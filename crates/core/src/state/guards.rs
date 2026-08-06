@@ -750,4 +750,135 @@ impl State {
             self.guards.remove(i);
         }
     }
+
+    /// The §7.5 dwell rule in force this turn: the playtest chance knob, and the
+    /// length range the facility alert imposes (§7.3 — rung 1's teeth). Read once
+    /// per guard phase, so every guard in the same turn pauses under the same rule.
+    pub(super) fn dwell_rule(&self) -> Dwell {
+        Dwell {
+            chance: self.dwell_chance,
+            turns: self.alert.dwell_turns(),
+        }
+    }
+
+    /// How Calm patrol chooses its next target this turn (§7.5/§7.3) — the whole of
+    /// what a **silenced radio** does to a patrol.
+    ///
+    /// With the net live, guards are coordinated and each sweeps its own slice of the
+    /// §7.5 partition. Bumping the comms console kills that (§7.3): with nobody
+    /// dispatching and nobody calling anyone in, there is no coordination left to
+    /// divide the building between them, so every Calm guard takes the whole level and
+    /// draws its next target at random. Silencing is one-way for the level, so the
+    /// style never changes back.
+    /// The `guards_watch_consoles` modifier (§12.6/#319) rides on the live-net style
+    /// and only there, which is the one thing to read carefully here. Its cycle is over
+    /// the consoles a guard's **beat** touches, and a silenced net leaves no beats at
+    /// all — so the console watch goes the way coordination does, and the comms console
+    /// (§7.3) buys off this modifier along with the dispatches. Resolved at this one
+    /// seam, so no other read site learns the flag exists (§12.3).
+    pub(super) fn patrol_style(&self) -> PatrolStyle {
+        if self.radio_silenced {
+            PatrolStyle::Wander
+        } else if self.modifiers.guards_watch_consoles {
+            PatrolStyle::WatchedConsoles
+        } else {
+            PatrolStyle::Beat
+        }
+    }
+
+    /// **How a guard sees on this level** (§6.1/§7.1/§7.6/§12.6) — the cone's arc and
+    /// range, and how much of its touching ring is blind, as the one value every look
+    /// and every sighting is resolved against.
+    ///
+    /// Two facts, resolved at this one seam so no read site learns either flag exists
+    /// (§12.3):
+    ///
+    /// - **The ring carve is the rule, not a level's choice any more** (#410/#442):
+    ///   [`BlindPolicy::FlankWhileCalm`], resolved per guard against its own mood. A
+    ///   **Calm** guard detects exactly its ~90° cone ([`BlindTier::FLANK`] — its flanks
+    ///   blind along with its back); every other mood watches its sides
+    ///   ([`BlindTier::REAR`], §155's three cells). It was the
+    ///   `calm_guards_detect_only_their_cone` experiment until the measurement came in
+    ///   clean (appendix 28) and #442 adopted it; the seam survives the adoption because
+    ///   the *policy* was never the interesting part — what matters is that the tier is
+    ///   resolved from the guard's mood at look time, so a guard's sides come back the
+    ///   turn it stops being Calm, with no new state and no timer.
+    /// - **The cone's shape is a level modifier** (§12.6/#495): the narrowed-cones draw
+    ///   hands every guard [`GuardSight::NARROWED`] — §7.1's own wedge with a shorter
+    ///   reach — and with it §7.6's zones, which are that cone's own halves.
+    ///
+    /// Still a function rather than a constant, and still read fresh on every use
+    /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
+    /// guard's cone, the sighting it resolves and the §11.5 danger overlay drawn from
+    /// them cannot disagree.
+    pub(crate) fn guard_sight(&self) -> GuardSight {
+        if self.modifiers.narrowed_guard_cones {
+            GuardSight::NARROWED
+        } else {
+            GuardSight::BASELINE
+        }
+    }
+
+    /// The radio net (§7.3): control's pings, resolved once per world turn. A
+    /// downed guard cannot answer, so each body runs a personal clock
+    /// ([`Body::ping_due`](crate::body::Body)); the turn a ping comes due it is
+    /// **missed**:
+    ///
+    /// - **First miss** — control dispatches the nearest still-active guard
+    ///   ([`radio::nearest_respondable`]) to **where the guard fell**
+    ///   ([`Body::fell_at`](crate::body::Body::fell_at)) — control's last fix on
+    ///   it — switching it to [`Responding`](crate::GuardState::Responding), and it
+    ///   **searches** there on arrival (§7.6). If every guard has the live player,
+    ///   nobody is free and the silence goes un-investigated — the rung steps anyway.
+    ///   That first silence is also a **rung-1 trigger** on the facility alert ladder
+    ///   (§7.3) — and the *second post* to fall silent is a rung-3 one: two missed
+    ///   pings across two bodies is an intruder taking the place apart, where one
+    ///   quiet post could be a fault.
+    /// - **Second miss** — control has called this post twice and gives up on it
+    ///   ([`MAX_MISSED_PINGS`](crate::radio) caps the pinging). It escalates nothing
+    ///   on its own: a post that has already gone quiet tells control nothing new, so
+    ///   the ladder counts **bodies**, not pings.
+    ///
+    /// A **hidden** body still misses its pings (§7.3): hiding a body confuses the
+    /// investigation — the responder searches the cell the body was dragged away
+    /// from — it does not cancel it. Both events are surfaced (§11.7): the silence
+    /// as a near-line message, the responder as its own sensed dot (§9).
+    ///
+    /// A net the player has **killed** at the comms console (§7.7) runs none of this:
+    /// control cannot ping what it has no radio for, so no ping is ever missed, no
+    /// responder is dispatched, and the alert never steps from this source again. The
+    /// bodies keep their clocks untouched — there is nothing to resume, since silencing
+    /// is one-way — and a guard already walking to a takedown site keeps going (see
+    /// [`call_guards_to`](Self::call_guards_to)).
+    pub(super) fn radio_phase(&mut self, events: &mut Vec<Event>) {
+        if self.radio_silenced {
+            return;
+        }
+        // Index-walk: `bodies` is only ever appended to (§7.2), so indices are
+        // stable across the loop, and the dispatch borrows `guards` separately.
+        for i in 0..self.bodies.len() {
+            if !self.bodies[i].ping_due(self.turn) {
+                continue;
+            }
+            let at = self.bodies[i].fell_at();
+            if self.bodies[i].miss_ping() == 1 {
+                // First miss: send the nearest guard who isn't already on the
+                // player. `respond_to` sets its destination and lead (§7.4), and
+                // the walk ends in a search of the takedown site (§7.6).
+                let sent = radio::nearest_respondable(&self.guards, at, 1, self.layout.facility());
+                for g in sent {
+                    self.guards[g].respond_to(at);
+                }
+                events.push(Event::RadioSilence { at });
+                // A post going quiet is the ladder's own trigger (§7.3): the first is
+                // rung 1, the second — a *different* body — is rung 3.
+                let trigger = self.alert.post_fell_silent();
+                // Control's last fix on the quiet post is where the guard fell (§7.3),
+                // so that is the cell a reinforcement is sent to search (#374) — the
+                // same cell the dispatched responder above is walking to, and the same
+                // one a dragged body is no longer lying on (§8.3).
+                self.raise_alert(trigger, at, events);
+            }
+        }
+    }
 }
