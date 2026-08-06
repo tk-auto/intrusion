@@ -1539,3 +1539,145 @@ fn the_scout_costs_a_facilitys_whole_haul() {
         },
     );
 }
+
+/// A facility on offer that hides crates — what the manifest sink is priced against.
+fn crated_offer(run: &Campaign) -> NodeId {
+    run.ahead()
+        .into_iter()
+        .find(|offer| run.manifest_on_sale(offer.node))
+        .expect("a choice point offers a facility with crates")
+        .node
+}
+
+/// **The reveal can never lie** (#550) — the §2.3 assertion this sink owes, and the reason
+/// it is stated against a *booted* facility rather than against a second copy of the
+/// stocking rule: what the hub says is [`cache_contents`] itself, called on the very seed
+/// the raid boots from (§8.3).
+#[test]
+fn the_manifest_is_the_tech_the_facility_actually_holds() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted(MANIFEST_COST as usize, 1));
+    let node = crated_offer(&run);
+
+    assert!(
+        run.manifest(node).is_none(),
+        "unbought, the hub says nothing"
+    );
+    assert!(run.buy_manifest(node).paid());
+    let promised = run.manifest(node).expect("bought");
+    assert!(!promised.is_empty());
+
+    assert!(run.choose(node));
+    let level = run.enter().expect("the facility boots");
+    let state = start_level(&level).expect("the v1 recipe places");
+    assert_eq!(
+        promised,
+        state.cache_contents(),
+        "the hub promised what the building holds",
+    );
+}
+
+/// **What, never where** (§11.5a/#550): the manifest is a set of abilities and hands over no
+/// cell — the crates stay fogged until seen, exactly as they are for a run that bought
+/// nothing. Buying #215's scout is the only thing that moves them, and the two compose.
+#[test]
+fn the_manifest_reveals_no_position() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted(MANIFEST_COST as usize, 1));
+    let node = crated_offer(&run);
+    assert!(run.buy_manifest(node).paid());
+    assert!(!run.is_scouted(node), "the manifest is not a scout");
+
+    assert!(run.choose(node));
+    let level = run.enter().expect("the facility boots");
+    assert!(
+        !level.modifiers.scouted,
+        "a manifest must not reach the level at all (#550: no modifier, no token slot)",
+    );
+    let state = start_level(&level).expect("the v1 recipe places");
+    for cell in state.equipment_caches() {
+        assert!(
+            !state.memory().contains(cell) || state.player_fov().contains(cell),
+            "{cell:?} was remembered without anyone paying for a position",
+        );
+    }
+}
+
+/// **Only a facility on offer that hides crates is for sale**, and only once. An Outpost, a
+/// locked road, a facility elsewhere and a second purchase are all refused as *nothing to
+/// buy here*, with the wallet untouched.
+#[test]
+fn only_a_crated_facility_on_offer_sells_its_manifest() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted((MANIFEST_COST * 3) as usize, 1));
+    let rich = run.intel();
+
+    assert_eq!(run.buy_manifest(locked_offer(&run)), Outlay::Closed);
+    assert_eq!(run.buy_manifest(NodeId::at(0, 0)), Outlay::Closed);
+    for offer in run.ahead() {
+        let empty = run.map().flavour(offer.node).modifiers().caches.crates() == 0;
+        if empty && !offer.locked {
+            assert!(!run.manifest_on_sale(offer.node), "nothing to sell");
+            assert_eq!(run.buy_manifest(offer.node), Outlay::Closed);
+        }
+    }
+    assert_eq!(run.intel(), rich, "no refusal took anything");
+
+    let node = crated_offer(&run);
+    assert!(run.buy_manifest(node).paid());
+    assert_eq!(
+        run.buy_manifest(node),
+        Outlay::Closed,
+        "a list you have already been read is not something to sell twice",
+    );
+    assert_eq!(run.intel(), rich - MANIFEST_COST);
+
+    // And it survives the walk onto the facility it was bought for.
+    assert!(run.choose(node));
+    assert!(run.has_manifest(node));
+}
+
+/// **An unaffordable manifest is refused and costs nothing**, and says which fact it is.
+#[test]
+fn an_unaffordable_manifest_is_refused_and_costs_nothing() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted((MANIFEST_COST - 1) as usize, 1));
+    let node = crated_offer(&run);
+    assert_eq!(
+        run.buy_manifest(node),
+        Outlay::Short {
+            cost: MANIFEST_COST,
+            balance: MANIFEST_COST - 1,
+        },
+    );
+    assert_eq!(run.intel(), MANIFEST_COST - 1);
+    assert!(run.manifest(node).is_none());
+}
+
+/// **The manifest's price is one knob** (§14 v3 **[START]**), pinned so a change to it is a
+/// visible change — and pinned *against its neighbours*, which is where its meaning is: the
+/// cheap sink beside the expensive one.
+#[test]
+fn the_manifest_costs_less_than_the_building_and_more_than_a_road() {
+    assert_eq!(MANIFEST_COST, 2);
+    const { assert!(MANIFEST_COST < SCOUT_COST) };
+    const { assert!(MANIFEST_COST > ROUTE_UNLOCK_COST) };
+}
+
+/// **Determinism (§12.4)**: the same run seed and the same spends read the same manifest.
+#[test]
+fn the_same_seed_and_the_same_spends_read_the_same_manifest() {
+    let read = || {
+        let mut run = Campaign::to_depth(99, 3);
+        run.enter();
+        run.complete(&extracted(MANIFEST_COST as usize, 1));
+        let node = crated_offer(&run);
+        assert!(run.buy_manifest(node).paid());
+        run.manifest(node).expect("bought")
+    };
+    assert_eq!(read(), read());
+}

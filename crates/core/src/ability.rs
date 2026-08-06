@@ -475,7 +475,7 @@ impl AbilityId {
     /// This is the **full** name: the help panel, the messages and the level-seed
     /// string all speak it. The ability bar has a row to fit and speaks the short
     /// [`bar_name`](Self::bar_name) instead.
-    pub fn name(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             AbilityId::Run => "Run",
             AbilityId::Camouflage => "Camouflage",

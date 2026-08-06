@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::ability::Loadout;
-use crate::campaign::{Campaign, CampaignStage, Offer, Outlay, SCOUT_COST};
+use crate::campaign::{Campaign, CampaignStage, Offer, Outlay, MANIFEST_COST, SCOUT_COST};
 use crate::render::campaign_map::{map_activation, map_hit, MapScreen};
 use crate::verdict::{Ending, RunStats, Verdict};
 
@@ -42,15 +42,20 @@ fn open_offer(run: &Campaign) -> Offer {
         .expect("a choice point offers an open road")
 }
 
-/// The brief's rows as the player reads them, trimmed, one string apiece.
+/// The screen row a brief row sits on — the new geometry's answer, unwrapped for tests
+/// that already know the row is there.
+fn row_at(run: &Campaign, node: NodeId, i: usize) -> u32 {
+    row_of_brief(run, node, H, i).expect("the row is drawn")
+}
+
+/// The brief's block as the player reads it — every drawn line, trimmed, in order. Read off
+/// the layout rather than off a slice of the screen, so a taller block (a bought manifest,
+/// #550) is read whole rather than clipped by an assumption about where it starts.
 fn rows_of(run: &Campaign, ui: MapUi, node: NodeId) -> Vec<String> {
-    render_brief(W, H, run, ui, node)
-        .to_text()
+    let text = render_brief(W, H, run, ui, node).to_text();
+    laid_out(run, node, H)
         .into_iter()
-        .skip(H.saturating_sub(LIST_ROWS) as usize)
-        .take((LIST_ROWS - 1) as usize) // the footer is not a row of the list
-        .filter(|row| !row.trim().is_empty())
-        .map(|row| row.trim().to_string())
+        .map(|(y, _)| text[y as usize].trim().to_string())
         .collect()
 }
 
@@ -82,10 +87,10 @@ fn a_facility_row_opens_a_brief_and_moves_nothing() {
     assert!(!run.path().contains(&offer.node));
 }
 
-/// **The brief says what the facility is, what scouting costs, and how to leave** — and
-/// the rows are the same three whichever way they are reached.
+/// **The brief says what the facility is, what each sink costs, and how to leave** — and
+/// the rows are the same four whichever way they are reached.
 #[test]
-fn the_brief_offers_the_raid_the_scout_and_the_way_back() {
+fn the_brief_offers_the_raid_the_two_sinks_and_the_way_back() {
     let run = at_a_choice_point_holding(8371, SCOUT_COST as usize);
     let offer = open_offer(&run);
     let ui = MapUi::default().opening(offer.node);
@@ -95,6 +100,7 @@ fn the_brief_offers_the_raid_the_scout_and_the_way_back() {
         vec![
             BriefRow::Enter,
             BriefRow::Scout { bought: false },
+            BriefRow::Manifest { bought: false },
             BriefRow::Back,
         ],
     );
@@ -103,6 +109,7 @@ fn the_brief_offers_the_raid_the_scout_and_the_way_back() {
         vec![
             format!("> Enter the {}", offer.flavour.label()),
             format!("Scout the facility — {SCOUT_COST} intel"),
+            format!("{MANIFEST_LABEL} — {MANIFEST_COST} intel"),
             "Back to the map".to_string(),
         ],
     );
@@ -147,12 +154,12 @@ fn the_scout_row_says_whether_it_can_be_had() {
             .position(|row| matches!(row, BriefRow::Scout { .. }))
             .expect("a scout row");
         let grid = render_brief(W, H, run, ui, node);
-        let text = grid.to_text()[row_of_brief(H, i) as usize].clone();
+        let text = grid.to_text()[row_at(run, node, i) as usize].clone();
         let x = text
             .chars()
             .position(|c| !c.is_whitespace())
             .expect("a row") as u32;
-        grid.get(x, row_of_brief(H, i)).fg
+        grid.get(x, row_at(run, node, i)).fg
     };
 
     let broke = at_a_choice_point_holding(8371, SCOUT_COST as usize - 1);
@@ -180,10 +187,15 @@ fn a_press_on_a_brief_row_does_what_that_row_says() {
     let run = at_a_choice_point_holding(8371, SCOUT_COST as usize);
     let node = open_offer(&run).node;
     let ui = MapUi::default().opening(node);
-    let expected = [MapHit::Enter(node), MapHit::Scout(node), MapHit::Back];
+    let expected = [
+        MapHit::Enter(node),
+        MapHit::Scout(node),
+        MapHit::Manifest(node),
+        MapHit::Back,
+    ];
 
     for (i, want) in expected.iter().enumerate() {
-        let row = row_of_brief(H, i);
+        let row = row_at(&run, node, i);
         for x in [0, W / 2, W - 1] {
             assert_eq!(
                 map_hit(W, H, &run, ui, x, row),
@@ -270,10 +282,9 @@ fn a_facility_with_no_room_left_in_its_token_offers_no_scout() {
 /// map — the same geometry the list is held to, one screen over.
 #[test]
 fn the_last_row_keeps_a_blank_between_itself_and_the_footer() {
-    let widest = MAX_ROWS as usize - 1;
     assert!(
-        row_of_brief(H, widest) + 1 < H - 1,
-        "the last of {MAX_ROWS} rows sits on the footer",
+        H.saturating_sub(LIST_ROWS) > 0 && LIST_ROWS < H - 1,
+        "the widest block ({LIST_ROWS} rows) does not fit above the footer",
     );
     let run = at_a_choice_point_holding(8371, SCOUT_COST as usize);
     let node = open_offer(&run).node;
@@ -281,4 +292,96 @@ fn the_last_row_keeps_a_blank_between_itself_and_the_footer() {
     let footer = &render_brief(W, H, &run, ui, node).to_text()[(H - 1) as usize];
     assert!(footer.contains(FOOTER));
     assert!(footer.contains("theme [n]"), "the theme keeps its corner");
+}
+
+/// **A bought manifest expands the brief in place** (#550): the row it was bought on
+/// becomes the heading, and the crates are listed under it — on the same screen as the
+/// price that revealed them and the row that raids the facility.
+#[test]
+fn a_bought_manifest_lists_the_crates_under_its_heading() {
+    let mut run = at_a_choice_point_holding(8371, MANIFEST_COST as usize);
+    let node = run
+        .ahead()
+        .into_iter()
+        .find(|offer| run.manifest_on_sale(offer.node))
+        .expect("a facility with crates on offer")
+        .node;
+    assert!(run.buy_manifest(node).paid());
+    let crates = run.manifest(node).expect("the manifest is bought");
+    assert!(!crates.is_empty(), "a facility on sale hides crates");
+
+    let ui = MapUi::default().opening(node);
+    let drawn = rows_of(&run, ui, node);
+    let heading = drawn
+        .iter()
+        .position(|line| line.contains(MANIFEST_HEADING))
+        .expect("the heading is drawn");
+    for (i, tech) in crates.iter().enumerate() {
+        let line = &drawn[heading + 1 + i];
+        assert!(
+            line.contains(tech.name()) && line.starts_with(CRATE_BULLET),
+            "crate {i} reads {line:?}",
+        );
+    }
+    // The way out is still the last row, under the list rather than buried in it.
+    assert_eq!(drawn.last().map(String::as_str), Some(BACK_LABEL));
+}
+
+/// **A crate line is not a row** (#268/#550): the marker steps over it and a press on it is
+/// swallowed, because there is nothing for either to do there. Three names that answered
+/// taps would be three buttons that do nothing.
+#[test]
+fn the_marker_and_the_finger_both_step_over_the_crates() {
+    let mut run = at_a_choice_point_holding(8371, MANIFEST_COST as usize);
+    let node = run
+        .ahead()
+        .into_iter()
+        .find(|offer| run.manifest_on_sale(offer.node))
+        .expect("a facility with crates on offer")
+        .node;
+    assert!(run.buy_manifest(node).paid());
+    let ui = MapUi::default().opening(node);
+
+    let rows = brief_rows(&run, node).len();
+    let lines = laid_out(&run, node, H);
+    assert!(lines.len() > rows, "the manifest expanded the block");
+
+    for (y, line) in lines {
+        match line {
+            Line::Crate(_) => assert_eq!(
+                map_hit(W, H, &run, ui, W / 2, y),
+                None,
+                "a crate line answered a press at row {y}",
+            ),
+            Line::Row(row) => assert_eq!(map_hit(W, H, &run, ui, W / 2, y), Some(row.hit(node))),
+        }
+    }
+
+    // And walking the marker visits exactly the rows, crates skipped.
+    let mut walked = Vec::new();
+    let mut ui = ui;
+    for _ in 0..rows {
+        walked.push(ui.brief_row);
+        ui = ui.next(&run);
+    }
+    assert_eq!(walked, (0..rows).collect::<Vec<usize>>());
+}
+
+/// **A facility with no crates is never offered the sale** (#550) — the row is absent, not
+/// present-and-refusing. The flavour is visible when offered (§14 v3 **[SETTLED]**), so the
+/// absence tells the player nothing the map had not already said.
+#[test]
+fn a_facility_with_no_crates_shows_no_manifest_row() {
+    let run = at_a_choice_point_holding(8371, 99);
+    for offer in run.ahead().into_iter().filter(|o| !o.locked) {
+        let has_crates = run.map().flavour(offer.node).modifiers().caches.crates() > 0;
+        let listed = brief_rows(&run, offer.node)
+            .iter()
+            .any(|row| matches!(row, BriefRow::Manifest { .. }));
+        assert_eq!(
+            listed, has_crates,
+            "{:?} ({:?}) offers a manifest iff it hides crates",
+            offer.node, offer.flavour,
+        );
+    }
 }

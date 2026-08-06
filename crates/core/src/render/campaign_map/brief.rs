@@ -34,7 +34,8 @@ use super::{
     centre, draw, footer, picture, Category, Grid, MapHit, MapUi, ENTRY_SPACING, MARKER, NO_MARKER,
     PRICE_DIGITS, SEPARATOR,
 };
-use crate::campaign::{Campaign, Flavour, NodeId, SCOUT_COST};
+use crate::ability::AbilityId;
+use crate::campaign::{Campaign, Flavour, NodeId, MANIFEST_COST, SCOUT_COST};
 use crate::place::LevelConfig;
 
 #[cfg(test)]
@@ -61,6 +62,22 @@ const SCOUT_LABEL: &str = "Scout the facility";
 const SCOUTED_LABEL: &str = "Scouted";
 const SCOUTED_BLURB: &str = "contents on your map";
 
+/// What the manifest row offers (§8.3/#550) — the crates named, never placed.
+///
+/// It says the thing itself rather than *cache manifest*: the player has never been shown
+/// that word, and the row is the question the sink answers (§11.8). It is also as long as
+/// a priced row can be — the compile-time bound below rejected the wordier phrasing this
+/// replaced, which is what that bound is for.
+const MANIFEST_LABEL: &str = "What the crates hold";
+
+/// The heading the bought manifest stands under, and the bullet each crate is listed with.
+///
+/// The glyph is the **equipment cache's own** (§11.3): the same `¤` the board draws a crate
+/// with, so the list reads as *these boxes* without a legend, and a player who has opened
+/// one already knows the mark.
+const MANIFEST_HEADING: &str = "The crates hold";
+const CRATE_BULLET: char = '¤';
+
 /// The way out, as a row (§11.6). "the map" and not "back": the screen it returns to is one
 /// the player has a name for.
 const BACK_LABEL: &str = "Back to the map";
@@ -80,6 +97,13 @@ pub enum BriefRow {
     /// than disappearing: a facility you have scouted should read as scouted on the screen
     /// you scouted it from.
     Scout { bought: bool },
+    /// **Learn what its crates hold** (§8.3/#550) — the manifest, bought once and then
+    /// standing as the heading over the list of tech it revealed.
+    ///
+    /// It is one row in both states, unlike the scout, because a bought manifest has
+    /// something to *show*: the row stops being a price and becomes the heading its
+    /// captions hang under.
+    Manifest { bought: bool },
     /// **Back to the list**, without touching the run.
     Back,
 }
@@ -90,6 +114,7 @@ impl BriefRow {
         match self {
             BriefRow::Enter => MapHit::Enter(node),
             BriefRow::Scout { .. } => MapHit::Scout(node),
+            BriefRow::Manifest { .. } => MapHit::Manifest(node),
             BriefRow::Back => MapHit::Back,
         }
     }
@@ -107,12 +132,58 @@ impl BriefRow {
 /// rule read one screen up: do not draw what cannot be pressed.
 pub fn brief_rows(run: &Campaign, node: NodeId) -> Vec<BriefRow> {
     let mut rows = vec![BriefRow::Enter];
-    let bought = run.is_scouted(node);
-    if bought || run.scoutable(node) {
-        rows.push(BriefRow::Scout { bought });
+    let scouted = run.is_scouted(node);
+    if scouted || run.scoutable(node) {
+        rows.push(BriefRow::Scout { bought: scouted });
+    }
+    // The manifest (#550), on the same terms and for the sharper reason: a facility that
+    // hides no crates has nothing to sell, and its row is absent rather than refusing.
+    let manifested = run.has_manifest(node);
+    if manifested || run.manifest_on_sale(node) {
+        rows.push(BriefRow::Manifest { bought: manifested });
     }
     rows.push(BriefRow::Back);
     rows
+}
+
+/// **A line of the brief as it is drawn** — a row the marker may rest on, or a caption that
+/// belongs to the row above it.
+///
+/// The distinction is the whole of what the manifest's expansion costs the screen: the
+/// crates it reveals are **not rows**. Nothing happens when Enter is pressed on one, so by
+/// the menu's own rule (#268) the marker must not stop there — and a tap must not resolve to
+/// one either. Keeping the two kinds in one list, in drawing order, is what makes the
+/// geometry answer both questions from one place: `brief_rows` is this filtered to the rows,
+/// and every screen row a press can land on comes from the same walk that drew it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Line {
+    Row(BriefRow),
+    /// One crate of a bought manifest — drawn under the row that revealed it.
+    Crate(AbilityId),
+}
+
+/// **Every line the brief draws**, in order, with the crates of a bought manifest expanded
+/// beneath their heading (#550).
+///
+/// The expansion happens *here* rather than on a third screen, and that is the design: at
+/// most three names is not a screen's worth of anything, and putting them one press further
+/// away would separate the fact from the two decisions it informs — whether to walk the
+/// detour, and whether to raid this facility at all. The brief already answers *what about
+/// this facility*; the manifest is one more sentence in that answer.
+fn brief_lines(run: &Campaign, node: NodeId) -> Vec<Line> {
+    let mut lines = Vec::new();
+    for row in brief_rows(run, node) {
+        lines.push(Line::Row(row));
+        if matches!(row, BriefRow::Manifest { bought: true }) {
+            lines.extend(
+                run.manifest(node)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Line::Crate),
+            );
+        }
+    }
+    lines
 }
 
 /// One row's text, marker and all — the [`entry_text`](super::super::menu) of this screen,
@@ -127,6 +198,13 @@ fn row_text(row: BriefRow, flavour: Flavour, selected: bool) -> String {
         }
         BriefRow::Scout { bought: false } => {
             format!("{marker}{SCOUT_LABEL}{SEPARATOR}{SCOUT_COST} intel")
+        }
+        // Bought, the row is the **heading** of the list under it rather than a statement
+        // about itself: what the player wants to read next is the names, and a row saying
+        // "bought" above them would be the screen congratulating itself.
+        BriefRow::Manifest { bought: true } => format!("{marker}{MANIFEST_HEADING}"),
+        BriefRow::Manifest { bought: false } => {
+            format!("{marker}{MANIFEST_LABEL}{SEPARATOR}{MANIFEST_COST} intel")
         }
         BriefRow::Back => format!("{marker}{BACK_LABEL}"),
     }
@@ -147,21 +225,91 @@ fn row_category(run: &Campaign, row: BriefRow, marked: bool) -> Category {
     match row {
         BriefRow::Scout { bought: true } => Category::Owned,
         BriefRow::Scout { bought: false } if !run.affords(SCOUT_COST) => Category::Ground,
+        // A bought manifest is a **heading**, so it takes the quiet Ground its captions
+        // hang under rather than the Owned a purchase reads as: what is yours here is the
+        // list, and the names carry that colour themselves.
+        BriefRow::Manifest { bought: true } => Category::Ground,
+        BriefRow::Manifest { bought: false } if !run.affords(MANIFEST_COST) => Category::Ground,
         _ => Category::Neutral,
     }
 }
 
-/// Rows the brief needs beneath the picture: one per row at [`ENTRY_SPACING`], for the
-/// widest brief there is — enter, scout, back — with a blank row at each end, exactly as
-/// the map's list is spaced.
-const MAX_ROWS: u32 = 3;
-const LIST_ROWS: u32 = (MAX_ROWS - 1) * ENTRY_SPACING + 3;
+/// One revealed crate's line — the cache's own glyph and the ability's name, indented under
+/// the heading so the list reads as belonging to the row above it.
+fn crate_text(tech: AbilityId) -> String {
+    format!("{CAPTION_INDENT}{CRATE_BULLET} {}", tech.name())
+}
 
-/// The screen row the brief's row at `index` is drawn on. Shared by the drawing and
-/// [`brief_hit`], so a tap lands on exactly the row that was drawn, with the blank between
-/// entries buffering a low tap off its neighbour (§11.6).
-fn row_of_brief(height: u32, index: usize) -> u32 {
-    height.saturating_sub(LIST_ROWS) + index as u32 * ENTRY_SPACING
+/// How far a crate line is indented past its heading. Two cells: enough that the list is
+/// plainly subordinate, and not so much that a long ability name has nowhere to go.
+const CAPTION_INDENT: &str = "  ";
+
+/// The **widest brief there is**, in lines: four rows — enter, scout, manifest, back — and
+/// the three crates a [`Vault`](Flavour::Vault) can reveal beneath one of them.
+///
+/// It is the tight case and the one that must fit; both halves can be at their maximum at
+/// once, since a facility rich enough to hide three crates is one both sinks are for sale
+/// on.
+const MAX_ROWS: u32 = 4;
+const MAX_CRATES: u32 = crate::modifiers::CacheCount::MAX as u32;
+
+/// How tall the brief's block is, given how many lines of each kind it is drawing: a row
+/// takes [`ENTRY_SPACING`] (itself and the blank that buffers a low tap off its neighbour,
+/// §11.6), a crate line takes one, and a blank sits at each end.
+///
+/// **A crate line is packed, and that is what makes the expansion read as a list.** Spacing
+/// the names as widely as the rows would make them look like three more things to press;
+/// tight under their heading, they read as what they are — one row's answer.
+const fn block_rows(rows: u32, crates: u32) -> u32 {
+    rows * ENTRY_SPACING + crates + 1
+}
+
+/// The tallest the block can ever be — what the layout reserves so the picture above it
+/// never changes height between one brief and another.
+///
+/// **The block is a fixed height, not a fitted one.** A brief that grew when a manifest was
+/// bought would move the map under the player at the exact moment they were reading it —
+/// the same objection the wallet line answers on the map screen by being drawn even when
+/// the wallet is empty (#211).
+pub(super) const LIST_ROWS: u32 = block_rows(MAX_ROWS, MAX_CRATES);
+
+/// The screen row each drawn line sits on, paired with the line — the one walk the drawing
+/// and the hit-test share, so a tap lands on exactly the row that was drawn.
+///
+/// The block starts at a **fixed top** ([`LIST_ROWS`] up from the footer), never one fitted
+/// to what it happens to be showing. Buying a manifest therefore pushes the *way out* down
+/// by the length of the list and leaves every row above it exactly where it was: a screen
+/// whose rows slid upward as the list grew would move the marker under the player's finger
+/// at the moment they pressed it.
+fn laid_out(run: &Campaign, node: NodeId, height: u32) -> Vec<(u32, Line)> {
+    let lines = brief_lines(run, node);
+    let mut y = height.saturating_sub(LIST_ROWS);
+    let mut placed = Vec::with_capacity(lines.len());
+    for line in lines {
+        placed.push((y, line));
+        y += match line {
+            Line::Row(_) => ENTRY_SPACING,
+            Line::Crate(_) => 1,
+        };
+    }
+    placed
+}
+
+/// The screen row the brief's **row** at `index` is drawn on — [`laid_out`] filtered to the
+/// lines a marker may rest on and a press may land on.
+///
+/// The drawing and the hit-test both walk [`laid_out`] whole, so this exists for the tests
+/// that ask about one row by number.
+#[cfg(test)]
+fn row_of_brief(run: &Campaign, node: NodeId, height: u32, index: usize) -> Option<u32> {
+    laid_out(run, node, height)
+        .into_iter()
+        .filter_map(|(y, line)| match line {
+            Line::Row(row) => Some((y, row)),
+            Line::Crate(_) => None,
+        })
+        .nth(index)
+        .map(|(y, _)| y)
 }
 
 /// The widest row the brief can ever draw, in cells — every row measured at its widest
@@ -177,6 +325,25 @@ const MAX_ROW_WIDTH: usize = {
     let back = MARKER.len() + BACK_LABEL.len();
     if back > widest {
         widest = back;
+    }
+    let priced =
+        MARKER.len() + MANIFEST_LABEL.len() + SEPARATOR.len() + PRICE_DIGITS + " intel".len();
+    if priced > widest {
+        widest = priced;
+    }
+    let heading = MARKER.len() + MANIFEST_HEADING.len();
+    if heading > widest {
+        widest = heading;
+    }
+    // Every crate line, measured at the longest ability name there is: a wordier ability
+    // fails the build here rather than clipping in a player's manifest.
+    let mut t = 0;
+    while t < AbilityId::TECH.len() {
+        let line = CAPTION_INDENT.len() + 2 + AbilityId::TECH[t].name().len();
+        if line > widest {
+            widest = line;
+        }
+        t += 1;
     }
     let mut i = 0;
     while i < Flavour::ALL.len() {
@@ -202,11 +369,16 @@ const _: () = assert!(
 /// theme control is tested before this by [`map_hit`](super::map_hit), which owns the one
 /// thing both screens share.
 pub(super) fn brief_hit(height: u32, run: &Campaign, node: NodeId, y: u32) -> Option<MapHit> {
-    brief_rows(run, node)
+    laid_out(run, node, height)
         .into_iter()
-        .enumerate()
-        .find(|&(i, _)| row_of_brief(height, i) == y)
-        .map(|(_, row)| row.hit(node))
+        .find_map(|(row_y, line)| match line {
+            // A **crate line is not a target** (#550): nothing happens when it is pressed,
+            // so a press that lands on one is swallowed exactly as a press on the blank
+            // between rows is. A list that answered taps would be three buttons that do
+            // nothing.
+            Line::Row(row) if row_y == y => Some(row.hit(node)),
+            _ => None,
+        })
 }
 
 /// Render the **facility brief** (§11.1/§14 v3/#215) — the whole `width × height` screen,
@@ -223,20 +395,34 @@ pub fn render_brief(width: u32, height: u32, run: &Campaign, ui: MapUi, node: No
     let rows = brief_rows(run, node);
     let marked = ui.row(rows.len());
     let flavour = run.map().flavour(node);
-    let widest = rows
+    let lines = laid_out(run, node, height);
+    let widest = lines
         .iter()
-        .map(|&row| row_text(row, flavour, true).chars().count() as u32)
+        .map(|&(_, line)| match line {
+            Line::Row(row) => row_text(row, flavour, true).chars().count() as u32,
+            Line::Crate(tech) => crate_text(tech).chars().count() as u32,
+        })
         .max()
         .unwrap_or(0);
     let column = centre(width, widest);
-    for (i, &row) in rows.iter().enumerate() {
-        draw(
-            &mut grid,
-            column,
-            row_of_brief(height, i),
-            &row_text(row, flavour, i == marked),
-            row_category(run, row, i == marked),
-        );
+    let mut index = 0;
+    for (y, line) in lines {
+        match line {
+            Line::Row(row) => {
+                draw(
+                    &mut grid,
+                    column,
+                    y,
+                    &row_text(row, flavour, index == marked),
+                    row_category(run, row, index == marked),
+                );
+                index += 1;
+            }
+            // **Owned** (§11.2): a revealed crate is a thing the run has been told and now
+            // has, on the same footing as the intel in its wallet — and a colour the
+            // heading above it deliberately does not share, so the list lifts off it.
+            Line::Crate(tech) => draw(&mut grid, column, y, &crate_text(tech), Category::Owned),
+        }
     }
     footer(&mut grid, FOOTER);
     grid
