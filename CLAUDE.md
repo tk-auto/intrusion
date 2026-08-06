@@ -57,6 +57,9 @@ skill rather than improvising its workflow. The intended loop:
 - **`/create-tickets`** — turn a slice of `docs/design.md` into GitHub issues.
   Proposals happen in conversation for approval, then become issues with
   v1/v2/v3 milestone and area/type/size labels.
+- **`/backlog`** — the same destination from the other direction: the *user's*
+  ideas, settled one question at a time and filed the moment each one lands,
+  never batched. Reuses `create-tickets`' taxonomy.
 - **`/survey`** — read the *code* for cleanup opportunities (oversized files,
   muddy naming, convention drift) and the always-loaded docs for bloat, then ask
   how many findings to fix and work them one at a time, ticket to merge. Each

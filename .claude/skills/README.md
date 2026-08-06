@@ -6,6 +6,7 @@ slash command (e.g. `/create-tickets`) or by describing the task.
 | Skill | Purpose | Status |
 |---|---|---|
 | [`create-tickets`](create-tickets/SKILL.md) | Turn `docs/design.md` into GitHub issues — drafts for review, then creates them with v1/v2/v3 milestones and area/type/size labels. | Ready |
+| [`backlog`](backlog/SKILL.md) | Run a backlog conversation from the *user's* ideas: ground each one in the design and the code, settle it with one question at a time, and file it as an issue the moment it's settled — never a batch at the end. | Ready |
 | [`work-ticket`](work-ticket/SKILL.md) | Pick an open issue and implement it end-to-end: branch-per-ticket, unit tests, the fmt/clippy/test gate, commit conventions, and a PR that closes the issue. | Ready |
 | [`survey`](survey/SKILL.md) | Quick code-health survey — files/functions too large or complex, muddy naming, modules that lost their focus, duplication, stale comments, convention drift, and bloat in the always-loaded docs. Ranks the top few, asks how many to fix, then works them one at a time (ticket → code → PR → merge on green). | Ready |
 | [`artifact-build`](artifact-build/SKILL.md) | Build the wasm bundle locally, pack it into one self-contained HTML page, smoke-verify it headlessly, and publish it as a Claude Artifact — a playable preview at a stable URL, no Pages deploy needed. | Ready |
@@ -19,7 +20,10 @@ slash command (e.g. `/create-tickets`) or by describing the task.
    opportunities — oversized files, muddy naming, drift — and the always-loaded
    docs for bloat, then asks how many findings to fix and drives each chosen one
    through ticket → `/work-ticket` → merge, filing its ticket only when that fix
-   starts.)
+   starts.) `/backlog` is the third entrance: when the idea comes from the user
+   rather than from the design or the code, it settles them one at a time and
+   files each as it lands — the same file-as-you-go rule `/survey` follows, and
+   the same taxonomy from `create-tickets`.
 2. `/work-ticket` — pick one, brief what it asks and how you're closing whatever
    it left open, build it, ship a PR. Player-visible PRs get an
    `/artifact-build` preview before merge; key (feel/balance) changes hold for
