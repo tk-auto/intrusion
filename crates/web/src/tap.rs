@@ -256,7 +256,8 @@ impl Game {
         // the `State` underneath, and its end screen must not answer a press aimed at the
         // map that is drawn over it.
         if let Some(run) = self.campaign.as_ref().filter(|_| self.map_open()) {
-            return map_hit(width, self.screen_height(), run, col, row).map(Control::Map);
+            let map = self.ui.map.unwrap_or_default();
+            return map_hit(width, self.screen_height(), run, map, col, row).map(Control::Map);
         }
         // A finished run's verdict owns the frame next (§14 v2/#138) — the panel is
         // drawn over everything, so the chrome underneath must not answer a press

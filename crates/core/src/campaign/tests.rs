@@ -1299,3 +1299,235 @@ fn a_two_facility_run_replays_byte_for_byte() {
     }
     assert_eq!(second, first, "the whole run, carried state and all");
 }
+
+/// Bank enough for `n` scouts by walking a raid out with a fat haul.
+fn bank_for_scouts(run: &mut Campaign, n: u32) {
+    run.enter();
+    run.complete(&extracted((SCOUT_COST * n) as usize, 1));
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+}
+
+/// The first facility on offer that is not behind a locked road, and can take the rule.
+fn scoutable_offer(run: &Campaign) -> NodeId {
+    run.ahead()
+        .into_iter()
+        .find(|offer| run.scoutable(offer.node))
+        .expect("a choice point offers a facility that can be scouted")
+        .node
+}
+
+/// **Intel buys a plan of the building** (§14 v3's pre-level sink, #215): paying
+/// [`SCOUT_COST`] at a choice point marks the facility scouted, debits the wallet exactly
+/// once, and — once the run walks in — the facility it boots carries the rule.
+#[test]
+fn scouting_a_facility_puts_its_contents_in_the_run_it_boots() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_scouts(&mut run, 1);
+    let node = scoutable_offer(&run);
+    assert!(!run.is_scouted(node));
+    assert!(
+        !run.level_at(node, false).modifiers.scouted,
+        "precondition: unbought, the facility hides its contents (§11.5a)",
+    );
+
+    assert_eq!(
+        run.scout(node),
+        Outlay::Paid {
+            cost: SCOUT_COST,
+            balance: 0,
+        },
+    );
+    assert!(run.is_scouted(node));
+
+    // Buying does not commit the run: it is still choosing, and still standing where it
+    // was — which is what makes the scout a purchase made *before* the choice (#207).
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+    assert_ne!(run.node(), node);
+
+    assert!(run.choose(node));
+    assert!(
+        run.next_level().modifiers.scouted,
+        "the facility the run walks into is the one it paid to know",
+    );
+}
+
+/// **A scout the run cannot pay for is refused and costs nothing** (#211's spend seam),
+/// and the refusal says which fact it is: too poor is not the same as nothing to buy.
+#[test]
+fn an_unaffordable_scout_is_refused_and_costs_nothing() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted((SCOUT_COST - 1) as usize, 1));
+    let node = run
+        .ahead()
+        .into_iter()
+        .find(|offer| !offer.locked)
+        .expect("an open road")
+        .node;
+
+    assert_eq!(
+        run.scout(node),
+        Outlay::Short {
+            cost: SCOUT_COST,
+            balance: SCOUT_COST - 1,
+        },
+    );
+    assert_eq!(run.intel(), SCOUT_COST - 1, "nothing was taken");
+    assert!(!run.is_scouted(node));
+    // The row is still *offered*, unlike one the token has no room for: a price you
+    // cannot meet today is one you can save up for.
+    assert!(run.scoutable(node));
+}
+
+/// **Only a facility the run may walk into is for sale.** A locked road it has not bought,
+/// a facility elsewhere in the country, one already scouted, and any call made from inside
+/// a raid are all refused as *nothing to buy here* — with the wallet untouched, however
+/// rich the run.
+#[test]
+fn only_a_facility_on_offer_can_be_scouted() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_scouts(&mut run, 3);
+    let rich = run.intel();
+
+    let locked = locked_offer(&run);
+    assert_eq!(run.scout(locked), Outlay::Closed, "an unbought road");
+    let elsewhere = NodeId::at(0, 0);
+    assert_eq!(run.scout(elsewhere), Outlay::Closed, "somewhere else");
+    assert_eq!(run.intel(), rich, "nothing was taken for either");
+
+    let node = scoutable_offer(&run);
+    assert!(run.scout(node).paid());
+    assert_eq!(
+        run.scout(node),
+        Outlay::Closed,
+        "a plan you already hold is not something to sell twice",
+    );
+    assert_eq!(run.intel(), rich - SCOUT_COST, "and it cost one scout");
+
+    // No spending inside a facility (§14 v3): the run is in a building, not at the hub.
+    assert!(run.choose(node));
+    run.enter();
+    let inside = run
+        .map()
+        .successors(run.node())
+        .first()
+        .expect("a node ahead")
+        .node;
+    assert_eq!(run.scout(inside), Outlay::Closed);
+    assert_eq!(run.intel(), rich - SCOUT_COST);
+}
+
+/// **A scout is bought for a facility, not for the run** (#215): the intel spent on a road
+/// the run then declines is spent, and the facility it takes instead is as fogged as it
+/// ever was. That is the sink's teeth — scouting the road you are not sure of is exactly
+/// the purchase that can be wrong.
+#[test]
+fn a_scout_does_not_follow_the_run_onto_another_road() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_scouts(&mut run, 1);
+    let open: Vec<NodeId> = run
+        .ahead()
+        .into_iter()
+        .filter(|offer| !offer.locked)
+        .map(|offer| offer.node)
+        .collect();
+    assert!(open.len() > 1, "a choice point offers more than one road");
+
+    assert!(run.scout(open[0]).paid());
+    assert_eq!(run.intel(), 0, "the intel is gone");
+
+    assert!(run.choose(open[1]), "the run takes the other road anyway");
+    assert!(
+        !run.next_level().modifiers.scouted,
+        "the facility it took is not the one it paid to know",
+    );
+    assert!(run.is_scouted(open[0]), "and the plan it bought is still its");
+}
+
+/// **A facility with no room left in its level-seed token is never offered the rule**
+/// (#215/§12.7). Selling it would hand the player a facility that cannot be written down,
+/// shared or replayed — so the hub refuses the sale outright rather than taking the intel
+/// and quietly dropping the token.
+#[test]
+fn a_facility_that_cannot_carry_the_rule_is_not_for_sale() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_scouts(&mut run, 3);
+    let rich = run.intel();
+    for offer in run.ahead() {
+        let sayable = run.level_at(offer.node, true).is_sayable();
+        assert_eq!(
+            run.scoutable(offer.node),
+            !offer.locked && sayable,
+            "{:?}: a facility is for sale exactly when it is open and can carry the rule",
+            offer.node,
+        );
+        if !sayable {
+            assert_eq!(run.scout(offer.node), Outlay::Closed);
+            assert_eq!(run.intel(), rich, "and nothing was taken for the refusal");
+        }
+    }
+}
+
+/// **Determinism (§12.4)**: the same run seed and the same spends boot the same facility,
+/// down to the board — a scout changes what the player *knows*, and nothing about what the
+/// building is.
+#[test]
+fn the_same_seed_and_the_same_spends_boot_the_same_scouted_facility() {
+    let booted = |scout: bool| {
+        let mut run = Campaign::to_depth(99, 3);
+        bank_for_scouts(&mut run, 1);
+        let node = scoutable_offer(&run);
+        if scout {
+            assert!(run.scout(node).paid());
+        }
+        assert!(run.choose(node));
+        let level = run.enter().expect("the facility boots");
+        (level, start_level(&level).expect("the v1 recipe places"))
+    };
+
+    let (level, state) = booted(true);
+    let (again, twice) = booted(true);
+    assert_eq!(level, again, "same seed, same spends, same config");
+    assert_eq!(render(&state).to_text(), render(&twice).to_text());
+
+    let (unbought, fogged) = booted(false);
+    assert_eq!(
+        level.seed, unbought.seed,
+        "the building is the same building either way",
+    );
+    assert_ne!(
+        render(&state).to_text(),
+        render(&fogged).to_text(),
+        "and the scout is visible on the board it boots (§2.3)",
+    );
+}
+
+/// **The scout's price is one knob** (§14 v3 **[START]**), pinned here so a change to it is
+/// a visible change rather than a number that drifted.
+#[test]
+fn the_scout_costs_a_facilitys_whole_haul() {
+    assert_eq!(SCOUT_COST, 3);
+
+    // **A facility's whole haul** at the §10.2 recipe, and that is the point: what is
+    // being sold is the §10 exploration of an entire building, answered before turn one,
+    // so it is priced at what a building is worth. It is deliberately the expensive end of
+    // the hub, against the road bought blind (#212) at a third of it.
+    let recipe = LevelConfig::V1.intel as u32;
+    assert_eq!(SCOUT_COST, recipe, "a building known costs a building robbed");
+    assert!(SCOUT_COST > ROUTE_UNLOCK_COST);
+
+    // No run scouts its first facility: nothing is banked until a raid is walked out of,
+    // and one clean raid is exactly the price — so the earliest a scout can be had is the
+    // *second* choice point, and only by a run that took everything and spent nothing.
+    let mut fresh = Campaign::to_depth(99, 3);
+    fresh.enter();
+    fresh.complete(&extracted(0, 1));
+    assert!(!fresh.affords(SCOUT_COST));
+    assert_eq!(
+        fresh.scout(scoutable_offer(&fresh)),
+        Outlay::Short {
+            cost: SCOUT_COST,
+            balance: 0,
+        },
+    );
+}

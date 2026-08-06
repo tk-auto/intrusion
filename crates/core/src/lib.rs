@@ -129,11 +129,12 @@ pub use region::{
     Door, DoorCell, DoorId, DoorKind, DoorLock, Region, RegionGraph, RegionId, RegionKind,
 };
 pub use render::{
-    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid,
-    flavour_glyph, help_hit, hit_of, is_help_button, is_message_button, map_hit, menu_hit,
-    message_log_rows, render, render_map, render_screen, verdict_hit, EndUi, Fill, GlyphCell, Grid,
-    HelpHit, HelpTab, InputModality, MapHit, MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi,
-    OptionsControl, ScreenUi, SeedCopy, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,
+    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, brief_rows,
+    flavour_glyph, help_hit, hit_of, is_help_button, is_message_button, map_activation, map_hit,
+    menu_hit, message_log_rows, render, render_brief, render_map, render_screen, verdict_hit,
+    BriefRow, EndUi, Fill, GlyphCell, Grid, HelpHit, HelpTab, InputModality, MapHit, MapScreen,
+    MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi, OptionsControl, ScreenUi, SeedCopy, Surface,
+    Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
     ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,

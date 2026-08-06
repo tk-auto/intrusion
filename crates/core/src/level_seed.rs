@@ -1592,6 +1592,83 @@ mod tests {
         );
     }
 
+    /// **The scout puts the building's contents on the board** (§11.5a/§14 v3/#215) — the
+    /// §2.3 anti-facade assertion this modifier owes, stated where the rule is applied.
+    ///
+    /// Three halves to it, and each is a way the sink could have been decoration. The cells
+    /// a raid *goes to* are **remembered** from turn one, in the ink §11.5a gives a console
+    /// you found and walked away from. The **building is the same building**: one seed,
+    /// same carve, same placement, so what the player bought is knowledge and not a
+    /// friendlier facility. And the **live layer is untouched** — the guards are where they
+    /// were, and every cell the scout revealed is still outside the player's sight.
+    #[test]
+    fn a_scouted_facility_opens_with_its_contents_remembered() {
+        use crate::render::{render, Visibility};
+        use crate::scout::scouted_cells;
+
+        let level = |scouted| LevelSeed {
+            seed: 8371,
+            modifiers: LevelModifiers {
+                scouted,
+                ..LevelModifiers::default()
+            },
+            abilities: Loadout::innate(),
+        };
+        let fogged = start_level(&level(false)).expect("the v1 recipe places");
+        let scouted = start_level(&level(true)).expect("the v1 recipe places");
+
+        // The same building, down to the terrain: this modifier reaches neither the carve
+        // nor placement (§12.6), so the two runs differ in knowledge and in nothing else.
+        assert_eq!(
+            crate::render::ascii_grid(fogged.layout().facility()),
+            crate::render::ascii_grid(scouted.layout().facility()),
+        );
+
+        let cells = scouted_cells(scouted.layout().facility());
+        assert!(!cells.is_empty(), "a v1 facility holds contents to scout");
+        let mut revealed = 0;
+        for cell in cells {
+            // Only the cells the player cannot already see are the sink's to prove: one
+            // standing in the opening view is live either way.
+            if scouted.player_fov().contains(cell) {
+                continue;
+            }
+            revealed += 1;
+            assert!(
+                scouted.memory().contains(cell),
+                "{cell:?} was paid for and is not remembered",
+            );
+            assert!(
+                !fogged.memory().contains(cell),
+                "{cell:?} is remembered without paying",
+            );
+            assert_eq!(
+                render(&scouted).get(cell.x, cell.y).vis,
+                Visibility::Remembered,
+                "{cell:?} draws as found, not as live and not as never-seen",
+            );
+            assert_ne!(
+                render(&fogged).get(cell.x, cell.y).vis,
+                Visibility::Remembered,
+                "{cell:?} draws as found without paying",
+            );
+        }
+        assert!(revealed > 0, "the scout revealed nothing out of sight");
+
+        // **Position only, never live state** (§11.5a **[SETTLED]**): the guards are
+        // exactly where the unscouted run's are, and nothing about them is known.
+        assert_eq!(
+            scouted.guards().len(),
+            fogged.guards().len(),
+            "the scout bought a plan, not a patrol",
+        );
+        assert_eq!(
+            scouted.player_fov(),
+            fogged.player_fov(),
+            "and it did not widen what the player can see",
+        );
+    }
+
     /// **A token from another format version is rejected.** Simulated by re-spelling
     /// a valid payload under a perturbed [`SCRAMBLE`] — exactly what a different
     /// [`FORMAT_MAJOR`], slot capacity or cap produces, since all of them feed

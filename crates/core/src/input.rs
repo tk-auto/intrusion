@@ -222,17 +222,22 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
 /// title screen has already learned this one, which is most of why the map's list is a
 /// list rather than something cleverer.
 ///
-/// There is deliberately **no `Back`**. The map is not a panel you opened over
-/// something: between facilities it *is* the game, and there is nothing underneath it to
-/// return to (§2.2 — no retry, no snapshot, and the last facility is gone).
+/// **`Back` closes the facility brief and nothing else** (#215). The map's own list is not
+/// a panel you opened over something — between facilities it *is* the game, and there is
+/// nothing underneath it to return to (§2.2: no retry, no snapshot, and the last facility
+/// is gone) — so on the list the shell drops this. The brief is a sub-screen and does have
+/// somewhere to go back to, which is the whole of what this command is for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MapNav {
-    /// Move the marker to the previous takeable facility, wrapping.
+    /// Move the marker to the previous row, wrapping.
     Prev,
-    /// Move the marker to the next takeable facility, wrapping.
+    /// Move the marker to the next row, wrapping.
     Next,
-    /// **Raid the marked facility** — the one irreversible key on the screen (§2.1).
+    /// Fire the marked row — open a facility's brief, buy what it offers, or raid it, which
+    /// is the one irreversible key on either screen (§2.1).
     Activate,
+    /// **Leave the facility brief** for the map's list, changing nothing (#215).
+    Back,
     /// Flip the colour theme (§11.2/#189), as on every other modal surface.
     ToggleTheme,
 }
@@ -244,10 +249,13 @@ pub fn map_nav_for_key(key: &str) -> Option<MapNav> {
         "ArrowUp" => Some(MapNav::Prev),
         "ArrowDown" => Some(MapNav::Next),
         "Enter" | " " => Some(MapNav::Activate),
+        // `Escape` leaves the **facility brief** (#215) and is dropped by the shell on the
+        // map's own list, where there is nowhere back to: a key that looked like a way out
+        // and did nothing would be worse than one that is plainly not there (§11.6's
+        // no-trap rule read the other way round). The table is stateless, so which of the
+        // two screens is up is the shell's to know.
+        "Escape" => Some(MapNav::Back),
         "n" => Some(MapNav::ToggleTheme),
-        // `Escape` is **not** bound: there is nowhere back from the map, and a key that
-        // looked like a way out and did nothing is worse than one that is plainly not
-        // there (§11.6's no-trap rule read the other way round).
         _ => None,
     }
 }
