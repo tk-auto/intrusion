@@ -87,7 +87,7 @@ use crate::cell::Direction;
 use crate::difficulty::Difficulty;
 use crate::generate::{generate_level, GenError};
 use crate::modifiers::{
-    CacheCount, GuardCount, IntelCount, IntelGate, LayoutKnowledge, LevelModifiers,
+    CacheCount, Composite, GuardCount, IntelCount, IntelGate, LayoutKnowledge, LevelModifiers,
 };
 use crate::place::LevelConfig;
 use crate::rng::Rng;
@@ -747,6 +747,51 @@ enum ModifierSlot {
     /// and a raid that opened knowing where the consoles were is not the raid the same
     /// seed gives someone who did not pay.
     Scouted = 19,
+    /// Slots 20–23, appended (#565): the count knobs' **two-step** rungs, one slot per
+    /// rung exactly as their one-step ends have (spec §3).
+    ///
+    /// They exist because a knob is a **delta** and deltas add: a
+    /// [`Vault`](Composite::Vault) says *one more guard* and the campaign alert (#210) can
+    /// deal *one more guard* onto the same facility, which is two. Only ever written for
+    /// what a run asks for **beyond** its composite, so in practice the encoder reaches
+    /// these when two *primitive* sources stack — a token whose Vault and whose drawn rule
+    /// each contribute one writes the composite's slot and the plain `MoreGuards`.
+    TwoMoreGuards = 20,
+    TwoFewerGuards = 21,
+    TwoMoreIntel = 22,
+    TwoFewerIntel = 23,
+    /// Slots 24–28, appended (#565): the **composite modifiers**, one slot each — the
+    /// §14 v3 flavours, in [`Composite::ALL`]'s order.
+    ///
+    /// **This is what the format's slot space is for.** A composite is a name for a
+    /// combination, so its slot is spent *instead of* the slots the combination would have
+    /// spent: a Vault names slot 22 and neither `MoreGuards`, `MoreIntel` nor `ThreeCaches`,
+    /// which takes it from three of [`MODIFIER_CAP`]'s five active slots to one. Five more
+    /// positions out of 256 change no radix and no token's meaning (spec §3); what they buy
+    /// back is four free slots on the facilities the campaign's drawn rules land hardest on.
+    ///
+    /// Rejected in pairs like a bounded knob's ends: a token naming two composites
+    /// describes a facility no source can produce, and there is no honest way to pick.
+    OutpostComposite = 24,
+    DepotComposite = 25,
+    VaultComposite = 26,
+    WorkshopComposite = 27,
+    ArchiveComposite = 28,
+}
+
+impl Composite {
+    /// This composite's permanent wire slot (#565), or `None` for
+    /// [`Composite::None`], which names nothing and encodes nothing.
+    fn slot(self) -> Option<ModifierSlot> {
+        match self {
+            Composite::None => None,
+            Composite::Outpost => Some(ModifierSlot::OutpostComposite),
+            Composite::Depot => Some(ModifierSlot::DepotComposite),
+            Composite::Vault => Some(ModifierSlot::VaultComposite),
+            Composite::Workshop => Some(ModifierSlot::WorkshopComposite),
+            Composite::Archive => Some(ModifierSlot::ArchiveComposite),
+        }
+    }
 }
 
 impl ModifierSlot {
@@ -775,6 +820,15 @@ impl ModifierSlot {
         ModifierSlot::PrizeRoomLocked,
         ModifierSlot::NarrowedGuardCones,
         ModifierSlot::Scouted,
+        ModifierSlot::TwoMoreGuards,
+        ModifierSlot::TwoFewerGuards,
+        ModifierSlot::TwoMoreIntel,
+        ModifierSlot::TwoFewerIntel,
+        ModifierSlot::OutpostComposite,
+        ModifierSlot::DepotComposite,
+        ModifierSlot::VaultComposite,
+        ModifierSlot::WorkshopComposite,
+        ModifierSlot::ArchiveComposite,
     ];
 }
 
@@ -802,6 +856,44 @@ const _: () = {
 /// §12.6 does not enforce — its three sources compose harder-ward without a bound —
 /// so this is where the promise is actually kept.
 fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
+    let mut slots = SlotSet::default();
+    // **A composite's expansion is not encoded** (#565) — the composite's own slot is, and
+    // what this run asks for *beyond* it goes on the wire as ordinary primitive slots.
+    // That is the whole mechanism: what is scarce is not slots but how many may be active
+    // at once, and a Vault saying *Vault* once costs one of the five rather than three.
+    //
+    // [`LevelModifiers::departures_beyond_composite`] is the one derivation for "beyond",
+    // shared with the Level info tab so the slots written and the rows drawn can never
+    // describe different runs. Its inverse is
+    // [`expand_composite`](LevelModifiers::expand_composite), applied on the way back — so
+    // a Vault dealt a harder guard rule writes the composite's slot plus a plain
+    // `MoreGuards`, and decoding adds the two back to the two guards it resolved to.
+    for (slot, active) in primitive_slots(m.departures_beyond_composite()) {
+        if active {
+            slots.push(slot as usize)?;
+        }
+    }
+    // Last, and so still ascending: every composite slot sits above every primitive one,
+    // which is why they were appended after the count knobs' two-step rungs rather than
+    // before (spec §3).
+    if let Some(slot) = m.composite.slot() {
+        slots.push(slot as usize)?;
+    }
+    Some((slots, m.intel_to_exit))
+}
+
+/// How many wire slots the **primitive** modifiers spend — [`ModifierSlot::ALL`] less the
+/// composites, and the width of the table both directions of the codec walk.
+const PRIMITIVE_SLOTS: usize = MODIFIER_SLOTS_USED - Composite::ALL.len();
+
+/// Which **primitive** slots a [`LevelModifiers`] names, in wire order — the one table
+/// the encoder writes from and the one the composite subtraction is measured against.
+///
+/// A struct destructure names every field, so a new modifier will not compile until it is
+/// given a **permanent slot** here — and that slot is then load-bearing forever (see
+/// [`SLOT_CAPACITY`] and [`ModifierSlot`]): appending is free, renumbering silently
+/// rewrites every token ever shared.
+fn primitive_slots(m: LevelModifiers) -> [(ModifierSlot, bool); PRIMITIVE_SLOTS] {
     use ModifierSlot as S;
     let LevelModifiers {
         guards_always_search_hideouts,
@@ -819,10 +911,15 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         prize_room_locked,
         narrowed_guard_cones,
         scouted,
-        intel_to_exit,
+        // Not a primitive slot: a composite has one of its own, written by
+        // [`modifier_slots`] in place of the slots this table would have spent on the
+        // fields it stands for (#565).
+        composite: _,
+        // Not a slot at all — the gate is its own token field, an exact three-value radix
+        // rather than a member of the held set.
+        intel_to_exit: _,
     } = m;
-    let mut slots = SlotSet::default();
-    for (slot, active) in [
+    [
         (S::GuardsAlwaysSearchHideouts, guards_always_search_hideouts),
         (S::SightingLostCallsAGuard, sighting_lost_calls_a_guard),
         (S::BodyFoundCallsTwoGuards, body_found_calls_two_guards),
@@ -853,12 +950,20 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         (S::NarrowedGuardCones, narrowed_guard_cones),
         // The pre-level scout (#215).
         (S::Scouted, scouted),
-    ] {
-        if active {
-            slots.push(slot as usize)?;
-        }
-    }
-    Some((slots, intel_to_exit))
+        // The count knobs' two-step rungs (#565), appended after the scout rather than
+        // tidied in beside their one-step partners — a slot number is permanent, so a
+        // knob that grows a rung appends it, exactly as the layout knob's harder end did.
+        (S::TwoMoreGuards, matches!(guard_count, GuardCount::TwoMore)),
+        (
+            S::TwoFewerGuards,
+            matches!(guard_count, GuardCount::TwoFewer),
+        ),
+        (S::TwoMoreIntel, matches!(intel_count, IntelCount::TwoMore)),
+        (
+            S::TwoFewerIntel,
+            matches!(intel_count, IntelCount::TwoFewer),
+        ),
+    ]
 }
 
 /// Rebuild a [`LevelModifiers`] from the token's fields — the inverse of
@@ -871,6 +976,14 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
 /// config no run can be in, and there is no honest way to pick which end was meant.
 /// It joins the other "this is not a run this game can produce" rejections, and falls
 /// gracefully to a fresh run like any token that does not decode.
+///
+/// A set naming **two composites** (#565) is rejected on exactly that footing: a facility
+/// is one thing, so a token calling it both a Vault and an Outpost describes a run no
+/// source can build.
+///
+/// The composite's own expansion is put back here rather than read off the wire, since the
+/// encoder dropped it — [`LevelModifiers::expanded`] over what the slots did name, which
+/// is one `union` and composes an overruled contribution exactly as resolution did.
 fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifiers> {
     use ModifierSlot as S;
     let mut active = [false; MODIFIER_SLOTS_USED];
@@ -890,19 +1003,35 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         (false, true) => LayoutKnowledge::None,
         (true, true) => return None,
     };
-    let guard_count = match (at(S::MoreGuards), at(S::FewerGuards)) {
-        (false, false) => GuardCount::Baseline,
-        (true, false) => GuardCount::More,
-        (false, true) => GuardCount::Fewer,
-        (true, true) => return None, // both ends at once is not a config a run can hold
+    // A knob holds one value, so a set naming two of its rungs describes a config no run
+    // can be in — the same rejection the layout knob's ends get, now over four rungs
+    // apiece (#565).
+    let guard_count = match (
+        at(S::MoreGuards),
+        at(S::TwoMoreGuards),
+        at(S::FewerGuards),
+        at(S::TwoFewerGuards),
+    ) {
+        (false, false, false, false) => GuardCount::Baseline,
+        (true, false, false, false) => GuardCount::More,
+        (false, true, false, false) => GuardCount::TwoMore,
+        (false, false, true, false) => GuardCount::Fewer,
+        (false, false, false, true) => GuardCount::TwoFewer,
+        _ => return None,
     };
-    // The same rejection over the intel knob (#207): a knob holds one value, so a set
-    // naming both its ends describes a config no run can be in.
-    let intel_count = match (at(S::MoreIntel), at(S::FewerIntel)) {
-        (false, false) => IntelCount::Baseline,
-        (true, false) => IntelCount::More,
-        (false, true) => IntelCount::Fewer,
-        (true, true) => return None,
+    // The same rejection over the intel knob (#207/#565).
+    let intel_count = match (
+        at(S::MoreIntel),
+        at(S::TwoMoreIntel),
+        at(S::FewerIntel),
+        at(S::TwoFewerIntel),
+    ) {
+        (false, false, false, false) => IntelCount::Baseline,
+        (true, false, false, false) => IntelCount::More,
+        (false, true, false, false) => IntelCount::TwoMore,
+        (false, false, true, false) => IntelCount::Fewer,
+        (false, false, false, true) => IntelCount::TwoFewer,
+        _ => return None,
     };
     // And over the cache knob's three rungs (#209), for the reason a knob's two ends are
     // rejected together: a facility hides one number of crates, so a set naming two of
@@ -914,33 +1043,50 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         (false, false, true) => CacheCount::Three,
         _ => return None,
     };
-    Some(LevelModifiers {
-        guards_always_search_hideouts: at(S::GuardsAlwaysSearchHideouts),
-        sighting_lost_calls_a_guard: at(S::SightingLostCallsAGuard),
-        body_found_calls_two_guards: at(S::BodyFoundCallsTwoGuards),
-        always_show_vision_cones: at(S::AlwaysShowVisionCones),
-        layout_knowledge,
-        calm_guards_detect_only_their_cone: at(S::CalmGuardsDetectOnlyTheirCone),
-        automatic_doors: at(S::AutomaticDoors),
-        guards_watch_consoles: at(S::GuardsWatchConsoles),
-        show_search_areas: at(S::ShowSearchAreas),
-        guard_count,
-        intel_count,
-        caches,
-        prize_room_locked: at(S::PrizeRoomLocked),
-        narrowed_guard_cones: at(S::NarrowedGuardCones),
-        scouted: at(S::Scouted),
-        intel_to_exit: gate,
-    })
+    // At most one composite may be named, for the reason a knob holds one value (#565).
+    let mut composite = Composite::None;
+    for named in Composite::ALL {
+        if named.slot().is_some_and(&at) {
+            if composite != Composite::None {
+                return None;
+            }
+            composite = named;
+        }
+    }
+    Some(
+        LevelModifiers {
+            guards_always_search_hideouts: at(S::GuardsAlwaysSearchHideouts),
+            sighting_lost_calls_a_guard: at(S::SightingLostCallsAGuard),
+            body_found_calls_two_guards: at(S::BodyFoundCallsTwoGuards),
+            always_show_vision_cones: at(S::AlwaysShowVisionCones),
+            layout_knowledge,
+            calm_guards_detect_only_their_cone: at(S::CalmGuardsDetectOnlyTheirCone),
+            automatic_doors: at(S::AutomaticDoors),
+            guards_watch_consoles: at(S::GuardsWatchConsoles),
+            show_search_areas: at(S::ShowSearchAreas),
+            guard_count,
+            intel_count,
+            caches,
+            prize_room_locked: at(S::PrizeRoomLocked),
+            narrowed_guard_cones: at(S::NarrowedGuardCones),
+            scouted: at(S::Scouted),
+            intel_to_exit: gate,
+            composite,
+        }
+        // Add the composite's expansion back — the encoder wrote only what this run asked
+        // for beyond it, so what comes out is field-for-field the set that went in (#565).
+        .expand_composite(),
+    )
 }
 
 /// How many modifier wire slots this build actually spends — [`ModifierSlot::ALL`]'s
 /// length, the live count against which a decoded slot number is checked. It grows
 /// into [`SLOT_CAPACITY`] without changing the format. Not the number of
 /// [`LevelModifiers`] *fields*: the guard-count knob (#232), the intel-count knob
-/// (#207) and the layout knob (#233) spend one slot per end, and the cache knob
-/// (#209) one slot per rung.
-const MODIFIER_SLOTS_USED: usize = 20;
+/// (#207) and the layout knob (#233) spend one slot per rung, the cache knob
+/// (#209) one slot per rung, and each composite (#565) one slot for the whole
+/// combination it names.
+const MODIFIER_SLOTS_USED: usize = 29;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1409,6 +1555,11 @@ mod tests {
                             narrowed_guard_cones: narrowed,
                             scouted,
                             intel_to_exit: gate,
+                            // The sweep is over the **primitive** wire, which is what
+                            // this test is about; the composites' own round-trip —
+                            // including the expansion the encoder drops and the decoder
+                            // puts back — is `every_composite_round_trips_through_one_slot`.
+                            composite: Composite::None,
                         };
                         let level = LevelSeed {
                             seed: 12345,
@@ -1578,6 +1729,10 @@ mod tests {
                 // contents are hidden until seen (§11.5a).
                 scouted: false,
                 intel_to_exit: IntelGate::All,
+                // Slots 20–24 (#565) are the eighth: a token minted before a facility
+                // could be stated as one word decodes as the facility it always named —
+                // a quick-play level, which is no flavour at all.
+                composite: Composite::None,
             },
             abilities: Loadout::innate()
                 .with(AbilityId::Camouflage)
@@ -1776,32 +1931,48 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 19, the scout (#215). A knob holds one
-        // value, so the highest five are the scout (19), the short cones (18), the
-        // locked room (17), the fogged layout (16) and the shown search areas (15) —
-        // appending slot 19 pushed the top cache rung (14) out of the set, which is what
-        // "the widest payload" moving with the roster looks like. Holding more than five
-        // at once is over the cap and refused outright, asserted in
+        // actually hold, which now reaches slot 28, the Archive composite (#565). A knob
+        // holds one rung and a facility is one thing, so the highest five are the Archive
+        // composite (28), the intel knob's two-fewer rung (23), the guard knob's (21), the
+        // scout (19) and the short cones (18). Appending the composites and the two-step
+        // rungs pushed the locked room (17) and the fogged layout (16) out of the set,
+        // which is what "the widest payload" moving with the roster looks like. Holding
+        // more than five at once is over the cap and refused outright, asserted in
         // `every_config_round_trips`.
+        //
+        // Read it as a *resolved* set, which is what the encoder takes: the Archive gives
+        // an extra guard and its hideout searches, so the guard knob one rung **below**
+        // the baseline is a two-step easier residual, and the hideout searches cost no
+        // slot at all. That is the whole mechanism, at the tightest corner of the format.
         let all_modifiers = LevelModifiers {
-            guards_always_search_hideouts: false,
+            guards_always_search_hideouts: true,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
-            layout_knowledge: LayoutKnowledge::None,
+            layout_knowledge: LayoutKnowledge::Plans,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
             guards_watch_consoles: false,
-            show_search_areas: true,
-            guard_count: GuardCount::Baseline,
-            intel_count: IntelCount::Baseline,
+            show_search_areas: false,
+            guard_count: GuardCount::Fewer,
+            intel_count: IntelCount::TwoFewer,
             caches: CacheCount::None,
-            prize_room_locked: true,
+            prize_room_locked: false,
             narrowed_guard_cones: true,
-            // The newest slot (#215), which is where the top of the wire now is.
             scouted: true,
             intel_to_exit: IntelGate::All,
+            // The newest slots (#565), which is where the top of the wire now is.
+            composite: Composite::Archive,
         };
+        assert_eq!(
+            modifier_slots(all_modifiers)
+                .expect("under the cap")
+                .0
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![18, 19, 21, 23, 28],
+            "the widest payload takes the five highest slots a run can hold",
+        );
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
             for modifiers in [LevelModifiers::default(), all_modifiers] {
                 for abilities in [Loadout::innate(), widest_tech] {
@@ -1912,6 +2083,117 @@ mod tests {
         assert_eq!(both(7, 8), None, "one more guard and one fewer");
         assert_eq!(both(9, 10), None, "one more console and one fewer");
         assert_eq!(both(12, 13), None, "one cache and two");
+        // And a set naming **two composites** (#565), on exactly that footing: a facility
+        // is one thing, so a token calling it both a Vault and an Outpost describes a run
+        // no source can build.
+        assert_eq!(both(20, 21), None, "two more guards and two fewer");
+        assert_eq!(both(7, 20), None, "one more guard and two more");
+        // Two **composites** at once, on the same footing: a facility is one thing, so a
+        // token calling it both a Vault and an Outpost describes a run no source can build.
+        assert_eq!(both(24, 26), None, "an Outpost and a Vault at once");
+        assert_eq!(both(27, 28), None, "a Workshop and an Archive at once");
+        // Each still decodes on its own, so the rejection is the *pair* — the same shape
+        // the knobs' ends take above.
+        for composite in Composite::ALL {
+            let mut slots = SlotSet::default();
+            let slot = composite.slot().expect("a named composite has a slot");
+            slots.push(slot as usize).expect("one composite");
+            assert_eq!(
+                modifiers_from_slots(&slots, IntelGate::None).map(|m| m.composite),
+                Some(composite),
+                "{composite:?} must decode on its own",
+            );
+        }
+    }
+
+    /// **A composite is one slot, and the slots its combination would have spent stay
+    /// free** (§12.6/#565) — the acceptance this whole mechanism exists for.
+    ///
+    /// The Vault is the worked case: three primitive rules (one more guard, one more
+    /// console, three crates) that cost three of [`MODIFIER_CAP`]'s five, said in one word
+    /// and costing one — so the campaign's own drawn rules (#210) have **four of five**
+    /// free on precisely the facilities that could least afford them.
+    #[test]
+    fn a_vault_spends_one_slot_and_leaves_four_of_five_free() {
+        let vault = Composite::Vault.contribution().expand_composite();
+        // It really does carry the three rules — this is not one slot for less facility.
+        assert_eq!(vault.guard_count, GuardCount::More);
+        assert_eq!(vault.intel_count, IntelCount::More);
+        assert_eq!(vault.caches, CacheCount::Three);
+        let (slots, _) = modifier_slots(vault).expect("under the cap");
+        assert_eq!(
+            slots.iter().collect::<Vec<_>>(),
+            vec![ModifierSlot::VaultComposite as usize],
+            "a Vault names its own slot and nothing else",
+        );
+        assert_eq!(
+            MODIFIER_CAP - slots.iter().count(),
+            4,
+            "four of five slots left for the campaign's drawn rules",
+        );
+        // Every composite is one slot, not only the one the ticket is written around.
+        for composite in Composite::ALL {
+            let resolved = composite.contribution().expand_composite();
+            let (slots, _) = modifier_slots(resolved).expect("under the cap");
+            assert_eq!(slots.iter().count(), 1, "{composite:?} must cost one slot");
+        }
+    }
+
+    /// **Every composite round-trips, and so does one stacked with drawn rules**
+    /// (§12.6/#565). The encoder drops the fields a composite already gives and the
+    /// decoder puts them back, so this is the assertion that the two are inverses — the
+    /// migration guarantee, stated on the wire rather than on the value.
+    ///
+    /// The stacked case is the interesting half: a composite whose contribution another
+    /// source **overruled** writes the winning primitive and not its own, and decoding
+    /// composes the composite's under the same harder-ward rule straight back to what
+    /// resolution produced.
+    #[test]
+    fn every_composite_round_trips_through_one_slot() {
+        for composite in [Composite::None].into_iter().chain(Composite::ALL) {
+            for extra in [
+                LevelModifiers::neutral(),
+                // A drawn harder rule the composite says nothing about.
+                LevelModifiers {
+                    guards_watch_consoles: true,
+                    ..LevelModifiers::neutral()
+                },
+                // …one that lands on a knob the composite *does* set, from either end.
+                LevelModifiers {
+                    guard_count: GuardCount::More,
+                    ..LevelModifiers::neutral()
+                },
+                LevelModifiers {
+                    guard_count: GuardCount::Fewer,
+                    ..LevelModifiers::neutral()
+                },
+                // …and the scout, which a campaign facility buys alongside its flavour.
+                LevelModifiers {
+                    scouted: true,
+                    ..LevelModifiers::neutral()
+                },
+            ] {
+                let modifiers = crate::ModifierSources {
+                    chosen: LevelModifiers {
+                        intel_to_exit: IntelGate::None,
+                        ..LevelModifiers::default()
+                    },
+                    alert: Some(extra),
+                    flavour: Some(composite.contribution()),
+                }
+                .resolve();
+                let level = LevelSeed {
+                    seed: 4242,
+                    modifiers,
+                    abilities: Loadout::innate(),
+                };
+                assert_eq!(
+                    LevelSeed::decode(&token(level)),
+                    Some(level),
+                    "{composite:?} with {extra:?} does not round-trip",
+                );
+            }
+        }
     }
 
     /// **The wire mapping itself, pinned slot by slot.** Round-trips cannot catch a
@@ -2006,6 +2288,33 @@ mod tests {
                     scouted: true,
                     ..neutral
                 },
+                // The count knobs' two-step rungs (#565).
+                S::TwoMoreGuards => LevelModifiers {
+                    guard_count: GuardCount::TwoMore,
+                    ..neutral
+                },
+                S::TwoFewerGuards => LevelModifiers {
+                    guard_count: GuardCount::TwoFewer,
+                    ..neutral
+                },
+                S::TwoMoreIntel => LevelModifiers {
+                    intel_count: IntelCount::TwoMore,
+                    ..neutral
+                },
+                S::TwoFewerIntel => LevelModifiers {
+                    intel_count: IntelCount::TwoFewer,
+                    ..neutral
+                },
+                // The composites (#565), each named through its own contribution — the
+                // word alone, so this also pins that a composite encodes as one slot
+                // rather than as the fields it stands for.
+                // Resolved, not bare: `modifier_slots` writes what a run asks for *beyond*
+                // its composite, so it takes a set the composite has been added to.
+                S::OutpostComposite => Composite::Outpost.contribution().expand_composite(),
+                S::DepotComposite => Composite::Depot.contribution().expand_composite(),
+                S::VaultComposite => Composite::Vault.contribution().expand_composite(),
+                S::WorkshopComposite => Composite::Workshop.contribution().expand_composite(),
+                S::ArchiveComposite => Composite::Archive.contribution().expand_composite(),
             }
         };
         for slot in ModifierSlot::ALL {

@@ -314,7 +314,7 @@ fn the_facility_is_the_flavour_the_map_offered() {
 #[test]
 fn the_flavours_build_different_facilities() {
     let recipe = |flavour: Flavour| {
-        let modifiers = flavour.modifiers();
+        let modifiers = flavour.composite().expansion();
         let config = LevelConfig::V1
             .with_guard_count(modifiers.guard_count)
             .with_intel_count(modifiers.intel_count);
@@ -333,7 +333,12 @@ fn the_flavours_build_different_facilities() {
         base_guards + 1,
         "the last raid is the hard one",
     );
-    assert!(Flavour::Archive.modifiers().guards_always_search_hideouts);
+    assert!(
+        Flavour::Archive
+            .composite()
+            .expansion()
+            .guards_always_search_hideouts
+    );
 }
 
 /// **Every flavour actually carves.** The recipe arithmetic above is one thing; a
@@ -846,18 +851,22 @@ fn each_flavour_hides_the_crates_its_row_promises() {
         (Flavour::Vault, CacheCount::Three),
         (Flavour::Archive, CacheCount::None),
     ] {
-        assert_eq!(flavour.modifiers().caches, caches, "{flavour:?}");
+        assert_eq!(
+            flavour.composite().expansion().caches,
+            caches,
+            "{flavour:?}"
+        );
     }
     // …and the Workshop's price is a console, where the Vault's is a guard: the two
     // rich flavours differ in what they charge, which is what makes the choice between
     // them a decision rather than a ranking (§2.3).
     assert_eq!(
-        Flavour::Workshop.modifiers().intel_count,
+        Flavour::Workshop.composite().expansion().intel_count,
         IntelCount::Fewer,
         "the console a Workshop's crates cost",
     );
     assert_eq!(
-        Flavour::Vault.modifiers().guard_count,
+        Flavour::Vault.composite().expansion().guard_count,
         crate::modifiers::GuardCount::More,
         "the guard a Vault's crates cost",
     );
@@ -871,7 +880,7 @@ fn each_flavour_hides_the_crates_its_row_promises() {
         let flavour = run.flavour();
         assert_eq!(
             run.next_level().modifiers.caches,
-            flavour.modifiers().caches,
+            flavour.composite().expansion().caches,
             "the config disagrees with the row that offered it",
         );
         stood_on_one |= flavour == Flavour::Workshop;
@@ -1618,7 +1627,14 @@ fn only_a_crated_facility_on_offer_sells_its_manifest() {
     assert_eq!(run.buy_manifest(locked_offer(&run)), Outlay::Closed);
     assert_eq!(run.buy_manifest(NodeId::at(0, 0)), Outlay::Closed);
     for offer in run.ahead() {
-        let empty = run.map().flavour(offer.node).modifiers().caches.crates() == 0;
+        let empty = run
+            .map()
+            .flavour(offer.node)
+            .composite()
+            .expansion()
+            .caches
+            .crates()
+            == 0;
         if empty && !offer.locked {
             assert!(!run.manifest_on_sale(offer.node), "nothing to sell");
             assert_eq!(run.buy_manifest(offer.node), Outlay::Closed);

@@ -664,6 +664,7 @@ mod tests {
             narrowed_guard_cones,
             scouted,
             intel_to_exit,
+            composite,
         } = all.modifiers;
         assert!(prize_room_locked);
         assert!(guards_always_search_hideouts);
@@ -694,6 +695,12 @@ mod tests {
             intel_to_exit,
             RunConfig::sim().modifiers.intel_to_exit,
             "a toggle must not move the gate — that is --intel-gate's job",
+        );
+        assert_eq!(
+            composite,
+            intrusion_core::Composite::None,
+            "a composite is a campaign flavour's shorthand (#565), not a switch the sim \
+             names — naming every modifier must not turn the level into a Vault",
         );
     }
 

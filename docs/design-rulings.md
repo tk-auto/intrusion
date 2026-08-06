@@ -4049,3 +4049,143 @@ deserves an appetite of its own, that is a §13.4 temperament decision and its o
 until it exists the sim simply has nothing to say about the avoidance-first half of the
 roster. `docs/stats/abilities/dart.md` says so in those words rather than filling the gap
 with the numbers the bug produced.
+
+## Appendix 55 — A composite is one word for a combination, and its rows are its receipt
+
+*(#565, §12.6/§14 v3 — the flavours went from one slot per field to one slot each. Two
+questions had to be answered first, and the second one is the interesting one.)*
+
+**The problem is not slots, it is simultaneity.** The level-seed token reserves 256
+permanent slot positions and spends twenty-nine, so *"appending is free"* is literally
+true; what the format actually bounds is `MODIFIER_CAP` — **five** modifiers active at
+once — and that number is not free at all. It is what keeps `PAYLOAD_SPACE` under
+`TOKEN_SPACE`, which is the whole of the format's integrity argument: there is no
+checksum field, and a bad token is rejected exactly because most of the token space is
+unused. Every bit spent on a sixth simultaneous modifier is a bit taken from that.
+
+So a Vault — *one more guard, one more console, three crates* — spent **three of five**
+on a combination the game already has a word for, and the campaign's own drawn rules
+(#210) stack at conditions 0, 2 and 3 on precisely those facilities. Raising the cap
+looks like the same fix and is not. Saying one thing once is free; raising the ceiling
+is not.
+
+### Question 1: what happens when a composite and a drawn rule touch the same field
+
+Three options were on the table, and two of them fail for stated reasons. **Rejecting the
+combination** — the way a knob's two ends are rejected together — would make the
+campaign's own stacking illegal, which is the one thing the mechanism exists to enable.
+**Last writer wins** is silent and unpredictable, and a drawn rule that quietly does
+nothing is the §2.3 facade.
+
+What was taken is **deltas over the baseline, clamped**: a Vault's `+1` and a drawn `+1`
+are `+2`. The first cut of this shipped that as a *framing* and not a behaviour — the
+guard envelope was three-either-side-of-four, the knob's documented reach was ±1, and the
+second step clamped straight back onto the same fifth guard, so `plus` and the old
+harder-ward rule computed the same answer on every input the game could produce. That was
+wrong, and the reason it was wrong is worth keeping:
+
+> A composite brings its **own version** of the modifiers. It is not a claim on a knob
+> that the highest bidder wins; it is a source, saying what this facility is, alongside
+> every other source. Two sources each putting a guard in the building are two guards. A
+> rule that arrives second and lands on a rung the first already took has changed nothing
+> observable — which is exactly the §2.3 test a shipped modifier has to pass, applied to
+> the second source instead of the first.
+
+So the **count** knobs are genuinely signed deltas now, composing by addition with a reach
+of **two steps either way** — one rung per source that can name the knob, since a facility
+has one flavour and one alert and there is no third. §10.2's guard envelope widened from
+3–5 to **2–6** to make room: the sixth guard is what a Vault the campaign has also been
+loud on costs, and the second guard off is what an Outpost taken quietly buys. Both are
+reached only by paying twice, which is the shape §14 v3 wants its map to have.
+
+The **intel** knob is arithmetic too and its envelope did **not** move, which is the one
+asymmetry here. Nothing but a node flavour names it — neither of its ends is in the §12.6
+directed pool, deliberately (§12.6: a difficulty draw that moved the intel count would be
+deciding how much of the game you have to do) — so its two-step rungs are unreachable in
+play, and §10.2's arguments for the console floor and the §10.6 carve's ceiling stand
+untouched. Consistency in the *rule*, not in the numbers: if the pool ever admits an intel
+rule, that envelope is what has to be argued again.
+
+**What arithmetic costs.** §12.6's older invariant — *no contribution can relieve pressure
+another one asked for* — does not survive it. An Outpost's `-1` and a drawn `+1` now sum to
+the recipe's own count, where before the drawn rule won outright. That was a real
+protection: it is what stopped a player's easier choice from talking the campaign alert out
+of its extra guard. It is given up here because a **count** is the one kind of knob where
+the arithmetic is the honest reading — a facility told to hold one fewer guard and one more
+guard holds the number it started with — and because the tab now shows both rules, so the
+sum is something the player can see rather than something the seam does behind them. The
+invariant is untouched wherever it still means something: the intel gate, every toggle, and
+the layout knob compose exactly as they did.
+
+### Question 2: a composite has no direction, and the tab must not lie about it
+
+Every `LevelModifiers` field carries a documented **harder / easier** direction with a
+§2.3 directional assertion behind it, *"so a flag that changes nothing observable cannot
+pass for shipped"*. A Vault is harder **and** richer — that is the entire point of §14
+v3's three axes — so it cannot claim a direction, and forcing one would make the panel's
+colour cue lie about half of it.
+
+What replaces the directional assertion is stronger: **equivalence**. Each composite's
+expansion is asserted field by field against a *frozen copy* of the combination it
+replaced — frozen rather than re-derived, or the test would assert that the code equals
+itself. If that holds, nothing about any facility differs afterwards, which is the whole
+claim the change makes. The direction is then inherited by the **parts**, which keep
+their own; a Vault's guard row is orange and its console row is blue, adjacent.
+
+### The display: one row per rule, one rule per row
+
+The Level info tab stays what it was — a flat list, one row per active rule — with the
+composite's name in front of each row it set. Not a label with rules behind it: §12.6
+promises the drawn rule is *"on the help panel's Level info tab with every other active
+modifier"*, and a word standing in for three rules would be concealing two of them.
+
+Two details fell out of building it. The rows are **derived twice from one derivation**:
+a composite's rows come from running the caption derivation over its expansion, and the
+rest come from running it over what the run asks for *beyond* the composite — the same
+`departures_beyond_composite` the encoder writes its slots from, so the rows drawn and the
+slots written can never describe different runs. And the rows needed a **second wording** —
+the existing captions are `Guards: one more`, and `Vault: Guards: one more` is both ugly
+and two columns past the panel's width bound on the v1 board. So each caption carries a
+short phrase (`one more guard`) used only when it is drawn under an owner, and the
+compile-time bound measures the longest label against the longest phrase. The tab can then
+only grow **downward**, which is the direction it was built to grow in.
+
+The ticket asked for two rows where a composite and a drawn rule touch one field:
+
+```
+Vault: one more guard
+Guards: one more
+```
+
+and that is what it draws — because with deltas both rules are genuinely in the building
+and the rows add up to it. The first cut drew **one** row here, on the grounds that under
+the clamp the two rules were one guard and a second row would be a receipt for nothing.
+That reasoning was sound *given* the clamp and wrong because of it: the fix was to make the
+second rule real, not to stop reporting it. Which is the useful shape of the mistake — a
+display rule quietly documenting a composition rule that had gone wrong upstream.
+
+The rule that follows is worth stating plainly, because it is what makes a row worth
+reading: **no row stands for a rule the building does not have, and no rule of the
+building's is missing a row.** A cancelling pair is drawn as a pair — `Outpost: one fewer
+guard` above `Guards: one more`, on a facility with the recipe's own count — because both
+rules are in force and the sum is the player's to do.
+
+### What made it a kind rather than a special case
+
+The flavours are not the last preset this game will want; a difficulty preset, a tutorial
+preset and a sim scenario are the same shape. So a composite declares a **name** and an
+**expansion** and nothing else, expands at resolution — so no system below
+`ModifierSources::resolve` learns the word *Vault* — and a second one is a new variant
+with a new slot. Two smaller decisions inside that:
+
+- **The Archive is a composite**, which #565 left open. What reaches the facility is a
+  §12.6 flavour contribution exactly as the others' are, and as a raw combination it cost
+  two slots. That the archive is *also* the campaign's terminal objective (#217) is a
+  property of the **node**, and stays there. One word, two facts, kept in the two places
+  that own them.
+- **`Flavour` and `Composite` stay two enums.** A flavour is a property of a node on the
+  map — what a branch offers, what its blurb says, which one the terminus is. A composite
+  is a modifier *value* with a permanent wire slot. Collapsing them would put the map's
+  vocabulary in the token's slot list and invert the crate's layering; the pairing is
+  pinned by a test instead.
+

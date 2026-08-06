@@ -297,3 +297,67 @@ fn every_flavour_names_itself() {
         "the archive is where the map ends, not something offered against alternatives",
     );
 }
+
+/// **The migration guarantee** (#565): each flavour, said as one composite, resolves to
+/// *exactly* the combination it was written as before — asserted **field by field**,
+/// against a frozen copy of that combination rather than against the expansion the game
+/// now reads.
+///
+/// This is the central test of the change and the reason it can be called a
+/// representation change: if it holds, nothing about any facility differs afterwards. It
+/// is also what stands in for a **directional** assertion (§2.3), which a composite cannot
+/// have — a Vault is harder *and* richer, so there is no single direction to claim, and
+/// equivalence is the stronger promise anyway.
+#[test]
+fn every_flavour_expands_to_exactly_the_combination_it_replaces() {
+    for flavour in Flavour::ALL {
+        let was = flavour.combination_before_composites();
+        // The **expansion** is what the word means; the contribution is just the word.
+        let now = flavour.composite().expansion();
+        // Field by field, not by one `assert_eq!` on the whole value: a struct comparison
+        // that failed would say only *that* something moved, and the point of this test is
+        // to say **which** knob a refactor knocked.
+        assert_eq!(now.guard_count, was.guard_count, "{flavour:?}: guards");
+        assert_eq!(now.intel_count, was.intel_count, "{flavour:?}: consoles");
+        assert_eq!(now.caches, was.caches, "{flavour:?}: caches");
+        assert_eq!(
+            now.guards_always_search_hideouts, was.guards_always_search_hideouts,
+            "{flavour:?}: hideout searches",
+        );
+        assert_eq!(
+            now.intel_to_exit, was.intel_to_exit,
+            "{flavour:?}: the gate — a flavour must never touch it",
+        );
+        // And the whole value, so a field neither list names cannot drift unnoticed. The
+        // composite itself is the one intended difference, so it is set aside first.
+        assert_eq!(
+            now, was,
+            "{flavour:?} no longer resolves to the combination it replaced",
+        );
+    }
+}
+
+/// Each flavour is stated as **its own** composite (#565) — the pairing the two enums
+/// need, pinned rather than left to reading. A flavour sharing another's composite would
+/// make two map rows the same facility, which is the §2.3 failure the flavours exist to
+/// avoid.
+#[test]
+fn every_flavour_maps_to_its_own_composite() {
+    let mut composites: Vec<Composite> = Flavour::ALL.into_iter().map(Flavour::composite).collect();
+    let count = composites.len();
+    composites.sort_unstable_by_key(|c| c.label());
+    composites.dedup();
+    assert_eq!(composites.len(), count, "two flavours share a composite");
+    assert!(
+        !composites.contains(&Composite::None),
+        "a flavour is always some facility — `None` is the absence of a composite",
+    );
+    // Exhaustive the other way too: every composite the format spends a slot on is a
+    // flavour some node can offer, so no slot is spent on a word nothing says.
+    for composite in Composite::ALL {
+        assert!(
+            Flavour::ALL.into_iter().any(|f| f.composite() == composite),
+            "{composite:?} has a wire slot and no flavour that names it",
+        );
+    }
+}

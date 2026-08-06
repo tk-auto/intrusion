@@ -90,13 +90,57 @@ const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
 /// that moves for both is easier to tune than two that drift.
 const PLAYER_CACHE_MIN_DISTANCE: u32 = PLAYER_COMMS_MIN_DISTANCE;
 
-// The shipped recipe sits **strictly inside** the guard-count envelope (#232), so
-// both ends of the knob always bite on the level the game actually ships. Held at
-// compile time rather than in a test: retuning §10.2's [START] count to an edge of
-// the envelope would leave one end of a shipped modifier silently doing nothing —
-// §2.3's facade, arrived at by moving a number somewhere else entirely.
-const _: () = assert!(LevelConfig::GUARDS_MIN < LevelConfig::V1.guards);
-const _: () = assert!(LevelConfig::V1.guards < LevelConfig::GUARDS_MAX);
+// The shipped recipe leaves the guard knob its **whole reach** in both directions
+// (#232/#565), so every rung of the knob bites on the level the game actually ships —
+// including the two-step rungs two sources reach together. Held at compile time rather
+// than in a test: retuning §10.2's [START] count toward an edge of the envelope would
+// leave a rung of a shipped modifier silently doing nothing — §2.3's facade, arrived at
+// by moving a number somewhere else entirely.
+const _: () =
+    assert!(LevelConfig::V1.guards >= LevelConfig::GUARDS_MIN + GuardCount::REACH as usize);
+const _: () =
+    assert!(LevelConfig::V1.guards + GuardCount::REACH as usize <= LevelConfig::GUARDS_MAX);
+// The intel knob is asserted at **one** step, which is its whole reach in play: nothing
+// but a node flavour names it and a facility has one flavour (see `INTEL_MIN`). Stating
+// the weaker claim is what keeps this an assertion about the shipped game rather than
+// about a token nobody can be dealt.
+const _: () = assert!(LevelConfig::INTEL_MIN < LevelConfig::V1.intel);
+const _: () = assert!(LevelConfig::V1.intel < LevelConfig::INTEL_MAX);
+
+/// Move `count` by `steps`, stopping at the `min`…`max` envelope — the arithmetic both
+/// count knobs are applied through (§12.6/#565).
+///
+/// **A count already outside the envelope is left where it is** rather than dragged into
+/// range: a sim sweep at eight guards asking for one more must not be handed six, because
+/// a knob that moved the *wrong way* is worse than one that did nothing. So the envelope
+/// is a wall the step stops against, never a clamp on the result.
+const fn stepped(count: usize, steps: i8, min: usize, max: usize) -> usize {
+    if steps < 0 {
+        let want = count.saturating_sub(steps.unsigned_abs() as usize);
+        if want < min {
+            // Stop at the floor — unless the recipe was already under it, in which case
+            // the knob has nothing to give and leaves the recipe alone.
+            if count < min {
+                count
+            } else {
+                min
+            }
+        } else {
+            want
+        }
+    } else {
+        let want = count + steps as usize;
+        if want > max {
+            if count > max {
+                count
+            } else {
+                max
+            }
+        } else {
+            want
+        }
+    }
+}
 
 /// A level recipe: the footprint and the piece counts (§10.2). v1 ships exactly
 /// one tuned configuration — [`LevelConfig::V1`] — but the knobs are data so the
@@ -149,23 +193,37 @@ impl LevelConfig {
     /// The fewest guards the [`GuardCount`] modifier may leave a facility with
     /// (§10.2/§10.6/#232).
     ///
-    /// **Three, and the floor is about the game rather than about placement.** A carve
+    /// **Two [START], and the floor is about the game rather than about placement.** A carve
     /// seats fewer guards more easily, not less, so nothing here would *fail* at one or
     /// at none — it would simply hand back a building with nobody in it, which is a
-    /// walk rather than a raid. Three is the last row of the `--guards` sweep that is
-    /// still a real level: a bare bot wins 48% of them against 37% at the baseline
+    /// walk rather than a raid. Three was the last row of the `--guards` sweep that is
+    /// still clearly a real level: a bare bot wins 48% of them against 37% at the baseline
     /// (appendix 26), so it is one step of relief and not a different game.
-    pub const GUARDS_MIN: usize = 3;
+    ///
+    /// **It moved to two when the knob became a delta** (#565). Two sources can each ask
+    /// for one guard fewer — an [`Outpost`](crate::Flavour::Outpost) is thinly guarded, and
+    /// a campaign raid nobody noticed is dealt an easier rule on top — and the answer to
+    /// that has to be *two* fewer or the second rule is a row with nothing behind it
+    /// (§2.3). What a two-guard facility is worth is a **balance** question this floor does
+    /// not settle; what it settles is that the second step is real. It is the cheapest
+    /// facility the map can offer, and it has to be paid for twice to reach.
+    pub const GUARDS_MIN: usize = 2;
 
     /// The most guards the [`GuardCount`] modifier may add (§10.2/§10.6/#232).
     ///
-    /// Five, one over the §10.2 baseline. Two things bound it and both point the same
-    /// way: the board is **screen-bound** (§11.4/§10.2), so a 40×40 crowds long before
-    /// the placement pool runs dry; and the §7.5 region partition divides the facility
-    /// into as many beats as there are guards (§10.5), so each extra guard cuts every
-    /// territory smaller — the §7.6 trap the design warns about is reached by adding
-    /// guards, not by any one of them being cleverer.
-    pub const GUARDS_MAX: usize = 5;
+    /// **Six [START]**, two over the §10.2 baseline — one rung per source that can ask for
+    /// a guard (#565). Two things bound it and both point the same way: the board is
+    /// **screen-bound** (§11.4/§10.2), so a 40×40 crowds long before the placement pool
+    /// runs dry; and the §7.5 region partition divides the facility into as many beats as
+    /// there are guards (§10.5), so each extra guard cuts every territory smaller — the
+    /// §7.6 trap the design warns about is reached by adding guards, not by any one of them
+    /// being cleverer.
+    ///
+    /// It was five while the knob reached one step. The sixth guard is what a
+    /// [`Vault`](crate::Flavour::Vault) the campaign has *also* dealt a harder rule to
+    /// costs, and it is the hardest facility the map can put in front of a run — reached
+    /// only by choosing the watched route and then being heard on it.
+    pub const GUARDS_MAX: usize = 6;
 
     /// The fewest intel consoles the [`IntelCount`] modifier may leave a facility with
     /// (§10.2/#207).
@@ -175,6 +233,14 @@ impl LevelConfig {
     /// one — but a facility with a *single* console is not a raid at all: there is one
     /// place worth going and no route to choose between. Two is the last count that
     /// still asks the player where to go first.
+    ///
+    /// **It did not move when the knob became a delta** (#565), unlike its guard-side
+    /// twin, and the asymmetry is deliberate. Nothing but a node **flavour** names this
+    /// knob — the §12.6 directed pool holds neither of its ends (see
+    /// [`POOL`](crate::modifiers)) — and a facility has one flavour, so the knob's
+    /// two-step rungs are unreachable in play. The knob is arithmetic for consistency; the
+    /// argument above for the floor is untouched by that, and this is the one place it is
+    /// decided. If the pool ever admits an intel rule, this is what has to be argued again.
     pub const INTEL_MIN: usize = 2;
 
     /// The most intel consoles the [`IntelCount`] modifier may add (§10.2/#207).
@@ -188,44 +254,47 @@ impl LevelConfig {
     /// This recipe with the §12.6 **guard-count knob** applied (#232) — the effective
     /// config [`generate_level`](crate::generate_level) places from.
     ///
-    /// **A step, not a setter.** The knob moves the recipe's own count by one and
-    /// stops at the [`GUARDS_MIN`](Self::GUARDS_MIN)…[`GUARDS_MAX`](Self::GUARDS_MAX)
-    /// envelope; a recipe already outside it is **left where it is** rather than
-    /// dragged into range, because clamping a sim sweep of seven guards down to five
-    /// would have "one more" quietly place *two fewer* — a knob that moved the wrong
-    /// way would be worse than one that did nothing. For the one shipped recipe
-    /// ([`V1`](Self::V1), four guards) both ends always bite.
+    /// **A step, not a setter.** The knob moves the recipe's own count by however many
+    /// guards it names ([`GuardCount::steps`], #565) and stops at the
+    /// [`GUARDS_MIN`](Self::GUARDS_MIN)…[`GUARDS_MAX`](Self::GUARDS_MAX) envelope; a recipe
+    /// already outside it is **left where it is** rather than dragged into range, because
+    /// clamping a sim sweep of eight guards down to six would have "one more" quietly place
+    /// *two fewer* — a knob that moved the wrong way would be worse than one that did
+    /// nothing. For the one shipped recipe ([`V1`](Self::V1), four guards) every rung
+    /// always bites, which is what the build-time check below pins.
     #[must_use]
     pub const fn with_guard_count(self, knob: GuardCount) -> Self {
-        let guards = match knob {
-            GuardCount::Baseline => self.guards,
-            GuardCount::Fewer if self.guards > Self::GUARDS_MIN => self.guards - 1,
-            GuardCount::More if self.guards < Self::GUARDS_MAX => self.guards + 1,
-            // Already at or past the envelope's edge in the direction asked for.
-            GuardCount::Fewer | GuardCount::More => self.guards,
-        };
-        Self { guards, ..self }
+        Self {
+            guards: stepped(
+                self.guards,
+                knob.steps(),
+                Self::GUARDS_MIN,
+                Self::GUARDS_MAX,
+            ),
+            ..self
+        }
     }
 
     /// This recipe with the §12.6 **intel-count knob** applied (#207) — the reward half
     /// of the map's flavour (§14 v3), resolved into the recipe beside the guard count.
     ///
     /// **A step, not a setter**, on exactly [`with_guard_count`](Self::with_guard_count)'s
-    /// terms: one console either way, stopping at the
+    /// terms: as many consoles either way as the knob names, stopping at the
     /// [`INTEL_MIN`](Self::INTEL_MIN)…[`INTEL_MAX`](Self::INTEL_MAX) envelope, and a
     /// recipe already outside that envelope is left where it is rather than dragged into
     /// range — a sim sweep at six consoles must not have "one more" quietly place two
     /// fewer.
+    ///
+    /// Its envelope is **one step wide either way** where the guard knob's is two, because
+    /// nothing in play asks this knob for two (see [`INTEL_MIN`](Self::INTEL_MIN)). A
+    /// crafted two-step token therefore stops at the same console the one-step rung
+    /// reaches: what a carve can seat is generation's word, and this is where it is said.
     #[must_use]
     pub const fn with_intel_count(self, knob: IntelCount) -> Self {
-        let intel = match knob {
-            IntelCount::Baseline => self.intel,
-            IntelCount::Fewer if self.intel > Self::INTEL_MIN => self.intel - 1,
-            IntelCount::More if self.intel < Self::INTEL_MAX => self.intel + 1,
-            // Already at or past the envelope's edge in the direction asked for.
-            IntelCount::Fewer | IntelCount::More => self.intel,
-        };
-        Self { intel, ..self }
+        Self {
+            intel: stepped(self.intel, knob.steps(), Self::INTEL_MIN, Self::INTEL_MAX),
+            ..self
+        }
     }
 
     /// This recipe with the §12.6 **cache count** applied (#209) — the third modifier
@@ -911,16 +980,34 @@ mod tests {
     /// way it does not name.
     #[test]
     fn the_guard_knob_steps_the_recipe_and_stops_at_the_envelope() {
-        // The shipped recipe sits inside the envelope (held at compile time beside
-        // the constants), so both ends bite: §10.2's four becomes three or five, the
-        // ±1 the knob promises.
+        // The shipped recipe leaves the knob its whole reach (held at compile time beside
+        // the constants), so **every** rung bites: §10.2's four becomes two, three, five
+        // or six — one guard per source that asked for one (#565).
         assert_eq!(LevelConfig::V1.guards, 4, "the §10.2 [START] baseline");
         let at = |knob| LevelConfig::V1.with_guard_count(knob).guards;
+        assert_eq!(at(GuardCount::TwoFewer), LevelConfig::V1.guards - 2);
         assert_eq!(at(GuardCount::Fewer), LevelConfig::V1.guards - 1);
         assert_eq!(at(GuardCount::Baseline), LevelConfig::V1.guards);
         assert_eq!(at(GuardCount::More), LevelConfig::V1.guards + 1);
-        assert_eq!(at(GuardCount::Fewer), LevelConfig::GUARDS_MIN);
-        assert_eq!(at(GuardCount::More), LevelConfig::GUARDS_MAX);
+        assert_eq!(at(GuardCount::TwoMore), LevelConfig::V1.guards + 2);
+        assert_eq!(at(GuardCount::TwoFewer), LevelConfig::GUARDS_MIN);
+        assert_eq!(at(GuardCount::TwoMore), LevelConfig::GUARDS_MAX);
+        // A recipe already outside the envelope is left where it is rather than dragged
+        // into range — the rule that keeps "one more" from ever placing fewer.
+        let wide = LevelConfig {
+            guards: LevelConfig::GUARDS_MAX + 2,
+            ..LevelConfig::V1
+        };
+        assert_eq!(
+            wide.with_guard_count(GuardCount::More).guards,
+            wide.guards,
+            "a sim sweep past the cap must not be clamped *down* by asking for more",
+        );
+        assert_eq!(
+            wide.with_guard_count(GuardCount::Fewer).guards,
+            wide.guards - 1,
+            "…and asking for fewer still steps down",
+        );
 
         // The knob touches nothing but the count.
         assert_eq!(
@@ -998,12 +1085,15 @@ mod tests {
         };
 
         for seed in seed_sweep(SEEDS) {
-            let (fewer_layout, fewer) = at(seed, GuardCount::Fewer);
+            // The knob's extremes (#565): two guards fewer and two more, which is what
+            // two sources each naming a guard resolve to.
+            let (fewer_layout, fewer) = at(seed, GuardCount::TwoFewer);
             let (base_layout, base) = at(seed, GuardCount::Baseline);
-            let (more_layout, more) = at(seed, GuardCount::More);
+            let (more_layout, more) = at(seed, GuardCount::TwoMore);
 
             // Exactly the requested counts, at every setting — §10.6's no-silent-drop
-            // rule applies to the knob's numbers as much as to the recipe's.
+            // rule applies to the knob's numbers as much as to the recipe's, and a
+            // 40×40 carve really does seat the widened envelope's six.
             assert_eq!(fewer.guard_cells().len(), LevelConfig::GUARDS_MIN);
             assert_eq!(base.guard_cells().len(), LevelConfig::V1.guards);
             assert_eq!(more.guard_cells().len(), LevelConfig::GUARDS_MAX);

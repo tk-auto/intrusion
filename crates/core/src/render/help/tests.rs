@@ -3,7 +3,8 @@ use crate::ability::AbilityId;
 use crate::ability::Loadout;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
 use crate::modifiers::{
-    ActiveModifier, CacheCount, DebugModifiers, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
+    ActiveModifier, CacheCount, Composite, DebugModifiers, GuardCount, IntelCount, IntelGate,
+    LayoutKnowledge,
 };
 
 /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
@@ -330,41 +331,62 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             IntelCount::Fewer,
             CacheCount::Three,
         ),
+        // The knobs' two-step rungs (#565), which two sources reach together — the
+        // longest count captions the tab can draw.
+        (
+            IntelGate::All,
+            GuardCount::TwoMore,
+            IntelCount::TwoMore,
+            CacheCount::Two,
+        ),
+        (
+            IntelGate::None,
+            GuardCount::TwoFewer,
+            IntelCount::TwoFewer,
+            CacheCount::One,
+        ),
     ] {
-        let all_on = LevelModifiers {
-            guards_always_search_hideouts: true,
-            sighting_lost_calls_a_guard: true,
-            body_found_calls_two_guards: true,
-            always_show_vision_cones: true,
-            layout_knowledge: LayoutKnowledge::Full,
-            calm_guards_detect_only_their_cone: true,
-            automatic_doors: true,
-            guards_watch_consoles: true,
-            show_search_areas: true,
-            guard_count,
-            intel_count,
-            caches,
-            prize_room_locked: true,
-            narrowed_guard_cones: true,
-            scouted: true,
-            intel_to_exit: gate,
-        };
-        let g = render_help(
-            W,
-            H,
-            show(HelpTab::LevelInfo, SeedCopy::default()),
-            panel_run(None, all_on, &quiet_alert(), Loadout::innate()),
-        );
-        let text = text_of(&g);
-        for m in all_on.active() {
-            let caption = match m.detail {
-                Some(d) => format!("{}: {}", m.name, d),
-                None => m.name.to_string(),
+        // …and once per composite (#565), so the **attributed** rows — a composite's name
+        // in front of a rule's short phrasing — are measured on a real frame too. They are
+        // the longest rows the tab can draw, which is what makes them worth rendering
+        // rather than only bounding at compile time.
+        for composite in [Composite::None].into_iter().chain(Composite::ALL) {
+            let all_on = LevelModifiers {
+                guards_always_search_hideouts: true,
+                sighting_lost_calls_a_guard: true,
+                body_found_calls_two_guards: true,
+                always_show_vision_cones: true,
+                layout_knowledge: LayoutKnowledge::Full,
+                calm_guards_detect_only_their_cone: true,
+                automatic_doors: true,
+                guards_watch_consoles: true,
+                show_search_areas: true,
+                guard_count,
+                intel_count,
+                caches,
+                prize_room_locked: true,
+                narrowed_guard_cones: true,
+                scouted: true,
+                intel_to_exit: gate,
+                composite,
             };
-            assert!(
-                text.contains(&caption),
-                "caption {caption:?} was clipped on a {W}-wide board",
+            let g = render_help(
+                W,
+                H,
+                show(HelpTab::LevelInfo, SeedCopy::default()),
+                panel_run(None, all_on, &quiet_alert(), Loadout::innate()),
             );
+            let text = text_of(&g);
+            for m in all_on.active() {
+                let caption = match m.detail {
+                    Some(d) => format!("{}: {}", m.name, d),
+                    None => m.name.to_string(),
+                };
+                assert!(
+                    text.contains(&caption),
+                    "caption {caption:?} was clipped on a {W}-wide board",
+                );
+            }
         }
     }
     // And the bound itself is not vacuously large: a caption may not run past
@@ -1109,6 +1131,8 @@ fn the_active_modifier_descriptor_is_readable() {
         name: "x",
         direction: ModifierDirection::Harder,
         detail: None,
+        source: None,
+        short: "x",
     };
     assert_eq!(m.direction, ModifierDirection::Harder);
 }

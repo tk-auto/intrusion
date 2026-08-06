@@ -3301,7 +3301,7 @@ flips a rule an existing system already owns rather than adding a parallel one:
 | **Layout knob** (`layout_knowledge`) | both ends | how much of the building a run starts knowing, either side of §11.5a's schematic. *Full known* draws the real architecture from turn one — doorways, furniture and the duct mouths, the one *content* it hands over because a mouth reads off a plan like a doorway does (a scouted mouth still gets the memory slate, #450). *Unknown* draws nothing, fogging the geometry so route-planning is what exploring buys — #233, the **one modifier that overrides a [SETTLED] rule**, kept out of the directed pool for that reason until #518 admitted it (see §11.5a) |
 | **The two cooperation call-ins** | harder | whether a lost sighting and a found body summon anyone (§7.7) |
 | **All doors automatic** | harder | every doorway generates frameless instead of hinged (§10.4/#452 — **read by generation**, see the blockquote below) |
-| **Guard count** (knob) | both ends | the §10.2 baseline, one either way (#232 — generation-time, and the one bounded knob whose baseline is a neutral middle) |
+| **Guard count** (knob) | both ends | the §10.2 baseline, by a signed **delta** of up to two either way (#232/#565 — generation-time; contributions add, and two is one step per source that can name it) |
 | **Guards watch consoles** | harder | a Calm patrol prefers a cell beside a console its beat touches and cycles them, so the ground the player must reach is the ground that is patrolled (§7.5/#319; appendix 39) |
 | **Search areas shown** | easier | the area every §7.6 search is sweeping paints in the Warning orange — the *when* is free and unconditional, only the *where* is priced (§11.5/#224) |
 | **Locked room** | harder | key-gates every doorway of the room holding the facility's prize and puts a key on every guard (§10.4/#236 — the fifth generation-read entry, and the one reaching *past* placement: it draws nothing, so both settings are the same board and only one room's doorways differ) |
@@ -3318,10 +3318,64 @@ knob a small enum or clamped integer). It is resolved **once at facility start**
 and every system branches on *that* value — never a global bool queried in ten
 places. Adding a modifier is adding a field, and the compiler then enumerates
 every read site that must handle it. Each field carries a documented **direction**
-(harder / easier); §2.3's anti-facade rule means every shipped modifier needs a
-**directional assertion** — from the same seed and inputs, the harder one yields
-at least as much pressure as baseline, the easier one reveals at least as much —
-so a flag that changes nothing observable cannot pass for shipped.
+(harder / easier) — **with one stated exception, the composite below**; §2.3's
+anti-facade rule means every shipped modifier needs a **directional assertion** —
+from the same seed and inputs, the harder one yields at least as much pressure as
+baseline, the easier one reveals at least as much — so a flag that changes nothing
+observable cannot pass for shipped.
+
+**A composite modifier is one word for a combination** (#565). Some combinations have a
+name the game already uses — the §14 v3 flavours are the first, and a difficulty preset,
+a tutorial preset and a sim scenario are the same shape. A **composite** declares two
+things and nothing else: its **name**, the word the player reads, and its **expansion**,
+the primitive fields it sets. It is a *kind*, so a second one is a new entry rather than
+new machinery. Three consequences, all load-bearing:
+
+- **Expansion happens at resolution**, so nothing below `ModifierSources::resolve` learns
+  the word *Vault*: the resolved value carries the extra guard, the extra console and the
+  three crates as ordinary primitive fields, and every system branches on those exactly as
+  it would if a primitive source had named them. What the composite's own value is kept
+  for is the token and the help panel, and nothing else.
+- **It occupies one wire slot, and the fields it stands for are then not encoded.** A Vault
+  goes from three of `MODIFIER_CAP`'s five active slots to one, leaving four for the
+  campaign's drawn rules (#210) — precisely on the facilities that could least afford the
+  budget. What is scarce is *how many modifiers may be active at once*, never how many
+  slots exist (token spec §3), which is why the fix is a composite and **not** a raised
+  cap: the cap is what keeps the token's rejection rate honest.
+- **It has no direction, and does not fake one.** A Vault is harder *and* richer — the
+  whole of §14 v3's three-axis design. What stands in for the directional assertion is a
+  stronger one: **equivalence**, asserted field by field against the combination the
+  composite replaces, so *"nothing about any facility differs"* is proved rather than
+  claimed. The direction is inherited by the parts, which keep their own.
+
+**A composite brings its own version of the modifiers, so they stack** — which is what
+made the **count** knobs (guards, consoles) arithmetic. They are signed **deltas** on the
+recipe's own number, and contributions **add**, clamped to the knob's reach: a Vault's
+`+1 guard` and a condition's `+1 guard` are **two** guards, and the tab draws a row for
+each. Not *reject the combination*, which would make the campaign's own stacking illegal;
+not *last writer wins*, which is silent; and not *harder-ward*, which had the second source
+land on a rung the first had taken and do nothing — §2.3's facade, on the source that
+arrived second. The knob's reach is **two steps either way**, one per source that can name
+it, and §10.2's guard envelope widened to **2–6** to make room (§10.2/appendix 55).
+
+> **What arithmetic costs, stated rather than buried.** The older rule that *no
+> contribution can relieve pressure another one asked for* does not survive a knob that is
+> a count: an Outpost's `-1` and a drawn `+1` now sum to the recipe's own number instead of
+> the drawn rule winning. That is the same trade in the other direction, and it is the
+> honest one for a count — a facility told to hold one fewer guard and one more guard holds
+> the number it started with, and both rows are on the tab so the player can do the sum. The
+> invariant still holds everywhere it always meant something: the **intel gate**, every
+> **toggle**, and the **layout** knob, none of which is a count and none of which composes
+> by addition.
+
+**The Level info tab lists one row per active rule, each with its owner** — `Vault: one
+more guard`, and a rule the campaign drew on its own row beside it. A composite adds no
+new row shape, only a name in front of a rule that is listed either way, so **no active
+rule is hidden behind a label** and the tab's count of active rules stays honest. Every
+source keeps its row, because with deltas every source's contribution is in the building:
+no row here stands for a rule the facility does not have, and no rule of the facility's is
+missing a row. The tab therefore grows **downward**, by exactly as many rows as there are
+rules. The argument, and the two questions #565 had to answer, is *appendix 55*.
 
 > **Several modifiers reach generation, and they reach different depths of it**
 > (§10.4/#452, §10.2/#232, §10.4/#236). Each is resolved **before** `generate_level`
@@ -3350,10 +3404,13 @@ deliberately distinct:
   *Outpost* is thin and thinly guarded, a *Vault* rich and watched, a *Workshop* full of
   crates and thin on intel (#209). A flavour **is**
   the modifier set it contributes and nothing else, which is what stops the map's
-  branches from being three differently-worded labels on the same facility (§2.3).
+  branches from being three differently-worded labels on the same facility (§2.3). Each
+  is stated as one **composite** (#565), so what rides on the wire is the word and not
+  the combination.
 
 They compose into the *same* resolved `LevelModifiers` (`ModifierSources::resolve`):
-a toggle is active if **any** source requests it; a knob composes *harder-ward*.
+a toggle is active if **any** source requests it; the **count** knobs add their deltas
+(above); every other knob composes *harder-ward*.
 **A contributing source starts from the neutral set, not from the default one**
 [SETTLED] — the default is the *game's* baseline (an intel gate at `AtLeastOne`), and
 composing harder-ward would let a source that never mentioned the exit tighten it. The
