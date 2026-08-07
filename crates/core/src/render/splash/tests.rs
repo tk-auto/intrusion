@@ -13,7 +13,7 @@ use crate::modifiers::{
 use crate::place::LevelConfig;
 use crate::render::help::{HelpTab, CONTENT_INDENT, SECTION_INDENT};
 use crate::render::modifier_rows::{modifier_rows, NONE_ACTIVE};
-use crate::render::{render_screen, ScreenUi, BOTTOM_ROWS, RULE_GLYPH, TOP_ROWS};
+use crate::render::{render_screen, ScreenUi, BOTTOM_ROWS, TOP_ROWS};
 use crate::state::State;
 use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel};
 use crate::Cell;
@@ -80,6 +80,15 @@ fn shows(rows: &[String], text: &str) -> bool {
     rows.iter().any(|row| row.contains(text))
 }
 
+/// The **column** `text` starts at on `row`, counting cells rather than bytes — the
+/// card's frame is box-drawing, so a byte offset is not a column.
+fn column_of(row: &str, text: &str) -> u32 {
+    let byte = row
+        .find(text)
+        .unwrap_or_else(|| panic!("{text:?} is on {row:?}"));
+    row[..byte].chars().count() as u32
+}
+
 /// The row index carrying `text`.
 fn row_of(rows: &[String], text: &str) -> u32 {
     rows.iter()
@@ -105,25 +114,25 @@ fn the_level_start_card_renders_golden() {
     let top = row_of(&rows, HEADING) - 2; // the rule and the blank above the heading
     let card: Vec<&str> = rows[top as usize..top as usize + 14]
         .iter()
-        .map(|row| row.trim_end())
+        .map(String::as_str)
         .collect();
     assert_eq!(
         card,
         vec![
-            "────────────────────────────────────────",
-            "",
-            "  THE JOB",
-            "",
-            "  OBJECTIVE",
-            "   Take all 3 intel",
-            "   Get back out through your tunnel",
-            "",
-            "  MODIFIERS",
-            "   Intel to exit: all of it",
-            "",
-            "  any key to begin",
-            "",
-            "────────────────────────────────────────",
+            "┌──────────────────────────────────────┐",
+            "│                                      │",
+            "│ THE JOB                              │",
+            "│                                      │",
+            "│ OBJECTIVE                            │",
+            "│  Take all 3 intel                    │",
+            "│  Get back out through your tunnel    │",
+            "│                                      │",
+            "│ MODIFIERS                            │",
+            "│  Intel to exit: all of it            │",
+            "│                                      │",
+            "│ any key to begin                     │",
+            "│                                      │",
+            "└──────────────────────────────────────┘",
         ],
         "the card: {rows:#?}",
     );
@@ -415,6 +424,59 @@ fn no_objective_line_is_clipped_on_the_board() {
     }
 }
 
+/// **The card is a box, walled on all four sides** (#497).
+///
+/// Bounded by two horizontal rules alone it read as a *cut through the level* — board
+/// above, board below, and no way to tell at a glance that the middle was one object
+/// laid on top rather than the facility itself. The sides and the corners are what say
+/// *dialog*, and the first frame of a run is the worst possible place to be unsure what
+/// you are looking at.
+///
+/// Asserted over the longest card as well as the shortest, because the sides are drawn
+/// per row: a row the frame forgot would be a hole in exactly the cue this is for.
+#[test]
+fn the_card_is_a_box_walled_on_every_row() {
+    for modifiers in [LevelModifiers::default(), every_modifier()] {
+        let rows = screen(&run_with(3, modifiers), opening());
+        let top = row_of(&rows, HEADING) - 2;
+        let bottom = rows
+            .iter()
+            .rposition(|row| row.starts_with(CORNER_BOTTOM_LEFT))
+            .expect("the card closes on its bottom edge") as u32;
+        assert!(bottom > top, "the card has a top and a bottom: {rows:#?}");
+
+        for y in top..=bottom {
+            let row = &rows[y as usize];
+            let (first, last) = (
+                row.chars().next().expect("a full-width row"),
+                row.chars().last().expect("a full-width row"),
+            );
+            let expected = if y == top {
+                (CORNER_TOP_LEFT, CORNER_TOP_RIGHT)
+            } else if y == bottom {
+                (CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT)
+            } else {
+                (SIDE_GLYPH, SIDE_GLYPH)
+            };
+            assert_eq!(
+                (first, last),
+                expected,
+                "row {y} of the card is walled on both sides: {rows:#?}",
+            );
+        }
+        // …and the walls cost the words nothing: every drawn row still starts at the
+        // card's own indent, clear of the side beside it.
+        assert_eq!(
+            column_of(&rows[row_of(&rows, HEADING) as usize], HEADING),
+            SECTION_INDENT
+        );
+        assert_eq!(
+            column_of(&rows[row_of(&rows, EXIT_LINE) as usize], EXIT_LINE),
+            CONTENT_INDENT,
+        );
+    }
+}
+
 /// The card's own headings are drawn in the Level info tab's columns — the two cards
 /// read as one family, which is what makes the reduced one legible to a player who has
 /// seen the full one (and the reverse).
@@ -426,15 +488,15 @@ fn the_card_is_laid_out_in_the_tabs_own_columns() {
     for heading in [HEADING, OBJECTIVE_HEADING, MODIFIERS_HEADING] {
         let y = row_of(&rows, heading);
         assert_eq!(
-            rows[y as usize].find(heading).map(|x| x as u32),
-            Some(SECTION_INDENT),
+            column_of(&rows[y as usize], heading),
+            SECTION_INDENT,
             "{heading:?} sits at the section indent",
         );
     }
     let objective = row_of(&rows, EXIT_LINE);
     assert_eq!(
-        rows[objective as usize].find(EXIT_LINE).map(|x| x as u32),
-        Some(CONTENT_INDENT),
+        column_of(&rows[objective as usize], EXIT_LINE),
+        CONTENT_INDENT,
         "content sits one column in from the heading that names it",
     );
     // The headings' colours: the card's own title in Interest — the goal colour, since
@@ -490,8 +552,8 @@ fn the_longest_card_still_fits_the_v1_board() {
     let top = row_of(&rows, HEADING) - 2;
     let bottom = rows
         .iter()
-        .rposition(|row| row.starts_with(RULE_GLYPH))
-        .expect("the card closes on its rule") as u32;
+        .rposition(|row| row.starts_with(CORNER_BOTTOM_LEFT))
+        .expect("the card closes on its bottom edge") as u32;
 
     assert!(top > TOP_ROWS, "board above the card: {rows:#?}");
     assert!(

@@ -82,12 +82,29 @@ const NO_INTEL: &str = "There is no intel here";
 const BEGIN_KEYS: &str = "any key to begin";
 const BEGIN_TOUCH: &str = "tap to begin";
 
+/// **The card is a box, not a pair of rules** (#497). Two horizontal rules alone read
+/// as a *cut through the level* — the board above and the board below look like two
+/// halves of the facility with something wedged between them — and the first frame of a
+/// run is the worst possible place to be unsure what you are looking at. The sides and
+/// the corners are what say *this is one object, laid on top*.
+///
+/// The horizontal run is the overlay family's own [`RULE_GLYPH`](super::RULE_GLYPH), and
+/// these are its corners and its verticals: the same box-drawing block, so a font that
+/// has the rule the verdict and the deployed log already draw has these too.
+const CORNER_TOP_LEFT: char = '┌';
+const CORNER_TOP_RIGHT: char = '┐';
+const CORNER_BOTTOM_LEFT: char = '└';
+const CORNER_BOTTOM_RIGHT: char = '┘';
+const SIDE_GLYPH: char = '│';
+
 /// One drawn row of the card. The layout is built as a list of these once and then
 /// drawn from it, the verdict's own shape — there is nothing to hit-test here, because
 /// the card carries no control: *every* press dismisses it.
 enum Row {
-    /// The bounding rule, edge to edge.
-    Rule,
+    /// The box's top edge — corners and the rule between them.
+    Top,
+    /// Its bottom edge.
+    Bottom,
     /// A blank row of card — the surface, with the board hidden behind it.
     Blank,
     /// A row of text at `indent`, in its own §11.2 category.
@@ -115,7 +132,7 @@ impl Row {
 /// checked against at compile time ([`super::modifier_rows`]).
 fn rows(modifiers: LevelModifiers, intel: usize, modality: InputModality) -> Vec<Row> {
     let mut rows = vec![
-        Row::Rule,
+        Row::Top,
         Row::Blank,
         Row::heading(HEADING, Category::Interest),
         Row::Blank,
@@ -134,7 +151,7 @@ fn rows(modifiers: LevelModifiers, intel: usize, modality: InputModality) -> Vec
     rows.push(Row::Blank);
     rows.push(Row::heading(begin_hint(modality), Category::Ground));
     rows.push(Row::Blank);
-    rows.push(Row::Rule);
+    rows.push(Row::Bottom);
     rows
 }
 
@@ -218,7 +235,9 @@ const _: () = {
 ///
 /// Every row it uses is **cleared first**, so the facility never reads through the
 /// words; rows past the frame's end are dropped, exactly as the verdict and the deployed
-/// log drop their tails.
+/// log drop their tails. Each cleared row then gets its **sides** ([`draw_sides`]), which
+/// is what makes the block one boxed object rather than a horizontal slice out of the
+/// level.
 ///
 /// `intel` is the facility's **whole** console count rather than what is still out: the
 /// card states the objective, not progress against it, and at level start the two are
@@ -238,11 +257,47 @@ pub(super) fn overlay_splash(
         }
         clear_row(grid, y);
         match row {
-            Row::Blank => {}
-            Row::Rule => draw_rule(grid, y),
-            Row::Text(text, category, indent) => draw(grid, *indent, y, text, *category),
+            Row::Blank => draw_sides(grid, y),
+            Row::Top => draw_edge(grid, y, CORNER_TOP_LEFT, CORNER_TOP_RIGHT),
+            Row::Bottom => draw_edge(grid, y, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT),
+            Row::Text(text, category, indent) => {
+                draw(grid, *indent, y, text, *category);
+                draw_sides(grid, y);
+            }
         }
     }
+}
+
+/// Draw one of the box's horizontal edges: the corners, and
+/// [`RULE_GLYPH`](super::RULE_GLYPH) between them.
+///
+/// The rule is drawn first and the corners over its ends, so the edge is exactly the row
+/// [`draw_rule`] already draws with its two outermost cells replaced — one width
+/// arithmetic, not two.
+fn draw_edge(grid: &mut Grid, y: u32, left: char, right: char) {
+    draw_rule(grid, y);
+    put(grid, 0, y, left);
+    put(grid, grid.width.saturating_sub(1), y, right);
+}
+
+/// Draw the box's verticals on row `y` — the first and last cell of the card.
+///
+/// They cost the content nothing: every column of the card is drawn from
+/// [`SECTION_INDENT`](help::SECTION_INDENT) or further in, and the modifier captions are
+/// bounded to leave the last column free (the one-cell right margin every card keeps), so
+/// the sides land on cells no row was using.
+///
+/// A grid too narrow to hold both — only a hand-built test state gets that small — draws
+/// the one it can, which is [`put`]'s clamp rather than a rule of its own.
+fn draw_sides(grid: &mut Grid, y: u32) {
+    put(grid, 0, y, SIDE_GLYPH);
+    put(grid, grid.width.saturating_sub(1), y, SIDE_GLYPH);
+}
+
+/// Write one frame glyph, in the System tan the overlay family's rule already wears —
+/// the card's frame is furniture, and the words on it are what carry the §11.2 meaning.
+fn put(grid: &mut Grid, x: u32, y: u32, glyph: char) {
+    draw(grid, x, y, &glyph.to_string(), Category::System);
 }
 
 #[cfg(test)]

@@ -2542,19 +2542,30 @@ small block is laid over the middle of the map — the same overlay the verdict 
 exactly two sections: the **objective**, and the **modifiers** bending this run (§12.6).
 
 ```
-────────────────────────────────────────
-  THE JOB
-
-  OBJECTIVE
-   Take all 3 intel
-   Get back out through your tunnel
-
-  MODIFIERS
-   Intel to exit: all of it
-
-  any key to begin
-────────────────────────────────────────
+┌──────────────────────────────────────┐
+│                                      │
+│ THE JOB                              │
+│                                      │
+│ OBJECTIVE                            │
+│  Take all 3 intel                    │
+│  Get back out through your tunnel    │
+│                                      │
+│ MODIFIERS                            │
+│  Intel to exit: all of it            │
+│                                      │
+│ any key to begin                     │
+│                                      │
+└──────────────────────────────────────┘
 ```
+
+**It is a box, walled on all four sides**, and that is a fix rather than decoration. Two
+horizontal rules alone — the verdict's own bounding, which reads correctly on a *finished*
+board — made the first frame of a run look **cut in half**: board above, board below, and
+nothing at a glance to say the middle was one object laid on top rather than the facility
+itself. Sides and corners say *dialog*. The walls cost the words nothing: every row of the
+card is drawn from the panels' standing indents, and the modifier captions already leave
+the last column free (the one-cell right margin every card keeps), so the frame lands on
+cells no row was using.
 
 It is a **reduced** Level info tab, and what it leaves out is as deliberate as what it
 carries: no level-seed token and no copy control — those are the run's setup, read and
