@@ -100,11 +100,16 @@ pub enum HelpNav {
     /// the run as a replay link. `Enter`/`Space`, the confirm keys §11.6 reserves — free
     /// here, because a modal panel has nothing else to confirm.
     Activate,
-    /// Copy this run's **level-seed token** to the system clipboard (§13.1/#353) —
-    /// the keyboard half of the Level info tab's `copy [c]` control, so the panel is
+    /// Copy a **link to this run's level** to the system clipboard (§13.1/#353/#572)
+    /// — the keyboard half of the Level info tab's `copy [c]` control, so the panel is
     /// reachable without a pointer and so is this (§11.6). The shell performs the
     /// write and mirrors the control exactly: a run whose panel draws no token has
     /// nothing to copy, and the key does nothing there, as the absent control does.
+    ///
+    /// The panel **displays** the token and **copies** the link, which is not an
+    /// inconsistency but the split #572 settled: eighteen letters are what a character
+    /// grid can print and a human can read back off a screen, and a URL is what the
+    /// person on the other end can actually open.
     CopySeed,
 }
 
@@ -163,7 +168,7 @@ pub enum MenuNav {
     Prev,
     /// Move the selection to the next enabled entry, wrapping.
     Next,
-    /// Choose the selected entry — start the run, or open the seed prompt. A
+    /// Choose the selected entry — start the run, or open the screen it names. A
     /// disabled entry (§14 v2/v3) does nothing.
     Activate,
     /// Step back out of a sub-screen to the entry list. On the list itself there
@@ -205,9 +210,10 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
         "Enter" | " " => Some(MenuNav::Activate),
         "Escape" => Some(MenuNav::Back),
         // The theme toggle reaches every modal screen (#189), here as on the help
-        // panel. The seed prompt is where it stops: `n` is an ordinary letter of a
-        // level-seed token, and a key that retyped the screen's colours mid-token
-        // would be a trap — the shell holds it back there (`apply_menu_nav`).
+        // panel. It used to stop at the seed prompt, where `n` was an ordinary letter
+        // of a token being typed; with typing gone (§13.1/#572) there is no screen on
+        // the menu that wants `n` for anything else, and the shell's exception went
+        // with the prompt.
         "n" => Some(MenuNav::ToggleTheme),
         _ => None,
     }

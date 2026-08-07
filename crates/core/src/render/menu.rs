@@ -5,11 +5,10 @@
 //! warning is about exactly this kind of screen: *"everything outside the loop was
 //! scaffolding around an unanswered question. Don't do that again."* So the menu
 //! offers the things that actually start a run — **Quick play** (a fresh seeded
-//! facility off the clock), **Seed play** (the level-seed token re-entry that used to be
-//! the always-on seed bar, §13.1/#110/#245), since #208 **Story mode**, which opens
-//! the campaign map (§14 v3), since #514 **Continue run**, which resumes the autosaved
-//! run and is listed only when there is one (§12.5), and since #513 **Options**, which
-//! opens the global settings screen (§14 v2, [`super::settings`]).
+//! facility off the clock), since #208 **Story mode**, which opens the campaign map
+//! (§14 v3), since #514 **Continue run**, which resumes the autosaved run and is
+//! listed only when there is one (§12.5), and since #513 **Options**, which opens the
+//! global settings screen (§14 v2, [`super::settings`]).
 //!
 //! Story mode and Options were both inert entries until the thing behind them existed,
 //! which is the shape this screen is meant to grow in: an entry becomes live when what
@@ -17,16 +16,21 @@
 //! the tag and the dim ink stay, because the next entry to be sketched here will want
 //! them, and the selection walk still steps over a disabled row.
 //!
+//! **A *Seed play* row stood here until #572**, opening a sub-screen whose whole
+//! content was a DOM text box to type a level-seed token into. Sharing is the URL now
+//! (§13.1): the Level info tab's `copy [c]` hands over a `…#seed=<token>` link, which
+//! the recipient opens rather than transcribes, so the entry, its screen and the last
+//! piece of DOM UI in the game went together.
+//!
 //! **Drawn in the character grid** (§11.1), like the help card ([`super::help`]) and
-//! for the same reasons: the whole screen is a pure function of its view state, so
-//! it prints as text and every row is pinned by a native test. Only the seed *text
-//! box* is DOM — a canvas cannot raise a phone's keyboard — and it floats in the
-//! band this screen deliberately leaves blank (see [`render_menu`]).
+//! for the same reasons: the whole screen is a pure function of its view state, so it
+//! prints as text and every row is pinned by a native test. Since #572 there is **no
+//! exception** — nothing on the title screen is markup.
 //!
 //! **Nothing here traps a touch user** (§11.6 — the failure the old options dialog
 //! shipped: a screen that could be opened but not closed by touch). Every entry row
-//! is a full-width tap target ([`menu_hit`]), the seed prompt carries its own DOM
-//! *back* button beside the *play* one, and the footer always spells out the way on.
+//! is a full-width tap target ([`menu_hit`]), and the footer always spells out the
+//! way on.
 //!
 //! The footer's own `theme [n]` control left with #513: the theme is a setting now, and
 //! **Options** is the row that opens the screen it lives on — a second door to it, one
@@ -37,10 +41,9 @@ use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 use crate::difficulty::Difficulty;
 
-/// The entries on the main menu, top to bottom. Four start a run today — the
-/// interrupted one, quick play, a shared level, and the campaign;
-/// [`Options`](Self::Options) is the one §14 v2 surface still listed as *later* and
-/// inert ([`enabled`]).
+/// The entries on the main menu, top to bottom. Three start a run today — the
+/// interrupted one, quick play, and the campaign — and [`Options`](Self::Options)
+/// opens the §14 v2 settings screen.
 ///
 /// [`ContinueRun`](Self::ContinueRun) is the one entry that is not always *listed*:
 /// it appears only when the shell found a save to resume ([`MenuUi::continue_run`]),
@@ -56,9 +59,6 @@ pub enum MenuEntry {
     /// selection, so the common case is one keypress (or one tap) from a load.
     #[default]
     QuickPlay,
-    /// Enter a level-seed token and play the run it names (§13.1/#110/#245) —
-    /// what the always-on seed bar used to do, now behind a menu entry.
-    SeedPlay,
     /// The **global settings screen** (§14 v2/#513, [`super::settings`]): the colour
     /// theme (#189), the renderer (#460), and — in a debug session — the §12.6
     /// switches. Deliberately *not* the level-options dialog
@@ -77,10 +77,9 @@ impl MenuEntry {
     /// It is the **full** list, not the drawn one: [`MenuUi::entries`] filters it to
     /// what this screen is currently showing, and every row measurement, hit test and
     /// selection walk goes through that rather than through this.
-    pub const ALL: [MenuEntry; 5] = [
+    pub const ALL: [MenuEntry; 4] = [
         MenuEntry::ContinueRun,
         MenuEntry::QuickPlay,
-        MenuEntry::SeedPlay,
         MenuEntry::Options,
         MenuEntry::StoryMode,
     ];
@@ -90,7 +89,6 @@ impl MenuEntry {
         match self {
             MenuEntry::ContinueRun => "Continue run",
             MenuEntry::QuickPlay => "Quick play",
-            MenuEntry::SeedPlay => "Seed play",
             MenuEntry::Options => "Options",
             MenuEntry::StoryMode => "Story mode",
         }
@@ -109,7 +107,6 @@ impl MenuEntry {
         match self {
             MenuEntry::ContinueRun
             | MenuEntry::QuickPlay
-            | MenuEntry::SeedPlay
             | MenuEntry::Options
             | MenuEntry::StoryMode => true,
         }
@@ -119,10 +116,10 @@ impl MenuEntry {
 /// Which of the title screen's surfaces is showing (#268).
 ///
 /// The menu is a small stack of full screens rather than one screen with flags: an
-/// enum makes "the entry list and the seed prompt at once" unrepresentable, where a
-/// second `bool` beside the first would make it merely unlikely. Every surface is
-/// drawn by [`render_menu`], hit-tested by [`menu_hit`], and reached and left through
-/// the shell's one [`MenuNav`](crate::MenuNav) handler.
+/// enum makes "the entry list and a dialog at once" unrepresentable, where a second
+/// `bool` beside the first would make it merely unlikely. Every surface is drawn by
+/// [`render_menu`], hit-tested by [`menu_hit`], and reached and left through the
+/// shell's one [`MenuNav`](crate::MenuNav) handler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MenuScreen {
     /// The **entry list** — the title block and the listed entries
@@ -130,10 +127,6 @@ pub enum MenuScreen {
     /// is nowhere further back from it.
     #[default]
     Entries,
-    /// The **seed prompt** — the sub-screen [`MenuEntry::SeedPlay`] opens, where the
-    /// DOM text box takes a level-seed token. Escape (or the box's own *back* button)
-    /// returns to the list.
-    SeedPrompt,
     /// The **level options** dialog (§14 v2/#298) — the sub-screen
     /// [`MenuEntry::QuickPlay`] opens, carrying the difficulty slider and the play
     /// control. A *pre-run* dialog, deliberately not the (still inert)
@@ -274,14 +267,9 @@ impl MenuUi {
             .unwrap_or(here)
     }
 
-    /// Whether the seed prompt is the surface showing — the one question most of this
-    /// module asks of [`screen`](Self::screen), kept as a name rather than a
+    /// Whether the level-options dialog is the surface showing — the one question
+    /// this module asks of [`screen`](Self::screen), kept as a name rather than a
     /// comparison repeated at a dozen sites.
-    fn seed_prompt(self) -> bool {
-        self.screen == MenuScreen::SeedPrompt
-    }
-
-    /// Whether the level-options dialog is the surface showing.
     fn level_options(self) -> bool {
         self.screen == MenuScreen::LevelOptions
     }
@@ -304,22 +292,6 @@ const TAGLINE: &str = "one tunnel in, the same tunnel out";
 /// strip with prose on the left and the control on the right, the same on this screen
 /// as on the help panel. A test pins that the two never meet.
 const MENU_FOOTER: &str = "↑↓ choose · Enter/tap plays";
-
-/// The footer of the seed prompt — the way back out, spelled out beside the box's
-/// own *back* button, so the sub-screen is never a dead end (§11.6's no-trap rule).
-const SEED_FOOTER: &str = "Esc or [back] returns to the menu";
-
-/// The heading and the two instruction lines of the seed prompt
-/// (§13.1/#110/#245/#333). The second line says what a token *looks* like, so a
-/// player who has one in hand can tell at a glance whether they have the whole thing
-/// — it is a fixed 18 letters, and a truncated paste is the likely mistake. It
-/// replaces the bare-seed promise that used to stand here: a number named a preset
-/// rather than a run, and no longer decodes at all (#333).
-const SEED_HEADING: &str = "SEED PLAY";
-const SEED_LINES: [&str; 2] = [
-    "type or paste a level-seed token",
-    "18 letters, like prbjdokbxcqgjnrnco",
-];
 
 /// The footer of the level-options dialog. It names the slider's keys, the way **on**
 /// and the way **back** — §11.6's no-trap rule, which is the exact failure the old
@@ -388,11 +360,6 @@ fn rows(ui: MenuUi, height: u32) -> (u32, u32, u32) {
     (title, title + 2, title + 6)
 }
 
-/// Where the seed prompt's title, tagline and heading sit — the title **near the
-/// top**, not centred as on the list. The prompt's text has to clear the middle of
-/// the screen for the DOM box that floats there, and the centred block does not: on
-/// the v1 board its title row and the heading would land on each other. Moving the
-/// title up is what buys the clear band, so the two are one decision, here.
 /// The level-options dialog's rows, as offsets from its title row. Named rather than
 /// arithmetic at the draw sites, because the drawing and [`menu_hit`] both walk them
 /// and a tap must land on exactly the row that was drawn.
@@ -414,8 +381,7 @@ const OPTIONS_BLOCK_ROWS: u32 =
     OPTIONS_FIRST_CONTROL + (OptionsControl::ALL.len() as u32 - 1) * ENTRY_SPACING + 1;
 
 /// The level-options dialog's title row; every other row is a named offset from it.
-/// The block is centred like the entry list's and, unlike the seed prompt's, needs no
-/// clear band — the dialog is glyphs all the way down, with no DOM floating over it.
+/// The block is centred like the entry list's, and every row of it is glyphs.
 fn options_title_row(height: u32) -> u32 {
     (height.saturating_sub(OPTIONS_BLOCK_ROWS) / 2).max(1)
 }
@@ -455,11 +421,6 @@ fn stop_hit(width: u32, x: u32) -> Option<Difficulty> {
     Difficulty::ALL
         .get(index.min(Difficulty::ALL.len() - 1))
         .copied()
-}
-
-fn seed_rows(height: u32) -> (u32, u32, u32) {
-    let title = (height / 12).max(1);
-    (title, title + 2, title + 5)
 }
 
 /// The screen row the listed entry at `index` is drawn on — the counterpart of
@@ -509,7 +470,7 @@ fn draw_centred(grid: &mut Grid, y: u32, text: &str, category: Category) {
 /// [`menu_nav_for_key`](crate::menu_nav_for_key).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MenuHit {
-    /// An entry row — choose it (start the run, or open the seed prompt).
+    /// An entry row — choose it (start the run, or open the screen it names).
     Entry(MenuEntry),
     /// A **slider stop** on the level-options dialog (#298) — set the difficulty to
     /// that position. A stop is set by tapping it directly rather than by tapping a
@@ -538,17 +499,11 @@ pub enum MenuHit {
 /// drawn on. Every control it has is reachable by finger, which is the half of §11.6
 /// the old options dialog never shipped.
 ///
-/// The seed prompt answers `None` everywhere — its controls are the DOM box's own
-/// *play* and *back* buttons, which handle their taps before the board sees them.
-///
 /// **No footer control** since #513: the `theme [n]` button that used to sit in the
 /// row's right corner went with the setting, to the options screen the *Options* entry
-/// opens. The row is prose again, on all three surfaces.
+/// opens. The row is prose again, on both surfaces.
 #[must_use]
 pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<MenuHit> {
-    if ui.seed_prompt() {
-        return None;
-    }
     if ui.level_options() {
         if y == options_title_row(height) + OPTIONS_TRACK_ROW {
             return stop_hit(width, x).map(MenuHit::Difficulty);
@@ -572,37 +527,34 @@ pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<M
 ///
 /// One screen per [`MenuScreen`]:
 ///
-/// - the **entry list** — the title block centred, the four entries with the
+/// - the **entry list** — the title block centred, the listed entries with the
 ///   selection marker, and the footer that names both ways to choose;
-/// - the **seed prompt** — the same title, moved up the screen, over the
-///   instructions for a level-seed token, with **the middle band left deliberately
-///   blank**. That band is where the shell's DOM text box floats (a canvas cannot
-///   raise a phone's keyboard, so the box has to be real markup); leaving the space
-///   empty rather than aligning glyphs to it means the two never fight over a row,
-///   at any fit.
 /// - the **level options** dialog (#298) — the same title block centred, the
-///   difficulty slider, and the *Play* and *Back* controls. All glyphs: nothing of it
-///   is DOM, so unlike the seed prompt it needs no clear band.
+///   difficulty slider, and the *Play* and *Back* controls.
+///
+/// Both are glyphs all the way down. A third surface — the seed prompt — stood here
+/// until #572 and was the one exception, drawn around a blank band for a DOM text
+/// box; sharing is the URL now (§13.1), so the exception went with the box.
 ///
 /// Bounds are clamped, never asserted (like the help card): on a board too small
 /// for a row, that row shows what fits and stops.
 pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     let mut grid = blank_grid(width, height);
-    let (title_row, tagline_row, heading_row) = match ui.screen {
-        MenuScreen::SeedPrompt => seed_rows(height),
+    let (title_row, tagline_row) = match ui.screen {
         MenuScreen::LevelOptions => {
             let title = options_title_row(height);
-            (title, title + OPTIONS_TAGLINE, title + OPTIONS_HEADING_ROW)
+            (title, title + OPTIONS_TAGLINE)
         }
-        MenuScreen::Entries => rows(ui, height),
+        MenuScreen::Entries => {
+            let (title, tagline, _) = rows(ui, height);
+            (title, tagline)
+        }
     };
 
     draw_centred(&mut grid, title_row, TITLE, Category::Interest);
     draw_centred(&mut grid, tagline_row, TAGLINE, Category::Ground);
 
-    if ui.seed_prompt() {
-        draw_seed_prompt(&mut grid, heading_row);
-    } else if ui.level_options() {
+    if ui.level_options() {
         draw_level_options(&mut grid, height, ui);
     } else {
         let column = entry_column(ui, width);
@@ -628,7 +580,6 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
 
     let footer_row = height.saturating_sub(1);
     let footer = match ui.screen {
-        MenuScreen::SeedPrompt => SEED_FOOTER,
         MenuScreen::LevelOptions => OPTIONS_FOOTER,
         MenuScreen::Entries => MENU_FOOTER,
     };
@@ -755,20 +706,6 @@ fn control_column(width: u32) -> u32 {
     centre(width, widest).saturating_sub(MARKER.chars().count() as u32)
 }
 
-/// Draw the seed prompt's heading and instructions from `heading` down, high enough
-/// on the screen that the band around the **middle** stays clear for the DOM text box
-/// that floats there (see [`render_menu`]). The box is centred in the viewport and the
-/// canvas is centred in the viewport too, so the middle of the grid is where it lands
-/// at every fit — the one row-level coupling between the two, kept as slack rather
-/// than arithmetic, and asserted by
-/// `the_seed_prompt_instructs_and_keeps_the_middle_clear` below.
-fn draw_seed_prompt(grid: &mut Grid, heading: u32) {
-    draw_centred(grid, heading, SEED_HEADING, Category::System);
-    for (i, line) in SEED_LINES.iter().enumerate() {
-        draw_centred(grid, heading + 2 + i as u32, line, Category::Neutral);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,14 +731,6 @@ mod tests {
         MenuUi {
             continue_run: true,
             selected: MenuEntry::ContinueRun,
-            ..MenuUi::default()
-        }
-    }
-
-    /// The seed prompt, at the default selection.
-    fn seed_prompt() -> MenuUi {
-        MenuUi {
-            screen: MenuScreen::SeedPrompt,
             ..MenuUi::default()
         }
     }
@@ -898,7 +827,7 @@ mod tests {
     /// holds its column on every other row).
     #[test]
     fn the_marker_marks_the_selected_entry_and_only_it() {
-        for selected in [MenuEntry::QuickPlay, MenuEntry::SeedPlay] {
+        for selected in [MenuEntry::QuickPlay, MenuEntry::Options] {
             let grid = render_menu(W, H, menu(selected));
             let rows = grid.to_text();
             let marked: Vec<usize> = rows
@@ -974,9 +903,8 @@ mod tests {
     #[test]
     fn selection_walks_the_live_entries_and_wraps() {
         let at = |selected| menu(selected);
-        assert_eq!(at(MenuEntry::QuickPlay).next_entry(), MenuEntry::SeedPlay);
         assert_eq!(
-            at(MenuEntry::SeedPlay).next_entry(),
+            at(MenuEntry::QuickPlay).next_entry(),
             MenuEntry::Options,
             "the Options entry is walked onto now that it opens a screen",
         );
@@ -986,7 +914,7 @@ mod tests {
             MenuEntry::QuickPlay,
             "next past the last enabled entry wraps to the first",
         );
-        assert_eq!(at(MenuEntry::SeedPlay).prev_entry(), MenuEntry::QuickPlay);
+        assert_eq!(at(MenuEntry::Options).prev_entry(), MenuEntry::QuickPlay);
         assert_eq!(
             at(MenuEntry::QuickPlay).prev_entry(),
             MenuEntry::StoryMode,
@@ -1037,7 +965,6 @@ mod tests {
             vec![
                 MenuEntry::ContinueRun,
                 MenuEntry::QuickPlay,
-                MenuEntry::SeedPlay,
                 MenuEntry::Options,
                 MenuEntry::StoryMode,
             ],
@@ -1088,11 +1015,7 @@ mod tests {
     /// So every cell of the row is inert, and the row is prose alone.
     #[test]
     fn the_footer_row_is_prose_and_carries_no_control() {
-        for ui in [
-            MenuUi::default(),
-            seed_prompt(),
-            options(Difficulty::Standard),
-        ] {
+        for ui in [MenuUi::default(), options(Difficulty::Standard)] {
             for x in 0..W {
                 assert_eq!(
                     menu_hit(W, H, ui, x, H - 1),
@@ -1124,60 +1047,35 @@ mod tests {
         );
     }
 
-    /// The token the prompt shows as an example is **a real one** — it decodes. A
-    /// sample that had drifted out of the format would be worse than no sample: it is
-    /// the one token a new player is certain to try, and the shape they will measure
-    /// their own paste against. This fails the moment the format moves, which is the
-    /// prompt asking to be rewritten (#333).
-    #[test]
-    fn the_example_token_in_the_prompt_actually_decodes() {
-        let example = SEED_LINES[1]
-            .rsplit(' ')
-            .next()
-            .expect("the line ends in the example");
-        assert_eq!(example.len(), crate::level_seed::TOKEN_LEN);
-        assert!(
-            crate::LevelSeed::decode(example).is_some(),
-            "the prompt's example token no longer decodes: {example}",
-        );
-    }
-
-    /// The seed prompt (§13.1/#110/#245/#333) says what to type, shows the shape of a
-    /// token so a truncated paste is obvious, and — critically — leaves the **middle
-    /// band blank** for the DOM text box that floats there. A glyph drawn into that
-    /// band would sit under the box.
+    /// **Nothing on the title screen is a seed prompt any more** (§13.1/#572). The
+    /// entry that opened one is gone, no surface is drawn around a blank band for a
+    /// DOM text box, and the two screens that remain are both glyphs — the property
+    /// the shell's own `the_page_carries_no_dom_ui` pins from the markup's side.
     ///
-    /// Each row is matched **whole**, not by `contains`: the first cut of this screen
-    /// centred its title exactly where the heading went, and the two drew over each
-    /// other into `I N SEED PLAY O N` — which a substring check reads as both lines
-    /// present and correct.
+    /// It is asserted over the *screens*, not over the deleted names: what matters is
+    /// that no surface exists whose content is a hole for something else to fill.
     #[test]
-    fn the_seed_prompt_instructs_and_keeps_the_middle_clear() {
-        let ui = seed_prompt();
-        let rows = render_menu(W, H, ui).to_text();
-        let (title, tagline, heading) = seed_rows(H);
-        let row = |y: u32| rows[y as usize].trim().to_string();
-
-        assert_eq!(row(title), TITLE);
-        assert_eq!(row(tagline), TAGLINE);
-        assert_eq!(row(heading), SEED_HEADING);
-        for (i, line) in SEED_LINES.iter().enumerate() {
-            assert_eq!(row(heading + 2 + i as u32), *line);
-        }
-        // Nothing of the entry list survives into the prompt.
-        let text = rows.join("\n");
-        for entry in MenuEntry::ALL {
+    fn no_surface_is_drawn_around_a_hole_for_markup() {
+        for ui in [
+            MenuUi::default(),
+            resumable(),
+            options(Difficulty::Standard),
+        ] {
+            let rows = render_menu(W, H, ui).to_text();
+            let drawn = rows.iter().filter(|r| !r.trim().is_empty()).count();
             assert!(
-                !text.contains(entry.label()),
-                "{entry:?} still shows on the seed prompt:\n{text}",
+                drawn >= 4,
+                "{:?} draws almost nothing — a screen with a hole in it:\n{}",
+                ui.screen,
+                rows.join("\n"),
             );
         }
-        let middle = H / 2;
-        for y in middle - 3..=middle + 3 {
+        // No entry names a prompt to type a token into: sharing is the URL, and the
+        // token is displayed on the Level info tab rather than entered anywhere.
+        for entry in MenuEntry::ALL {
             assert!(
-                row(y).is_empty(),
-                "row {y} must stay blank for the DOM seed box, found: {:?}",
-                row(y),
+                !entry.label().to_lowercase().contains("seed"),
+                "{entry:?} still offers seed entry",
             );
         }
     }
@@ -1198,20 +1096,21 @@ mod tests {
         assert!(first > tagline, "the entries sit below the title block");
     }
 
-    /// §11.6's no-trap rule, on the screen itself: both footers name the way on —
-    /// the list says how to choose (by key *and* by tap), the prompt says how to get
-    /// back. A player who reaches either screen can always read their way out of it.
+    /// §11.6's no-trap rule, on the screen itself: both footers name the way on — the
+    /// list says how to choose (by key *and* by tap), the dialog says how to set the
+    /// slider and how to get back. A player who reaches either screen can always read
+    /// their way out of it.
     #[test]
     fn every_screen_spells_out_the_way_on() {
         let list = text_of(&render_menu(W, H, MenuUi::default()));
         assert!(list.contains(MENU_FOOTER), "{list}");
-        let prompt = text_of(&render_menu(W, H, seed_prompt()));
-        assert!(prompt.contains(SEED_FOOTER), "{prompt}");
+        let dialog = text_of(&render_menu(W, H, options(Difficulty::Standard)));
+        assert!(dialog.contains(OPTIONS_FOOTER), "{dialog}");
     }
 
     /// The level-options dialog's rows, matched **whole** (#298) — the same discipline
-    /// the seed prompt's test keeps, and for the same reason: the first cut of that
-    /// screen drew its title and heading over each other into `I N SEED PLAY O N`,
+    /// the retired seed prompt's test kept, and for the same reason: the first cut of
+    /// that screen drew its title and heading over each other into `I N SEED PLAY O N`,
     /// which a `contains` check reads as both lines present and correct. This screen
     /// stacks seven drawn rows in one block, so it has more ways to collide, not fewer.
     #[test]
@@ -1470,8 +1369,6 @@ mod tests {
         for (w, h) in [(1, 1), (8, 4), (12, 7)] {
             let grid = render_menu(w, h, MenuUi::default());
             assert_eq!((grid.width(), grid.height()), (w, h));
-            let seeded = render_menu(w, h, seed_prompt());
-            assert_eq!((seeded.width(), seeded.height()), (w, h));
             // The dialog's track is wider than any of these boards, so its stops all
             // clamp to the left edge rather than drawing off it.
             for position in Difficulty::ALL {

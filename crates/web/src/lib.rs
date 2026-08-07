@@ -118,9 +118,10 @@ pub(crate) fn new_run(level: &LevelSeed, debug: DebugModifiers) -> Result<State,
 /// level is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
 /// from the URL when a `…#seed=<token>` link was shared, from a baked global in a
 /// seed-locked artifact, and otherwise off the clock ([`seed`]). It is the whole
-/// reproducible config `(seed, modifiers, abilities)` (#245), re-enterable through
-/// the menu's seed prompt ([`menu`]) as a compact level-seed token — the
-/// seed-sharing loop (§13.1/#110/#244).
+/// reproducible config `(seed, modifiers, abilities)` (#245), carried as a compact
+/// level-seed token — and since #572 the URL is the *only* way one comes back in: the
+/// help panel copies a link, and there is nothing anywhere to type a token into
+/// (§13.1/#110/#244).
 ///
 /// **Where a load lands** (#268): a load that was *told* which level to play — a
 /// shared link, a baked artifact, a replay — boots straight into it, because the
@@ -240,7 +241,7 @@ pub fn start() -> Result<(), JsValue> {
     tiles::install(&game)?;
     if game.borrow().replay.is_some() {
         // A replay is a pure view: only the scrub pump is wired, never the live
-        // pumps or the seed bar — so the gesture maps cannot collide (§11.6).
+        // pumps — so the gesture maps cannot collide (§11.6).
         replay::install(&document, &game)?;
     } else {
         input::install_input(&document, &game)?;
@@ -315,7 +316,7 @@ struct Game {
     ui: ScreenUi,
     /// The level the current run booted from (§12.4/#245) — the shell's, not the
     /// core's: the whole reproducible config `(seed, modifiers, abilities)`. Held so
-    /// the seed bar can show its [level-seed token](LevelSeed::encode) and a
+    /// the help panel can show its [level-seed token](LevelSeed::encode) and a
     /// `…#seed=<token>` link can carry it, modifiers and loadout and all ([`seed`]).
     level: LevelSeed,
     /// The replay being played back, or `None` in ordinary live play (#197). When
@@ -413,10 +414,6 @@ impl Game {
             cell_h: CELL_H * scale * dpr,
             font: (CELL_H - 2.0) * scale * dpr,
         };
-        // Tell the page how big a glyph is now (in CSS pixels, so the same number the
-        // stylesheet works in): the seed box types itself at the board's own size
-        // rather than a fixed one that would tower over a small fit ([`menu`]).
-        menu::set_glyph_size((CELL_H - 2.0) * scale);
         self.draw();
     }
 

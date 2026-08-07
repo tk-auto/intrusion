@@ -167,9 +167,9 @@ python3 .claude/skills/artifact-build/assemble.py \
 A bare number is **not** accepted (#333): it named the build's quick-play preset
 rather than a run, so an artifact baked from one drifted every time it was rebuilt.
 
-To get the token for a config you want, encode a `LevelSeed` in a throwaway test or
-read it off the seed bar / `#seed=` URL of a running build — `assemble.py` bakes it
-verbatim and the core validates it. Smoke-verify and publish as usual (§§4–5). This
+To get the token for a config you want, encode a `LevelSeed` in a throwaway test, read
+it off the help panel's Level info tab, or take it out of the `#seed=` URL of a running
+build — `assemble.py` bakes it verbatim and the core validates it. Smoke-verify and publish as usual (§§4–5). This
 is what you hand back when the ask is "let me play the seed the bot flagged" (or "…
 with cones shown"): **one artifact per level** — publish the locked build to *its own*
 URL, named `intrusion-<ticket>-<seed>-<iteration>` (a matching `--title`, e.g.
@@ -183,10 +183,12 @@ token and all.
 is the only accepted form (#333) — a bare `?seed=8371` no longer decodes and falls to
 the menu. Hand this form over only for the live Pages URL, never for an artifact.
 
-> **The on-page seed box is hidden for now** (it sat over the board's top-left). The
-> wiring is intact behind one CSS rule in `web/index.html`, so levels currently come
-> from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
-> any level-seed token live and this section's "type it in" path returns.
+> **There is no on-page seed box, and there is not meant to be one** (#572). Sharing
+> is the URL (§13.1): a level reaches a build from `--seed` at bake time or from the
+> page's own `#seed=` fragment, and the help panel's `copy [c]` writes a link rather
+> than a token so the round trip needs no typing. `web/index.html` carries no
+> interactive markup at all — a native test pins that — so don't add a box back to make
+> a preview easier to drive; bake the level or hand over the link.
 
 ## 6b. The Debug tab, and lifting the fog (`--debug reveal`, §12.6/#459)
 
