@@ -21,7 +21,8 @@
 //!
 //! # What it deliberately is not
 //!
-//! Not a screen. §8.4 says build the targeting up front and reuse it, and the ability
+//! Not a screen. §8.4 says an ability is answered by one keypress, through one seam, and
+//! the ability
 //! bar is already a four-slot selection surface with a digit, a mnemonic letter and a
 //! tap hit-test all resolving through one seam (`ability_in_slot`). So the exchange is
 //! **drawn on the bar**, in the same four slots, and the keys that fire an ability fire

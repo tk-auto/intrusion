@@ -52,9 +52,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ability::{
-    AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
-};
+use crate::ability::{AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout};
 use crate::alert::{Alert, AlertReadout, AlertTrigger, AlertTuning};
 use crate::body::Body;
 
@@ -76,7 +74,6 @@ use crate::radio;
 use crate::region::{DoorCell, DoorId, RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::status::MessageHistory;
-use crate::targeting::Targeting;
 use crate::verdict::{Ending, RunStats, Verdict};
 use crate::vision::{
     field_of_view_with_peek, GuardSight, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
