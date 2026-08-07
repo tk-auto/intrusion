@@ -77,6 +77,19 @@ pub(super) enum Aimed {
     /// shot is resolved and handed over *whatever* it found, and a miss is paid for in
     /// full ([`fire_dart`](State::fire_dart)).
     Dart(DartShot),
+    /// The field a **Repel** would stamp (§7.6/§8.3/#554) — the disc, measured where the
+    /// press happened.
+    ///
+    /// The second arm that is never the [`Err`] side of anything, and it joins
+    /// [`Dart`](Aimed::Dart) on a related argument rather than by oversight (§8.4). The
+    /// ability is **terrain, not a detector**: the only precondition worth asking would be
+    /// *"is there a guard near enough for this to be worth it?"*, and refusing on that —
+    /// or greying the bar entry on it, which answers it every frame for free — would hand
+    /// the player a proximity read the §9 channels do not give them. So the field goes
+    /// down wherever it is pressed, over empty floor as readily as in front of a chase,
+    /// and costs its turn and its lockout either way (§8.3's False Call reasoning, and
+    /// #554 asks for it by name).
+    Repel(EffectArea),
     /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
     /// the player's own, because you let it go from your hands.
     ///
@@ -199,6 +212,13 @@ impl State {
         // all.
         if id == AbilityId::PierceWall {
             return self.bore_target().map(Aimed::Bore).map_err(Refused::Bore);
+        }
+        // The field asks for **nothing** (§7.6/§8.3/#554) — see [`Aimed::Repel`]. It sits
+        // beside the dart above rather than among the refusing arms below, so the ladder
+        // read top to bottom names its two always-fire abilities together and an edit that
+        // wanted to add a precondition to either has to argue with the arm's own doc first.
+        if declares(id, Effect::Repel) {
+            return Ok(Aimed::Repel(self.repel_area()));
         }
         if declares(id, Effect::SealDoors) {
             let doors = self.lockdown_doors();

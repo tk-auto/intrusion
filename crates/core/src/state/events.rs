@@ -450,6 +450,21 @@ pub enum Event {
     /// so the footprint the flash paints is the very object the daze was computed
     /// from (#308/#324).
     ConfusionFired { blast: EffectArea, caught: u32 },
+    /// The player stamped a **Repel** field (§7.6/§8.3/#554): `field` is the disc, taken
+    /// where the press happened, and no guard outside it will step in until the window
+    /// closes. A turn-costing action (§4.4), pushed alongside the activation.
+    ///
+    /// It carries the area itself rather than a recipe for redrawing one, so the wash the
+    /// layer paints is the very object the guards are held by (#338) — and the near line
+    /// can say *where* rather than only *what*.
+    ///
+    /// **It carries no count, and that is the design** (§8.4). Confusion reports what it
+    /// caught because a blast that catches nobody is refused and there is a purchase to
+    /// report; this catches nothing by construction — the field is ground, and a guard
+    /// standing where it lands is not held, moved or even noticed. A number here could
+    /// only be *how many guards are within three cells of me*, which is a detector's
+    /// answer given away by a wall's key (False Call's reasoning, §8.3).
+    RepelFired { field: EffectArea },
     /// A Confusion activation was **refused** because the blast would have caught
     /// nobody (§8.3/#325) — free and nothing changed, like a wall bump, and spending
     /// neither the turn nor the cooldown.
@@ -553,6 +568,14 @@ impl Event {
             | Event::LockdownRefused
             | Event::ConfusionFired { .. }
             | Event::ConfusionMissed
+            // The field is a thing of yours laid on the floor (§8.3/#554) — the same
+            // Owned band as the lockdown it is the open-ground twin of. It is **not**
+            // False Call's Warning below, and the difference is who the report is about:
+            // a forged call says *guards are coming here*, and this says *I put a wall
+            // down*. What the wall then costs arrives through other events entirely — the
+            // sighting, the search, the ring that is waiting when it lifts — and each of
+            // those already wears its own band.
+            | Event::RepelFired { .. }
             // A forged call that *did not go out* is the same quiet band as every other
             // refused press: nothing happened, and the line is teaching a rule. What a
             // call that **did** go out reads as is a different question, answered below.

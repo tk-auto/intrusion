@@ -592,6 +592,15 @@ impl State {
                 .map(|(_, g)| g.pos())
                 .collect();
             blocked.extend_from_slice(&sealed);
+            // A **Repel** field is solid to the route of every guard outside it
+            // (§7.6/§8.3/#554) — the seal's rule with the brush widened from a doorway to
+            // open ground, so a pursuit plans the long way round instead of walking into
+            // ground that will refuse it. Read **per guard**, unlike the seal above,
+            // because the rule is about crossing the boundary rather than about the cells:
+            // a guard already standing inside is bound by nothing and is handed no blocks
+            // at all ([`repel_route_blocks`](State::repel_route_blocks)). Empty on every
+            // turn no field is up, which is nearly all of them.
+            blocked.extend(self.repel_route_blocks(self.guards[i].pos()));
             // §7.7: a chase that ends *this turn* is what calls it in, so the state
             // is read either side of the decision. Chasing is exactly the certain
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
@@ -635,6 +644,24 @@ impl State {
                 continue;
             };
 
+            // **The field refuses the step in** (§7.6/§8.3/#554), and it is asked here —
+            // above the capture, above the door, above everything — because it is the one
+            // rule that decides whether this guard is standing on that cell at all. A
+            // player inside their own disc is behind a wall for exactly as long as it
+            // holds, so a capture resolved first would be capture-is-contact (§4.5) read
+            // off a step the guard was never allowed to take. The route above already
+            // plans around the field, so what arrives here is the arrival the route could
+            // not avoid — a destination inside the disc, or a field stamped under the
+            // guard's feet — and it is a *wait*, never a deadlock: the window ends, and
+            // the guard walks in on the ordinary step the turn after.
+            //
+            // It asks nothing about the guard's state, deliberately (see
+            // [`repels`](State::repels)): Calm, investigating, searching and chasing are
+            // all simply *outside*, and a rule written over moods is one a later mood can
+            // be left out of by accident.
+            if self.repels(self.guards[i].pos(), target) {
+                continue;
+            }
             if target == self.player {
                 // Inside a duct the player is in the crawlspace, not on the floor the
                 // guard walks (§10.7): a duct changes *nothing* guard-facing, so the

@@ -145,13 +145,30 @@ pub enum Verb {
     /// histogram saying the same thing it would have said about the old free neutralise
     /// on day one.
     Dart,
+    /// Stamped a **Repel** field (§7.6/§8.3/#554) —
+    /// [`Event::AbilityActivated`](intrusion_core::Event::AbilityActivated), like every
+    /// other activation, so it counts the **press**. There is no outcome to count instead:
+    /// the field catches nobody by construction, and what it is worth is measured in the
+    /// turns after it rather than in anything that happens on the turn it goes down.
+    ///
+    /// Read it against [`Lockdown`](Verb::Lockdown), which is the row it exists to be
+    /// compared with (#554). The two buy the same thing — a pursuer's detour — and differ
+    /// only in where they work, so a run holding both should press each where the other is
+    /// useless. Two shares that track each other is the §2.3 warning showing up as data:
+    /// one of the pair is dead weight, and the answer is to move them apart on radius and
+    /// window rather than to keep both.
+    ///
+    /// Watch it beside `detections` and `captures` as well. This ability is deliberately
+    /// **not** a cloak, so a share that climbs while captures climb with it is the bot
+    /// telling us the field reads as safety it does not provide.
+    Repel,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 17] = [
+    pub const ALL: [Verb; 18] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -169,6 +186,7 @@ impl Verb {
         Verb::Drone,
         Verb::FalseCall,
         Verb::Dart,
+        Verb::Repel,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -197,6 +215,7 @@ impl Verb {
             AbilityId::Drone => Verb::Drone,
             AbilityId::FalseCall => Verb::FalseCall,
             AbilityId::Dart => Verb::Dart,
+            AbilityId::Repel => Verb::Repel,
             AbilityId::Vision | AbilityId::Saver | AbilityId::Guide => return None,
         })
     }
@@ -257,6 +276,7 @@ impl Verb {
             Verb::Drone => "drone",
             Verb::FalseCall => "false_call",
             Verb::Dart => "dart",
+            Verb::Repel => "repel",
         }
     }
 
@@ -383,7 +403,8 @@ mod tests {
                 "silence_radio",
                 "drone",
                 "false_call",
-                "dart"
+                "dart",
+                "repel"
             ]
         );
         // Each ability activation lands in its own slot.

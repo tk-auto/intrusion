@@ -120,6 +120,20 @@ pub struct EffectArea {
 }
 
 impl EffectArea {
+    /// A footprint built **outside a firing** — for a test that needs to hand an event a
+    /// geometry without standing a whole [`State`] up to fire one (§11.7's near-line fit
+    /// check is the caller, #554).
+    ///
+    /// Crate-internal, and it is not a second firing seam: every area the *game* acts on
+    /// is measured at its own seam ([`confusion_blast`](State::confusion_blast),
+    /// [`lockdown_area`](State::lockdown_area), [`false_call_area`](State::false_call_area),
+    /// [`repel_area`](State::repel_area)) and carried by value from there, which is the
+    /// discipline that keeps the picture and the rule one object.
+    #[cfg(test)]
+    pub(crate) const fn at(centre: Cell, radius: u32) -> Self {
+        Self { centre, radius }
+    }
+
     /// Whether `cell` is inside the footprint — the §6.1 box test, through walls.
     pub fn contains(&self, cell: Cell) -> bool {
         self.centre.sight_distance(cell) <= self.radius
@@ -165,6 +179,7 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
         Effect::Confuse => Some(CONFUSION_RADIUS),
         Effect::SealDoors => Some(LOCKDOWN_RADIUS),
         Effect::FakeCall => Some(FALSE_CALL_RADIUS),
+        Effect::Repel => Some(REPEL_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
         // Reversal (#243) acts on the one cell the player is standing in — the guard
         // has to reach *them* — so it has no footprint to draw either.
@@ -808,6 +823,24 @@ impl State {
                 // would restate the thing they are doing while the player watches them
                 // do it — and would go on claiming an effect over a guard that had long
                 // since finished its search and gone back to its beat.
+                // Repel wears **one** mark, and the one it does not wear is the
+                // interesting half (§8.3/#554). Lockdown flashes its box for a frame and
+                // then marks the doorways it holds, because the box and the state are two
+                // different facts — *this far*, once, and *these ones*, throughout. Here
+                // they are the same fact: the box **is** the wall. So a momentary wash
+                // beside the standing one would draw the same cells twice and teach
+                // nothing the second time.
+                //
+                // Standing, over the very [`EffectArea`] the guards are actually held by,
+                // so the ground the player is playing off and the ground the rule enforces
+                // cannot disagree. It ends with the window, from
+                // [`clear_effect_marks`](Self::clear_effect_marks), on the same teardown
+                // that releases the field itself.
+                Event::RepelFired { field } => self.light_mark(
+                    AbilityId::Repel,
+                    MarkPlace::Cells(field.cells(self.layout.facility())),
+                    MarkLife::Standing,
+                ),
                 Event::FalseCallFired { reach, .. } => self.light_mark(
                     AbilityId::FalseCall,
                     MarkPlace::Cells(reach.cells(self.layout.facility())),

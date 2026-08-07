@@ -2883,6 +2883,95 @@ fn the_debug_reveal_draws_the_whole_level_live() {
     );
 }
 
+/// §8.3/§11.5 (#554): the **Repel** field washes the disc it holds for as long as it
+/// holds it — and **loses to Danger on a shared cell**, which is the one thing about it
+/// that is not negotiable. This ability puts a wash over ground guards are standing next
+/// to, so its cells and a cone's overlap constantly; a wall drawn over the thing that can
+/// kill you is exactly the §11.5 **[SETTLED]** failure, and it would read as *safe here*
+/// over the cell where you are about to be taken.
+#[test]
+fn the_repel_field_washes_its_disc_and_loses_to_danger() {
+    use crate::state::REPEL_RADIUS;
+    use crate::AbilityId;
+    // A guard well to the north, looking south (§7.1's spawn facing): its wedge falls
+    // across most of the disc but not the southern corners, so the two layers genuinely
+    // share cells — which is what makes the precedence question a real one — while leaving
+    // ground for the wash and, behind the player, ground it has never seen.
+    let mut s = state_holding_facing_north(
+        30,
+        30,
+        Cell::new(15, 15),
+        vec![Guard::stationary(Cell::new(16, 6))],
+        AbilityId::Repel,
+    );
+    s.step(Input::Activate(AbilityId::Repel));
+    let field = s.repel_field().expect("the field is up");
+    let g = render(&s);
+    // The overlay's **own** reading (§11.5), not a second derivation of it: the danger
+    // set is the cones the player can see plus the watcher lines, and asserting against
+    // the guard's raw cone would be this test disagreeing with the board about which
+    // cells are red for reasons that have nothing to do with the field.
+    let danger = |cell: Cell| s.in_visible_danger(cell);
+
+    let (mut shared, mut washed) = (0, 0);
+    for y in 0..g.height() {
+        for x in 0..g.width() {
+            let cell = Cell::new(x, y);
+            if !field.contains(cell) {
+                continue;
+            }
+            if danger(cell) {
+                shared += 1;
+                assert_eq!(
+                    g.get(x, y).bg,
+                    Some(Category::Danger),
+                    "{cell:?}: the detection set is never painted over (§11.5)",
+                );
+            } else {
+                washed += 1;
+                assert_eq!(
+                    g.get(x, y).bg,
+                    Some(Category::Effect),
+                    "{cell:?}: and everywhere else the disc is washed",
+                );
+            }
+        }
+    }
+    assert!(shared > 0, "the fixture has the two layers sharing cells");
+    assert!(
+        washed > 0,
+        "…and the rest of the disc is the field's own cyan"
+    );
+    // **The disc reaches through the fog, and leaks nothing with it** (§11.5a/#554). The
+    // field is measured through walls, so most of it lands on ground the player has never
+    // looked at — and the wash is a *background*, so those cells keep exactly the
+    // schematic appearance the fog gives them. What the player learns is how far their own
+    // gadget reached, which is their own knowledge; what the building holds under it is
+    // unchanged.
+    let unseen = field
+        .cells(s.layout().facility())
+        .into_iter()
+        .find(|&cell| !danger(cell) && g.get(cell.x, cell.y).vis == Visibility::Unexplored)
+        .expect("most of a disc measured through walls is ground never looked at");
+    let drawn = g.get(unseen.x, unseen.y);
+    assert_eq!(
+        drawn.vis,
+        Visibility::Unexplored,
+        "behind a north-facing @, and never looked at",
+    );
+    assert_eq!(
+        (drawn.glyph, drawn.bg),
+        (' ', Some(Category::Effect)),
+        "washed, and still as blank as every other unexplored cell",
+    );
+
+    // The control: ground that is neither watched nor walled speaks no background at
+    // all, so the wash above is the field's doing and not the frame's.
+    let elsewhere = Cell::new(15 - REPEL_RADIUS - 3, 15 - REPEL_RADIUS - 3);
+    assert!(!field.contains(elsewhere) && !danger(elsewhere));
+    assert_eq!(g.get(elsewhere.x, elsewhere.y).bg, None);
+}
+
 /// §8.3/§11.5 (#308/#338): the effect layer's **wash**. Firing Confusion washes the
 /// §6.1 box it reached in `Category::Effect` — asserted against the rule's own
 /// [`EffectArea`](crate::EffectArea) rather than a hand-drawn shape, so the picture

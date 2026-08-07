@@ -68,7 +68,10 @@ pages follow:
 A verb measured alone cannot be dominant, so dominance is read from batches holding a
 real three-tech loadout — the §8.3 cap. Two kits cover the six salvaged verbs that share the §8.3 cap of three. Lockdown is
 in neither — a third kit would hold it alone — so the share on its page is a solo one,
-which is the weaker claim and is labelled as such there:
+which is the weaker claim and is labelled as such there; **Repel (#554) is in neither
+either, and it has a kit waiting to be run**: `lockdown,repel` plus a third is the batch
+that answers whether the two route-denial verbs are one press wearing two names (§2.3),
+which is the risk its own ticket filed it under.
 
 ```
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camouflage,decoy,confusion --runs 100 --seed 0 --cap 1000
@@ -113,6 +116,7 @@ to make.
 | Lockdown | cued | [`lockdown.md`](lockdown.md) |
 | False Call | cued, narrowly | [`false-call.md`](false-call.md) |
 | Dart | cued, and shy by construction | [`dart.md`](dart.md) |
+| Repel | cued, on Lockdown's own gates | [`repel.md`](repel.md) |
 | Guide | **none** — passive, and a cue would have to cheat | [`guide.md`](guide.md) |
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
 | Saver | **none** — passive, and deliberately uncued | [`saver.md`](saver.md) |

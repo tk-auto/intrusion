@@ -96,6 +96,7 @@ mod events;
 mod guards;
 mod lockdown;
 mod reinforcements;
+mod repel;
 mod sense;
 mod traversal;
 mod tuning;
@@ -416,6 +417,20 @@ pub struct State {
     /// promptly too. A small set — a player passes through one door at a time — so a
     /// plain `Vec` scan beats a map.
     autodoors_pending: Vec<DoorId>,
+    /// The **Repel** field currently up (§7.6/§8.3/#554), or `None` — the disc of ground
+    /// no guard may step into, stamped where the ability fired and held for its window.
+    ///
+    /// A **snapshot**, which is the load-bearing word: the area is stored as it was
+    /// measured ([`fire_repel`](Self::fire_repel)) and never re-derived from the player, so
+    /// the field does not follow whoever put it down. §4.5's capture-is-contact is
+    /// **[SETTLED]** and a disc centred on a moving player is one no guard could ever reach
+    /// him in — the ability would stop being a §7.6 flight tool and become immunity.
+    ///
+    /// One field at a time, dropped whole when the window ends either way (§8.2 expiry,
+    /// §4.4 toggle-off) from the one teardown list ([`unwind_effect`](Self::unwind_effect))
+    /// — so *"every cell is released"* is a property of the shape rather than of a sweep
+    /// that could miss one.
+    repel: Option<EffectArea>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -625,6 +640,7 @@ impl State {
             sense_cues: Vec::new(),
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
+            repel: None,
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -1242,6 +1258,7 @@ impl State {
                         Aimed::Blast(blast) => self.fire_confusion(blast, events),
                         Aimed::Call(reach) => self.fire_false_call(reach, events),
                         Aimed::Dart(shot) => self.fire_dart(&shot, events),
+                        Aimed::Repel(field) => self.fire_repel(field, events),
                         Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }
@@ -1371,6 +1388,12 @@ impl State {
         // at once. It refunds nothing — the full lockout still runs (§8.2).
         if declares(id, Effect::SealDoors) {
             self.release_lockdown();
+        }
+        // The field is the window (§8.3/#554), exactly as the seals are: ending it early
+        // hands every cell back at once, and refunds nothing — the full lockout still runs
+        // (§8.2).
+        if declares(id, Effect::Repel) {
+            self.release_repel();
         }
         // The effect is gone, so its marks go with it (#308/#338) — an early end
         // leaves no residue to fade over nothing.
