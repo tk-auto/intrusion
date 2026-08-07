@@ -80,6 +80,22 @@ if ((await screen()) === "menu") {
   }
 }
 
+// A replay build reveals a #replaybar HUD; a live build never does. Asked here
+// because the two need different preparation as well as different checks.
+const replayPos = await page.$("#replaybar.on #replay-pos");
+
+// A live run opens on the **level-start card** (§11.4/#497), which any input
+// dismisses — including the arrows the movement check below presses. Left up, it
+// would swallow the first arrow and the frame would change because the *card* went
+// away, so the check would pass on a build whose input was broken. So it is shot for
+// the record and then dismissed with `Escape`, which is bound to nothing on the board
+// (§11.6): on a build with no card up this is an exact no-op.
+if (!replayPos) {
+  await page.screenshot({ path: resolve(shotsDir, "level-start.png") });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+}
+
 const boot = await page.screenshot({ path: resolve(shotsDir, "boot.png") });
 
 // A blank canvas screenshots as a near-empty PNG; the glyph grid does not.
@@ -89,8 +105,6 @@ if (boot.length < 5000) {
   process.exit(1);
 }
 
-// A replay build reveals a #replaybar HUD; a live build never does. Branch on it.
-const replayPos = await page.$("#replaybar.on #replay-pos");
 let moved = false;
 if (replayPos) {
   // Replay viewer (#197): the arrows scrub the time cursor, not the player. Assert
