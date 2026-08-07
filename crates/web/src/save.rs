@@ -40,12 +40,13 @@
 //!
 //! [`Autosave`] decides *what should happen* and answers with a [`Write`]; the caller
 //! does it. That split is what makes the boundary testable natively: the policy runs
-//! against a [`Slot`] and a [`Timer`] that are traits, so a test drives a burst of
-//! turns through the real policy and **counts the writes** the shell would have made,
-//! with no browser anywhere near it (#514's acceptance criterion). The browser
-//! implementations of the two traits are the only part that needs a page.
+//! against a [`Slot`] and a [`Timer`](crate::timer::Timer) that are traits, so a test
+//! drives a burst of turns through the real policy and **counts the writes** the shell
+//! would have made, with no browser anywhere near it (#514's acceptance criterion). The
+//! browser implementations of the two traits are the only part that needs a page — and
+//! the clock is shared with the other timed surface the shell owns
+//! ([`crate::timer`]).
 
-use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
 use intrusion_core::{parse_script, to_script, Campaign, LevelSeed, MapUi, RunOptions, State};
@@ -56,6 +57,7 @@ use web_sys::Storage;
 
 use crate::menu::{SCREEN_MAP, SCREEN_PLAY};
 use crate::seed;
+use crate::timer::{Timer, WindowTimer};
 
 /// The key the run's save lives under. One slot, and one key: **the settings record
 /// (#513) keeps its own**, because ending a run must never reset a preference.
@@ -174,16 +176,6 @@ pub(crate) trait Slot {
     fn write(&self, value: &str) -> bool;
     /// Empty the slot.
     fn clear(&self);
-}
-
-/// The **trailing-write timer**: the clock half of the debounce, which §12.1 keeps out
-/// of the core entirely. Arming replaces any pending fire, so a burst of turns re-arms
-/// one timer rather than queueing a write each.
-pub(crate) trait Timer {
-    /// Fire a flush `ms` from now, cancelling any pending one.
-    fn arm(&self, ms: i32);
-    /// Cancel any pending fire.
-    fn cancel(&self);
 }
 
 /// What a moment in the run asks of the slot — the policy's whole vocabulary.
@@ -395,6 +387,9 @@ impl crate::Game {
         });
         // Nothing is outstanding: what is in the slot *is* the world now on screen.
         self.autosave.reset();
+        // And nothing is popped in over it (§11.7/#576): a resumed run is one already
+        // underway, whose loud messages were read hours ago.
+        self.reset_pop_in();
         seed::reflect_level(&self.level);
         crate::menu::set_screen(if self.map_open() {
             SCREEN_MAP
@@ -456,62 +451,14 @@ impl Slot for LocalSlot {
     }
 }
 
-/// The browser's `setTimeout`, holding the pending handle so arming replaces rather
-/// than stacks.
-///
-/// It reaches back into the shell through a **weak** handle, exactly as the clipboard
-/// callback does: the timer is owned by the game it calls, and an upgrade that fails
-/// simply means the page is gone and there is nothing left to write.
-struct WindowTimer {
-    handle: Cell<Option<i32>>,
-    /// The callback the timer fires, built once and kept: it outlives every arming,
-    /// so the shell hands the browser the same function each time rather than leaking
-    /// a fresh closure per turn.
-    fire: Closure<dyn FnMut()>,
-}
-
-impl WindowTimer {
-    fn new(game: Weak<std::cell::RefCell<crate::Game>>) -> Self {
-        let fire = Closure::<dyn FnMut()>::new(move || {
-            if let Some(game) = game.upgrade() {
-                game.borrow_mut().flush_save();
-            }
-        });
-        Self {
-            handle: Cell::new(None),
-            fire,
-        }
-    }
-}
-
-impl Timer for WindowTimer {
-    fn arm(&self, ms: i32) {
-        self.cancel();
-        let Some(win) = web_sys::window() else { return };
-        // The handle is what makes this a *debounce* rather than a queue: the next
-        // turn cancels this fire before arming its own.
-        if let Ok(id) = win.set_timeout_with_callback_and_timeout_and_arguments_0(
-            self.fire.as_ref().unchecked_ref(),
-            ms,
-        ) {
-            self.handle.set(Some(id));
-        }
-        // Nothing to do if the browser refused a timer: the page-hide flush and the
-        // turn cap both still write, so a save is late rather than lost.
-    }
-
-    fn cancel(&self) {
-        if let (Some(id), Some(win)) = (self.handle.take(), web_sys::window()) {
-            win.clear_timeout_with_handle(id);
-        }
-    }
-}
-
 /// The shell's live autosave, wired to the browser.
 pub(crate) fn browser(game: Weak<std::cell::RefCell<crate::Game>>) -> Autosave {
     Autosave::new(
         Box::new(LocalSlot::boot()),
-        Box::new(WindowTimer::new(game)),
+        // The trailing write, on the shell's shared one-shot clock ([`crate::timer`]):
+        // arming replaces, which is what makes the policy above a debounce and not a
+        // queue of writes.
+        Box::new(WindowTimer::new(game, |game| game.flush_save())),
     )
 }
 
@@ -561,7 +508,7 @@ pub(crate) fn install(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use intrusion_core::{start_level, to_script, Difficulty, Direction, Input, RunMode};
 

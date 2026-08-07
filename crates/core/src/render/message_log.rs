@@ -44,7 +44,7 @@
 
 use super::hud::{ScreenUi, BOTTOM_ROWS, NEAR_ROW, TOP_ROWS};
 use super::*;
-use crate::status::{live_messages, Message, MessageHistory};
+use crate::status::{live_messages_beside, Message, MessageHistory, PopIn};
 
 /// The most **rows** the deployed block may ever cover, separators included
 /// (§11.7/#300). **[START]** — the panel is drawn over the map, and burying the
@@ -77,7 +77,7 @@ const SEPARATOR_GLYPH: char = '─';
 
 /// One row of the deployed block: a message, or the rule that divides two actions.
 #[derive(Clone, PartialEq, Eq, Debug)]
-enum LogRow {
+pub(super) enum LogRow {
     /// A message, drawn in its own §11.2 category — at full strength when it is the
     /// current action's, in that category's **dim** shade when it is a past one's
     /// ([`PAST`]).
@@ -135,8 +135,8 @@ const LOG_TOP_ROW: u32 = super::hud::USABLE_ROW;
 /// Empty when there is nothing the near line has not already said: a lone live message
 /// with no history is simply the band, and there is nothing left over to deploy
 /// (§11.7).
-fn log_rows(state: &State) -> Vec<LogRow> {
-    assemble(live_messages(state), state.message_history())
+pub(super) fn log_rows(state: &State, popped: Option<PopIn>) -> Vec<LogRow> {
+    assemble(live_messages_beside(state, popped), state.message_history())
 }
 
 /// [`log_rows`]' whole rule, over its two inputs and nothing else — the live block and
@@ -231,11 +231,11 @@ pub(crate) fn near_line_text_max(width: u32) -> usize {
 /// The deploy control's label, or `None` when there is nothing to deploy — *what* the
 /// corner shows, leaving *where* to [`near_line_controls`](super::hud::near_line_controls),
 /// which is the one place the near line's layout lives.
-pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
-    if log_rows(state).is_empty() {
+pub(super) fn deploy_label(state: &State, open: bool, popped: Option<PopIn>) -> Option<String> {
+    if log_rows(state, popped).is_empty() {
         return None;
     }
-    let unread = live_messages(state).len() > 1;
+    let unread = live_messages_beside(state, popped).len() > 1;
     Some(format!("[{}]", deploy_glyph(unread, open)))
 }
 
@@ -248,10 +248,11 @@ pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
 /// said — more than one live message, **or** a non-empty history (#300) — so a lone
 /// message on a quiet first turn yields `false`. The geometry is read from `state`,
 /// so a click can never miss the toggle the frame drew.
-pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
+pub fn is_message_button(state: &State, ui: ScreenUi, x: u32, y: u32) -> bool {
     let width = state.layout().facility().width();
     // Either chevron is one cell, so which of the two is drawn cannot move the button.
-    let Some((label, start)) = super::hud::near_line_controls(state, width, false).log else {
+    let Some((label, start)) = super::hud::near_line_controls(state, width, false, ui.pop_in).log
+    else {
         return false;
     };
     let len = label.chars().count() as u32;
@@ -284,11 +285,11 @@ pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, start: u32,
 /// Shared by the drawing ([`overlay_message_log`]) and the geometry
 /// ([`message_log_rows`]) so a shell can never disagree with the frame about where the
 /// block ends.
-fn drawn_rows(state: &State, map_h: u32) -> u32 {
+fn drawn_rows(state: &State, map_h: u32, popped: Option<PopIn>) -> u32 {
     // From LOG_TOP_ROW down to the map's last row inclusive: the usable line's row
     // plus the whole board.
     let budget = map_h + (TOP_ROWS - LOG_TOP_ROW);
-    (log_rows(state).len() as u32).min(budget)
+    (log_rows(state, popped).len() as u32).min(budget)
 }
 
 /// How many **map rows** the deployed message log covers right now (§11.7), or `0`
@@ -308,7 +309,7 @@ pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
         return 0;
     }
     let map_h = state.layout().facility().height();
-    drawn_rows(state, map_h).saturating_sub(TOP_ROWS - LOG_TOP_ROW)
+    drawn_rows(state, map_h, ui.pop_in).saturating_sub(TOP_ROWS - LOG_TOP_ROW)
 }
 
 /// Overlay the deployed message log onto the finished screen `grid` (§11.7/#267/#300):
@@ -327,11 +328,11 @@ pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
 /// hand-built test states get that small — the v1 board is 40×40, §10.2) the block
 /// shows as many as fit from the top and drops the rest. It never reaches the ability
 /// bar: the bar is the one surface always worth reading, log or no log.
-pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
+pub(super) fn overlay_message_log(grid: &mut Grid, state: &State, popped: Option<PopIn>) {
     let width = grid.width;
     let map_h = grid.height.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
-    let rows = log_rows(state);
-    let drawn = drawn_rows(state, map_h) as usize;
+    let rows = log_rows(state, popped);
+    let drawn = drawn_rows(state, map_h, popped) as usize;
     let blank = GlyphCell::blank();
     for (i, row) in rows.iter().take(drawn).enumerate() {
         let y = LOG_TOP_ROW + i as u32;
@@ -389,8 +390,8 @@ mod tests {
     use crate::render::hud::{render_screen, TOP_ROWS};
     use crate::render::MenuUi;
     use crate::state::{Event, Input};
-    use crate::status::near_line;
     use crate::status::HISTORY_ACTIONS;
+    use crate::status::{live_messages, near_line};
     use crate::test_support::open_room;
 
     /// The board every deployed-log test is built on: a takedown-with-witness set up
@@ -462,15 +463,15 @@ mod tests {
         // whatever it has to say.
         let start = width - DEPLOY_LEN;
         assert!(
-            is_message_button(&s, start, NEAR_ROW),
+            is_message_button(&s, ScreenUi::default(), start, NEAR_ROW),
             "the counter is hittable"
         );
         assert!(
-            !is_message_button(&s, start - 1, NEAR_ROW),
+            !is_message_button(&s, ScreenUi::default(), start - 1, NEAR_ROW),
             "nothing just left of it"
         );
         assert!(
-            !is_message_button(&s, start, NEAR_ROW + 1),
+            !is_message_button(&s, ScreenUi::default(), start, NEAR_ROW + 1),
             "and nothing a row down"
         );
 
@@ -609,7 +610,7 @@ mod tests {
             "and nothing to deploy leaves the right end to the words: {near:?}"
         );
         assert!(
-            (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
+            (0..width).all(|x| !is_message_button(&s, ScreenUi::default(), x, NEAR_ROW)),
             "and nothing to click"
         );
     }
@@ -786,7 +787,7 @@ mod tests {
         s.step(Input::Step(Direction::North));
 
         let width = s.layout().facility().width();
-        let controls = super::hud::near_line_controls(&s, width, false);
+        let controls = super::hud::near_line_controls(&s, width, false, None);
         let (label, log_start) = controls.log.clone().expect("three live messages deploy");
         assert_eq!(
             controls.text_max,
@@ -866,7 +867,12 @@ mod tests {
         );
         // And the button is in the same place, so a tap lands where it always did.
         let start = width - DEPLOY_LEN;
-        assert!(is_message_button(&carried, start, NEAR_ROW));
+        assert!(is_message_button(
+            &carried,
+            ScreenUi::default(),
+            start,
+            NEAR_ROW
+        ));
 
         // Deployed, though, the block is the live three, a rule, and the remembered
         // one — the history shows only behind the chevron.
@@ -911,7 +917,7 @@ mod tests {
         let rows = message_log_rows(&s, deployed);
         assert_eq!(rows, 4, "clamped to the board's height");
         assert!(
-            log_rows(&s).len() > rows as usize,
+            log_rows(&s, None).len() > rows as usize,
             "and there was genuinely more to show"
         );
 

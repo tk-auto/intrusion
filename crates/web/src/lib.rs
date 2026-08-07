@@ -51,6 +51,7 @@ mod debug;
 mod input;
 mod menu;
 mod palette;
+mod pop_in;
 mod replay;
 mod save;
 mod screen_settings;
@@ -58,6 +59,7 @@ mod seed;
 mod settings;
 mod tap;
 mod tiles;
+mod timer;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -229,6 +231,7 @@ pub fn start() -> Result<(), JsValue> {
             tiles: tiles::Tiles::boot(),
             campaign: None,
             autosave: save::browser(handle.clone()),
+            pop_in: pop_in::clock(handle.clone()),
             resume,
             handle: handle.clone(),
         })
@@ -364,6 +367,12 @@ struct Game {
     /// is drawn — and it is the page's, not the run's: a fresh facility keeps the same
     /// slot and simply overwrites it.
     autosave: save::Autosave,
+    /// The **loud-message pop-in's clock** (§11.7/#576): the couple of seconds the box
+    /// on [`ui`](Game::ui) stays up. Held here for the autosave's reason — it is the
+    /// page's, not the run's — and separate from the box itself, because the box is
+    /// what is *drawn* (so it lives on the view state the core renders from) and this
+    /// is only what takes it away ([`pop_in`]).
+    pop_in: Box<dyn timer::Timer>,
     /// The saved run this load found and has **not yet resumed**, or `None`.
     ///
     /// Read once at boot and taken by [`Game::continue_run`], so a run can be resumed
@@ -464,6 +473,10 @@ impl Game {
         // page's, not the run's. The carried set is named once, beside the fields, so
         // a new one cannot be forgotten here (#473).
         self.ui = self.ui.for_fresh_run();
+        // …and the old run's pop-in with it (§11.7/#576), clock included: a box raised
+        // by a facility that no longer exists must not expire — and repaint — over the
+        // card the new one opens on.
+        self.reset_pop_in();
         self.fit_and_draw();
         Ok(())
     }

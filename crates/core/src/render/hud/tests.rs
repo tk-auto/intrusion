@@ -5,6 +5,7 @@ use crate::guard::Guard;
 use crate::guard::GuardState;
 use crate::modifiers::{IntelGate, LevelModifiers};
 use crate::state::{BoreRefusal, Event, Input, State};
+use crate::status::near_line;
 use crate::test_support::open_room;
 use crate::{Difficulty, EndExit, EndUi, MapScreen, NodeId, Outlay, RunMode, RunOptions};
 
@@ -17,6 +18,27 @@ fn granted() -> Loadout {
         .with(AbilityId::Camouflage)
         .with(AbilityId::Decoy)
         .with(AbilityId::Dephase)
+}
+
+/// A live pop-in (§11.7/#576) — a run whose last action took the intel, which is the
+/// top of the ladder and so raises the box. Any loud message would do; this is the
+/// cheapest one to reach from a hand-built state.
+fn a_pop_in() -> Option<crate::PopIn> {
+    let mut state = State::new(
+        open_room(12, 12),
+        Cell::new(5, 6),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 5)],
+        Cell::new(10, 10),
+    );
+    state.step(Input::Step(Direction::North));
+    let raised = crate::pop_in(&state);
+    assert!(
+        raised.is_some(),
+        "taking the intel is loud enough to pop in"
+    );
+    raised
 }
 
 /// The same grant with the **passive** in it (#264/#287) — Run, two activated
@@ -489,7 +511,7 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 
     for x in 0..width {
         let hit = is_help_button(x, NEAR_ROW)
-            || super::super::message_log::is_message_button(&s, x, NEAR_ROW);
+            || super::super::message_log::is_message_button(&s, ScreenUi::default(), x, NEAR_ROW);
         if hit {
             assert_eq!(
                 g.get(x, NEAR_ROW).bg,
@@ -501,12 +523,17 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 
     // …and the spans the layout names cover every hittable cell, with only whatever air
     // the row holds back beside each control over and above them.
-    let controls = near_line_controls(&s, width, false);
+    let controls = near_line_controls(&s, width, false, None);
     let held: Vec<u32> = controls.held_back().flatten().collect();
     let hittable: Vec<u32> = (0..width)
         .filter(|&x| {
             is_help_button(x, NEAR_ROW)
-                || super::super::message_log::is_message_button(&s, x, NEAR_ROW)
+                || super::super::message_log::is_message_button(
+                    &s,
+                    ScreenUi::default(),
+                    x,
+                    NEAR_ROW,
+                )
         })
         .collect();
     assert!(
@@ -527,7 +554,7 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 fn holding_the_band_back_costs_the_message_nothing() {
     let s = near_line_with_deploy_control();
     let width = s.layout().facility().width();
-    let controls = near_line_controls(&s, width, false);
+    let controls = near_line_controls(&s, width, false, None);
     assert!(controls.log.is_some(), "both controls are up");
     assert_eq!(
         controls.capacity(),
@@ -719,7 +746,7 @@ fn status_rows_carry_the_band_and_the_categories() {
     assert_eq!(g.height(), TOP_ROWS + map.height() + BOTTOM_ROWS);
 
     let (near_y, usable_y) = (NEAR_ROW, USABLE_ROW);
-    let controls = near_line_controls(&s, g.width(), false);
+    let controls = near_line_controls(&s, g.width(), false, None);
     let held: Vec<u32> = controls.held_back().flatten().collect();
     for x in 0..g.width() {
         let cell = g.get(x, near_y);
@@ -1823,6 +1850,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         modality: InputModality::Touch,
         // Off, so the raise below is this seam's doing and not the fixture's.
         splash_open: false,
+        pop_in: a_pop_in(),
     };
 
     let ScreenUi {
@@ -1842,6 +1870,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         help_tab,
         seed_copy,
         end,
+        pop_in,
     } = carried.for_fresh_run();
 
     assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
@@ -1881,6 +1910,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         "a new token, unacknowledged"
     );
     assert_eq!(end, EndUi::default(), "no verdict has been reached yet");
+    assert!(
+        pop_in.is_none(),
+        "and the last run's loud message does not pop in over this one (§11.7/#576)",
+    );
 }
 
 /// The carry is **idempotent and total**: a default view state comes back

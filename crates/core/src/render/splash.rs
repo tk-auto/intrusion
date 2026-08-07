@@ -52,7 +52,10 @@
 use super::hud::InputModality;
 use super::modifier_rows::{modifier_rows, MODIFIERS_HEADING};
 use super::objective::{objective_line, EXIT_LINE, OBJECTIVE_HEADING};
-use super::{clear_row, draw, draw_rule, help, overlay_top, Grid};
+use super::{
+    clear_row, draw, draw_rule, help, overlay_top, Grid, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT,
+    CORNER_TOP_LEFT, CORNER_TOP_RIGHT, SIDE_GLYPH,
+};
 use crate::category::Category;
 use crate::modifiers::LevelModifiers;
 use crate::place::LevelConfig;
@@ -71,21 +74,6 @@ const HEADING: &str = "THE JOB";
 /// hint that teaches keys to a thumb is a hint nobody follows. Both work at all times.
 const BEGIN_KEYS: &str = "any key to begin";
 const BEGIN_TOUCH: &str = "tap to begin";
-
-/// **The card is a box, not a pair of rules** (#497). Two horizontal rules alone read
-/// as a *cut through the level* — the board above and the board below look like two
-/// halves of the facility with something wedged between them — and the first frame of a
-/// run is the worst possible place to be unsure what you are looking at. The sides and
-/// the corners are what say *this is one object, laid on top*.
-///
-/// The horizontal run is the overlay family's own [`RULE_GLYPH`](super::RULE_GLYPH), and
-/// these are its corners and its verticals: the same box-drawing block, so a font that
-/// has the rule the verdict and the deployed log already draw has these too.
-const CORNER_TOP_LEFT: char = '┌';
-const CORNER_TOP_RIGHT: char = '┐';
-const CORNER_BOTTOM_LEFT: char = '└';
-const CORNER_BOTTOM_RIGHT: char = '┘';
-const SIDE_GLYPH: char = '│';
 
 /// One drawn row of the card. The layout is built as a list of these once and then
 /// drawn from it, the verdict's own shape — there is nothing to hit-test here, because
