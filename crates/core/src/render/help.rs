@@ -82,6 +82,14 @@ use crate::place::LevelConfig;
 /// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
 pub(crate) const HELP_KEY: char = '?';
 
+/// The **second spelling** of [`HELP_KEY`] (#551) — `Escape`, printed as the `Esc` the
+/// footer and the exchange's usable line already print.
+///
+/// It is drawn beside `?` in the controls list because a binding a legend omits is one
+/// no player can find, and because the two keys are one command: whichever opens the
+/// panel, it comes up on the tab it was last left on and closes on either.
+pub(crate) const HELP_KEY_ALT: &str = "Esc";
+
 /// The key that flips the colour theme (§11.2/#189) — `n`, for *night* mode. A
 /// **standing** shortcut: it is listed in this card's controls block, and matched in
 /// [`ui_command_for_key`](crate::input::ui_command_for_key) (on the board) and in
@@ -881,7 +889,13 @@ fn control_rows() -> Vec<(String, String)> {
         // which is precisely what belongs on a legend.
         ("1234".to_string(), "abilities".to_string()),
         ("m".to_string(), "messages".to_string()),
-        (HELP_KEY.to_string(), "this help".to_string()),
+        // Both spellings of the panel's own key (#551): `Escape` opens it as `?` does,
+        // and a legend that named only one of them would leave the other to be
+        // stumbled on.
+        (
+            format!("{HELP_KEY} / {HELP_KEY_ALT}"),
+            "this help".to_string(),
+        ),
         // The theme toggle (#189) is a standing shortcut like the rest: it is true of
         // every run, and it is the one row that also works *while this card is up*.
         (THEME_KEY.to_string(), "colour theme".to_string()),

@@ -185,8 +185,19 @@ fn the_control_rows_are_the_standing_shortcuts_only() {
         );
     }
     assert_eq!(rows.len(), 6, "and nothing else — no per-ability rows");
-    // The panel's own two keys document themselves.
-    assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
+    // The panel's own two keys document themselves — help by **both** of its spellings
+    // (#551), since `Escape` opens it as `?` does and a legend naming one of a pair
+    // teaches the key that is already conventional and hides the one that is not.
+    let help_row = rows
+        .iter()
+        .find(|(_, a)| a == "this help")
+        .expect("the card names its own key");
+    for spelling in [HELP_KEY.to_string(), HELP_KEY_ALT.to_string()] {
+        assert!(
+            help_row.0.contains(&spelling),
+            "the help row names {spelling:?}",
+        );
+    }
     assert!(rows.iter().any(|(k, _)| *k == THEME_KEY.to_string()));
 }
 

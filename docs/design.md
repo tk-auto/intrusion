@@ -2965,7 +2965,7 @@ finally having a mechanism.
 | `1` `2` `3` `4` (top row) | Fire ability bar slots 1–4 |
 | The bar's marked letters | Fire the same four, by mnemonic |
 | `Enter` / `Space` | Confirm |
-| `Escape` | Cancel / menu |
+| `Escape` | **Decline an open exchange** (§8.3) — and with no offer open, the help panel, exactly as `?` does (#551). Back out of a modal sub-screen: the seed prompt, the facility brief |
 | `m` / `?` / `n` | Messages, help, colour theme — view toggles, never a turn (§11.2/§11.4) |
 | `↑` `↓` / `Enter` | **On the help panel's Options tab only** — walk its rows and fire the marked one (§14 v2/#513). Free keys: no other tab had anything for them to do, so the settings claimed nothing from play |
 
