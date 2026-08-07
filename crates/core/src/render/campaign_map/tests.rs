@@ -67,34 +67,34 @@ fn the_map_draws_the_country_the_run_is_in() {
         vec![
             "            THE FACILITY MAP            ",
             "    Left unnoticed — Depot off guard    ",
+            "      speed ★ · stealth ★ · haul ★      ",
             "         Intel — nothing banked         ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
             "                                        ",
             "                                        ",
-            " ▫           ▫      ▫             ▫     ",
-            "                           ▫            ",
+            " ▫           ▫      ▫      ▫      ▫     ",
+            "                                        ",
             "                                        ",
             "    ▫                                   ",
             "            ▫                           ",
             "                   ▫      ▫         ▫   ",
             "                                        ",
-            "                                        ",
-            "           ▫                        ▫   ",
+            "           ▫                            ",
+            "                                    ▫   ",
             "   ▫                ▫        ▫          ",
-            "                                        ",
             "                                        ",
             "                                        ",
             "                    ▫      ▫            ",
             "  ▫       ▫                       ▫     ",
             "                                        ",
-            " ▫                                 ?    ",
-            "                     ▪          ···     ",
-            "         ▫          ·    $   ···        ",
-            "                   ·   ······           ",
-            "                  ·  ····               ",
-            " ▫         ▫      @···     ▫        ▫   ",
+            "                                        ",
+            " ▫                   ▪             ?    ",
+            "         ▫          ·    $     ····     ",
+            "                   ·   ··  ····         ",
+            "                  ·  ······             ",
+            " ▫         ▫      @····    ▫        ▫   ",
             "                                        ",
             "                                        ",
             "                                        ",
@@ -741,4 +741,75 @@ fn drawing_the_map_changes_nothing() {
     let second = render_map(W, H, &run, MapUi::default());
     assert_eq!(first.to_text(), second.to_text());
     assert_eq!(run, before, "looking at a map is not playing one");
+}
+
+/// **The map is where a campaign's stars land** (§14 v3/#563): a completed facility does
+/// not raise the end screen, so if the score is not on this screen it is nowhere.
+///
+/// Each axis is **named** beside its mark — the row says which star was missed, which is
+/// the whole reason the score is three marks and not a tier.
+#[test]
+fn the_map_reports_what_the_last_raid_was_worth() {
+    let mut run = Campaign::new(8371);
+    // Narrowed to the score row on purpose: `★` is also the archive's node glyph, and
+    // the picture draws that from the first frame. The two readings are told apart by
+    // *where* they are, which is exactly what this asserts.
+    let blank = text(&run, MapUi::default())[SCORE_ROW as usize].clone();
+    assert!(
+        !blank.contains(STAR_EARNED) && !blank.contains(STAR_MISSED),
+        "a run with no raid behind it has nothing to score: {blank:?}",
+    );
+
+    run.enter();
+    // Seen, and one console short: speed alone.
+    run.complete(&Verdict {
+        ending: Ending::Escaped,
+        stats: RunStats {
+            turns: 40,
+            par: 200,
+            intel: 2,
+            intel_total: 3,
+            alert_peak: 1,
+            ..RunStats::default()
+        },
+    });
+    let rows = text(&run, MapUi::default());
+    let score = run.last_score().expect("the raid is scored");
+    let row = &rows[SCORE_ROW as usize];
+    for axis in Axis::ALL {
+        assert!(row.contains(axis.label()), "{axis:?} is named: {row:?}");
+    }
+    assert!(row.contains(&format!("speed {STAR_EARNED}")), "{row:?}");
+    assert!(row.contains(&format!("stealth {STAR_MISSED}")), "{row:?}");
+    assert!(row.contains(&format!("haul {STAR_MISSED}")), "{row:?}");
+    assert_eq!(score.stars(), 1);
+
+    // …and it is coloured as it is marked (§11.2): the star earned in the goal colour,
+    // the two missed in the dim one.
+    let grid = render_map(W, H, &run, MapUi::default());
+    let earned: Vec<GlyphCell> = cells_of(&grid, STAR_EARNED)
+        .into_iter()
+        .filter(|c| c.fg == Category::Interest)
+        .collect();
+    assert!(
+        !earned.is_empty(),
+        "the archive's own star is Interest too, so this only says the row drew one",
+    );
+    for cell in cells_of(&grid, STAR_MISSED) {
+        assert_eq!(cell.fg, Category::Ground, "a star not earned is drawn dim",);
+    }
+}
+
+/// **The score row is reserved on every frame**, so the picture below it never jumps when
+/// the first raid's stars arrive — the rule the wallet line already follows one row down.
+#[test]
+fn the_score_row_costs_the_picture_the_same_band_either_way() {
+    let fresh = render_map(W, H, &Campaign::new(8371), MapUi::default());
+    let scored = render_map(W, H, &at_a_choice_point(8371), MapUi::default());
+    assert_eq!(fresh.height(), scored.height());
+    assert_eq!(
+        (0..fresh.height()).find(|&y| (0..W).any(|x| fresh.get(x, y).glyph == UNKNOWN_GLYPH)),
+        (0..scored.height()).find(|&y| (0..W).any(|x| scored.get(x, y).glyph == UNKNOWN_GLYPH)),
+        "the country starts on the same row before and after the first score",
+    );
 }

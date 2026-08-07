@@ -330,6 +330,90 @@ If you are adding an ability and about to make it free, re-read §2.3.
 
 ---
 
+### 4.6 The score — three stars, one per axis
+
+**[SETTLED]** on the shape, **[START]** on every number. A facility the player **got out
+of** is scored out of **three stars, awarded one per axis** (#563):
+
+| Star | Earned when | On screen |
+|---|---|---|
+| **Speed** | Turns taken ≤ the facility's **par** (below) | `speed ★ out inside par` |
+| **Stealth** | The run ended at **security condition 0** (§7.3) — nobody ever knew | `stealth ★ never noticed` |
+| **Thoroughness** | **Every** intel console *and* every equipment cache the building held was taken | `haul ★ took everything` |
+
+**One per axis, independently earned, is the whole design.** A weighted total mapped onto
+three tiers would say *"two stars"* and nothing else; three independent stars say **which
+one you missed**, which is the only thing a rating is good for in a game with no
+meta-progression. §2.2 says the one thing carrying between runs is what you learned —
+*"you had it all, but you were seen"* is that sentence given a surface.
+
+**The range is 0–3, and zero is a real reading.** Escaping is not the first star: a floor
+that made winning worth one would spend the most legible mark on the fact the player
+already knows, and would stop the readout being diagnostic. A run that crawled out slow,
+loud and half-empty earned none of the three, and the screen says so plainly.
+
+**Only a run that got out is scored.** A capture has no score at all — not zero stars.
+The end screen owes a lost run a *reason* (§14 v2), and a rating standing where the reason
+belongs would be answering a question the run never finished asking.
+
+#### Par — derived from the building, never a constant
+
+**Par is computed at level start from the facility's own contents**, because a *Vault* has
+one more of everything (§14 v3) and legitimately takes longer than an *Outpost*. A flat
+number would be wrong for half the facilities on the map and would read as the game being
+arbitrary, which is worse than having no speed star at all.
+
+    par = span + 25 × consoles + 15 × crates          (span = width + height)
+
+All three **[START]**. The span term is the there-and-back: crossing a 40×40 twice is
+eighty cells of walking before a single detour, and the size is screen-bound (§10.2/§11.4)
+so the span is a fair stand-in for how far the ground goes. The per-objective terms are
+the detour *and the looking that finds it* — exploration is most of a raid (§10) — with a
+crate worth less than a console because a crate is a detour the player chooses rather than
+one the level asks for. Quick play's facility lands on **155**, an *Outpost* on 130, a
+*Vault* on 225.
+
+**Par lives on the help panel's Level info tab, not on the board.** It is a fact about the
+level like every active modifier (§12.6), so it is available on demand and never nagging.
+A par counting down in the corner would turn a stealth game into a speedrun and push
+against exactly the patience §1 and §7.6 are built to reward.
+
+#### It grants nothing — with exactly one planned exception
+
+**Nothing reads the score.** Not an ability, not a modifier, not the wallet (#211), and
+nothing at all across runs — §2.2's no-meta-progression rule is not negotiable, and a
+score a system can *spend* is a currency the player plays toward instead of playing well.
+The one exception the design has chosen is the campaign's **archive gate** (#573, v3): the
+run's accumulated stars set how hard the terminus is, earned and spent inside one run
+exactly as intel is. Until that ships the set of readers is empty, and a test asserts it.
+
+#### Where the stars are shown
+
+- **Quick play** — on the end screen, beside the run's ledger.
+- **The campaign** — on the **map**, per facility, because §14 v3 settles that a completed
+  facility does not raise the end screen; the map comes up instead, so if the stars are
+  not there they are nowhere. The run keeps the score of every facility it completed, in
+  raid order, and its total is the sum.
+
+Either way the axes are **named**, never a bare `★★☆`: knowing which one you missed is the
+entire point.
+
+#### Two known states, recorded rather than hidden
+
+- **The thoroughness star is free in quick play.** Quick play sets `intel_to_exit: All`
+  (§4.5) and plants no crates (§10.2), so *taking every objective* is exactly the win
+  condition — the star follows the escape. Quick play therefore scores meaningfully out of
+  two, and the campaign is where the axis bites. Accepted for v2, to be revisited once the
+  campaign exists; the alternative on the table is a different third axis for quick play
+  (**no bodies left** is the strongest candidate).
+- **The stealth star is demanding, not impossible.** Rung 1 costs one sighting *or* one
+  missed ping and never comes back down (§7.3), so this was the number most likely to be
+  unreachable. The sim says otherwise: over 400 bare-bot runs it was earned by **60–75% of
+  winning runs** across all four profiles (appendix 59). The threshold stays at condition
+  0; if a played run says otherwise, it moves to ≤ 1 before the design is blamed.
+
+---
+
 ## 5. The player
 
 | Property | Value |
@@ -751,8 +835,14 @@ does with its *own* eyes: the one that loses you still searches, the one that fi
 body still hunts it (§7.6/§7.2). Only the *calling of others* stops — and where a
 *calm* one chooses to walk.
 
-**[OPEN]** — whether a run **score** exists, and whether takedowns cost score.
-See §15.
+**Takedowns cost score, and this ladder is how.** *(Resolved — §4.6 owns the answer,
+and §15 Q4 is closed with it.)* A run **is** scored, out of three stars, and one of them
+is *stealth*: left at condition 0. A takedown leaves a body (§7.2), a found body is a
+rung-3 trigger above, and any rung above zero costs that star. So aggression is priced
+through the clock this section already builds — **no second rule, and no leaderboard.**
+That is the *"which may well be enough"* branch §15 Q4 named, taken deliberately: a
+separate score penalty on takedowns would charge twice for one decision, and the charge
+the radio already makes is the one the player can see coming.
 
 ### 7.4 State machine
 
@@ -4308,11 +4398,13 @@ default.
    sensed dot stay a **flat presence marker**, or convey *some* state — say, a
    distinct tint when a guard is Chasing — trading legibility for tension? Does it
    name *which* guard, or just "a guard"?
-4. **Run score.** Does a run have a score? If so, takedowns cost score — giving
-   "no killing" mechanical teeth via a leaderboard rather than a rule, and creating
-   a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
-   takedown cost, which may well be enough. Note a score also gives the bot in §13
-   a far better objective function, which is an argument for it beyond the game.
+4. **Run score.** *(Resolved — §4.6 owns the answer: a completed facility is scored
+   out of three stars, one per axis, and takedowns are charged through the **stealth**
+   star rather than by a rule of their own. The ghost↔aggressive spectrum falls out of
+   the §7.3 ladder, which is the "may well be enough" branch this question named. The
+   bot's objective function is deliberately **not** changed: the sim reports the star
+   distribution and optimises nothing, because a bot playing for stars would make the
+   histogram measure the scorer rather than the game — §13.3.)*
 5. **Do guards check hideouts?** *(Resolved — §10.3 owns the answer: only when
    alerted, and only if they saw you go in or found a body nearby.)*
 6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A

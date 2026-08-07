@@ -157,6 +157,58 @@ fn a_won_run_draws_the_victory_screen_and_its_ledger() {
     assert!(shows(&rows, "intel 0 of 0"), "{rows:#?}");
 }
 
+/// **A won run's score names every axis** (#563) — the whole point of three stars rather
+/// than a tier is knowing *which* one you missed, so a screen that printed only `★★☆`
+/// would have said nothing worth the rows.
+#[test]
+fn a_won_run_names_each_axis_and_whether_it_was_earned() {
+    let state = won_run();
+    let rows = screen(&state, EndUi::default());
+    let score = state
+        .verdict()
+        .expect("a finished run")
+        .score()
+        .expect("a run that got out is scored");
+
+    for axis in Axis::ALL {
+        assert!(
+            shows(&rows, axis.label()),
+            "the {} axis is named: {rows:#?}",
+            axis.label(),
+        );
+        assert!(
+            shows(&rows, axis.blurb()),
+            "…and says what it was for: {rows:#?}",
+        );
+    }
+    assert!(
+        shows(&rows, &score.marks()),
+        "the glance form too: {rows:#?}"
+    );
+}
+
+/// **A lost run is not scored** (§14 v2): the screen owes it a reason, and three empty
+/// stars beside a capture would be a rating standing where the reason belongs.
+#[test]
+fn a_lost_run_shows_no_stars_at_all() {
+    let state = captured_run();
+    let rows = screen(&state, EndUi::default());
+    assert_eq!(
+        state.verdict().expect("a finished run").score(),
+        None,
+        "a capture has no score",
+    );
+    for axis in Axis::ALL {
+        assert!(!shows(&rows, axis.blurb()), "{rows:#?}");
+    }
+    for mark in [STAR_EARNED, STAR_MISSED] {
+        assert!(
+            !rows.iter().any(|row| row.contains(mark)),
+            "{mark} is drawn on a screen with nothing to score: {rows:#?}",
+        );
+    }
+}
+
 /// **A run in progress draws neither** — the property comes from the state, not from a
 /// flag the shell has to remember to clear.
 #[test]
@@ -286,6 +338,9 @@ fn every_line_fits_the_v1_board() {
         turns: 999,
         intel: 9,
         intel_total: 9,
+        caches: 9,
+        caches_total: 9,
+        par: 999,
         takedowns: 99,
         detections: 999,
         alert_peak: 0,
@@ -321,6 +376,18 @@ fn every_line_fits_the_v1_board() {
     }
     for exit in [EndExit::Retry, EndExit::NewRun, EndExit::Menu] {
         lines.push(format!("{MARKER}{}", exit.label()));
+    }
+    // The score block (#563) at its widest — every axis earned and every axis missed, so
+    // both colourings of every row are measured.
+    for score in [
+        Score {
+            speed: true,
+            stealth: true,
+            thoroughness: true,
+        },
+        Score::default(),
+    ] {
+        lines.extend(score_rows(score).into_iter().map(|(text, _)| text));
     }
     for line in lines {
         assert!(

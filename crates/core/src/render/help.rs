@@ -74,6 +74,7 @@ use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::place::LevelConfig;
+use crate::score::Axis;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
 /// key, an ability key, or another UI control — and the conventional roguelike
@@ -562,6 +563,23 @@ pub(super) struct PanelRun<'a> {
     /// **latch**, not the switch beside it, which is why it is a field of its own: the
     /// replay row answers to the run's history and not to what is currently flipped.
     pub(super) ghosted: bool,
+    /// **The facility's par turn count** ([`State::par`](crate::State::par), §14 v2/#563)
+    /// — the Level info tab's par row, and the one number on this panel that belongs to
+    /// the building rather than to the run's setup.
+    pub(super) par: u32,
+}
+
+/// The Level info tab's **par** section (§14 v2/#563) — the facility's turn allowance,
+/// and what beating it is worth.
+///
+/// *Par* is meta vocabulary in §11.8's sense: it names the run's measurement, not
+/// anything inside the building, so it stays the word the design uses rather than being
+/// dressed up diegetically. The blurb comes from [`Axis::Speed`] itself, so the panel and
+/// the end screen cannot end up promising different things about the same star.
+const PAR_HEADING: &str = "PAR";
+
+fn par_row(par: u32) -> String {
+    format!("{par} turns · {} for a star", Axis::Speed.blurb())
 }
 
 /// Draw the tab bar on row 0: each tab as `[Label]` — the active one in Interest
@@ -648,6 +666,23 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
         draw(grid, CONTENT_INDENT, y, &text, category);
         y += 1;
     }
+
+    // The facility's **par** (§14 v2/#563), under the modifiers and above the alert: it
+    // is a fact about the level like every active modifier, so this is where it lives —
+    // available on demand, never nagging. It is deliberately **not** on the board HUD: a
+    // par counting down in the corner would turn a stealth game into a speedrun and push
+    // against exactly the patience §1 and §7.6 are built to reward.
+    y += 1;
+    draw(grid, SECTION_INDENT, y, PAR_HEADING, Category::System);
+    y += 1;
+    draw(
+        grid,
+        CONTENT_INDENT,
+        y,
+        &par_row(run.par),
+        Category::Neutral,
+    );
+    y += 1;
 
     // The facility alert (§7.3/#375), **last**: the modifiers above say what was
     // bending the rules before the raid started, and this says what the raid itself

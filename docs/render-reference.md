@@ -346,8 +346,24 @@ meaning, across both screens. And a facility that has been raided
 recolours to Ground exactly as a spent console does (§2.2's recolour rule): shape is
 what it is, colour is what it means to you now.
 
-`★` is the one glyph on this screen the game does not use elsewhere, which is right
-for the one place a run is trying to reach.
+`★` has **two readings on this screen**, and they are told apart by kind and place.
+As a **node in the picture** it is the archive — the one place a run is trying to reach.
+As a **mark in the score row**, beside a named axis, it is a star the last raid earned,
+with `☆` for one it missed (§4.6/#563):
+
+| Glyph | Means | Category |
+|---|---|---|
+| `★` | *(in the score row)* an axis **earned** | Interest |
+| `☆` | *(in the score row)* an axis **missed** | Ground |
+
+The pair was kept rather than swapped for a private mark, because `★` is the one glyph
+every player already reads as *this is the good one* and a rating is exactly what that is
+for — and because the score row never draws a bare `★★☆`: each mark stands beside the axis
+it belongs to (`speed ★ · stealth ☆ · haul ☆`), which is both the ticket's own requirement
+and what keeps the two readings apart at a glance. Appendix 59 records the call.
+
+The end screen draws the same pair (§14 v2) and has no archive on it, so there is nothing
+to tell apart there.
 
 **Why `▫` and not the flavour.** The country's *shape* is public and its *contents* are
 not — the §11.5a rule one scale up, which is why it reads without being taught.

@@ -8,7 +8,7 @@
 //! default. Metrics are counted from the core's [`Event`] stream as the run steps,
 //! never scraped from state or the rendered grid.
 
-use intrusion_core::{start_level_with, Event, GenError, Input, Outcome};
+use intrusion_core::{start_level_with, Event, GenError, Input, Outcome, Score, Verdict};
 
 use crate::alert::AlertRecord;
 use crate::config::RunConfig;
@@ -95,6 +95,21 @@ pub struct RunRecord {
     /// sight: a run can reach rung 3 and face fewer than three newcomers, and the
     /// difference is a fact about the level rather than about the ladder.
     pub reinforcements: u32,
+    /// **The run's three stars** (§15 Q4/#563), or `None` for a run that did not get out
+    /// — a capture, an entombment, or a batch cap reached mid-raid.
+    ///
+    /// Reported, never optimised for. §13.2's bot decides by cues and has no objective
+    /// function; handing it *maximise stars* would make the histogram measure the scorer
+    /// rather than the game, which is the one thing the sim exists to avoid (§13.3,
+    /// `docs/bot-behaviour.md`). What the number is good for here is balance: how often a
+    /// winning run is actually inside par, and whether the condition-0 stealth star is
+    /// aspirational or impossible.
+    pub score: Option<Score>,
+    /// **The facility's par** ([`par_for`](intrusion_core::par_for)) this run was measured
+    /// against — carried so a batch can be read without re-deriving it, and so a par that
+    /// is plainly wrong for the recipe is visible in the rows rather than only in the
+    /// star that fell out of it.
+    pub par: u32,
 }
 
 /// Run one seeded game under `policy`, to a win, a loss, or `input_cap` issued
@@ -143,6 +158,10 @@ pub fn run_one_with(
         usage: UsageHistogram::new(),
         alert: AlertRecord::default(),
         reinforcements: 0,
+        // Filled from the verdict once the run is over: a run still being played has no
+        // score, exactly as it has no verdict (§14 v2).
+        score: None,
+        par: state.par(),
     };
     for _ in 0..input_cap {
         let input = policy.decide(&state);
@@ -193,6 +212,9 @@ pub fn run_one_with(
         }
     }
     record.turns = state.turn();
+    // The stars, off the state's own verdict (#563) — `None` for a capture and `None` for
+    // a run the input cap stopped mid-raid, since neither finished the question.
+    record.score = state.verdict().as_ref().and_then(Verdict::score);
     Ok(record)
 }
 
@@ -316,7 +338,7 @@ mod tests {
     /// history: a re-carve makes the row incomparable, a rule change makes it evidence.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":116,\"detections\":3,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":12,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":116,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":116,\"detections\":3,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":12,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":116,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0,\"par\":155,\"stars\":null,\"score\":null}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

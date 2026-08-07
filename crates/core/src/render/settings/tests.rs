@@ -60,6 +60,7 @@ fn render_settings_for(
             bar: Vec::new(),
             debug,
             ghosted,
+            par: 0,
         },
     )
 }
@@ -535,6 +536,7 @@ fn a_tiny_board_clips_rather_than_panicking() {
                 bar: Vec::new(),
                 debug: DebugModifiers::default(),
                 ghosted: false,
+                par: 0,
             },
         );
         assert_eq!((grid.width(), grid.height), (w, h));

@@ -516,6 +516,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
                 ghosted: state.ghosted(),
+                par: state.par(),
             },
         );
     }

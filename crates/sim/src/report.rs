@@ -18,6 +18,7 @@
 use crate::alert::AlertTally;
 use crate::harness::{RunOutcome, RunRecord};
 use crate::usage::{diversity, UsageHistogram, Verb};
+use intrusion_core::{Axis, Score};
 
 /// A `{"wait":N,...}` object of the histogram's integer counts, keys in
 /// [`Verb::ALL`] order — the shared shape the run row and the summary both emit.
@@ -27,6 +28,24 @@ fn usage_counts_json(usage: &UsageHistogram) -> String {
         .map(|&v| format!("\"{}\":{}", v.key(), usage.count(v)))
         .collect();
     format!("{{{}}}", body.join(","))
+}
+
+/// A run's three stars as a `{"speed":true,...}` object, or `null` for a run that did not
+/// get out (#563).
+///
+/// `null` and *all three false* are different findings and must stay different bytes: the
+/// first is a raid that never finished, the second one that finished badly.
+fn score_json(score: Option<Score>) -> String {
+    match score {
+        None => "null".to_string(),
+        Some(score) => {
+            let body: Vec<String> = Axis::ALL
+                .iter()
+                .map(|&axis| format!("\"{}\":{}", axis.label(), score.earned(axis)))
+                .collect();
+            format!("{{{}}}", body.join(","))
+        }
+    }
 }
 
 /// A profile name as a JSON string, or `null` when the policy had no temperament
@@ -40,7 +59,7 @@ impl RunRecord {
     /// The run's JSONL row. Field order is fixed; see `crates/sim/README.md`.
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":{},\"alert_escalations\":{},\"reinforcements\":{}}}",
+            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":{},\"alert_escalations\":{},\"reinforcements\":{},\"par\":{},\"stars\":{},\"score\":{}}}",
             self.seed,
             profile_json(self.profile),
             self.outcome.as_str(),
@@ -52,6 +71,9 @@ impl RunRecord {
             self.alert.peak(),
             self.alert.to_json(),
             self.reinforcements,
+            self.par,
+            self.score.map_or_else(|| "null".to_string(), |s| s.stars().to_string()),
+            score_json(self.score),
         )
     }
 }
@@ -109,6 +131,23 @@ pub struct Summary {
     /// count a run actually **faced**, which is not the same claim as the rung it
     /// reached: an arrival is refused when the facility offers nowhere out of sight.
     pub reinforcements: u64,
+    /// **How the batch's winning runs scored** (§15 Q4/#563): how many earned 0, 1, 2 and
+    /// 3 stars, indexed by the total.
+    ///
+    /// The distribution rather than a mean, for the reason the alert tally is one: *"most
+    /// wins are one-star"* and *"wins are split between none and three"* are opposite
+    /// balance findings with the same average.
+    ///
+    /// **Over the wins only.** A capture has no score, so folding losses in as zero would
+    /// report the win rate a second time under another name.
+    pub stars: [usize; 4],
+    /// **How often each axis was earned**, across the batch's winning runs — in
+    /// [`Axis::ALL`] order.
+    ///
+    /// This is the number that settles the design's own stated risk: if the stealth column
+    /// reads near zero across a batch, the condition-0 threshold is impossible rather than
+    /// aspirational, and it moves to ≤ 1 before the design is blamed.
+    pub axes: [usize; Axis::ALL.len()],
 }
 
 impl Summary {
@@ -160,6 +199,20 @@ impl Summary {
             total_turns: records.iter().map(|r| u64::from(r.turns)).sum(),
             alert: AlertTally::of(records.iter().map(|r| &r.alert)),
             reinforcements: records.iter().map(|r| u64::from(r.reinforcements)).sum(),
+            stars: records
+                .iter()
+                .filter_map(|r| r.score)
+                .fold([0; 4], |mut tally, score| {
+                    tally[score.stars() as usize] += 1;
+                    tally
+                }),
+            axes: Axis::ALL.map(|axis| {
+                records
+                    .iter()
+                    .filter_map(|r| r.score)
+                    .filter(|score| score.earned(axis))
+                    .count()
+            }),
         }
     }
 
@@ -192,7 +245,7 @@ impl Summary {
             .map(|(&v, s)| format!("\"{}\":{s:.4}", v.key()))
             .collect();
         format!(
-            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak_mean\":{:.4},\"alert_rungs\":{},\"alert_triggers\":{},\"reinforcements\":{}}}}}",
+            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak_mean\":{:.4},\"alert_rungs\":{},\"alert_triggers\":{},\"reinforcements\":{},\"stars\":{},\"star_axes\":{}}}}}",
             profile_json(self.profile),
             self.runs,
             self.wins,
@@ -212,8 +265,32 @@ impl Summary {
             self.alert.rungs_json(),
             self.alert.triggers_json(),
             self.reinforcements,
+            tally_json(&self.stars),
+            axes_json(&self.axes),
         )
     }
+}
+
+/// The star distribution as `{"0":n,"1":n,"2":n,"3":n}` — keyed by the total, so a reader
+/// sees the shape rather than an average that hides it.
+fn tally_json(stars: &[usize; 4]) -> String {
+    let body: Vec<String> = stars
+        .iter()
+        .enumerate()
+        .map(|(n, count)| format!("\"{n}\":{count}"))
+        .collect();
+    format!("{{{}}}", body.join(","))
+}
+
+/// Per-axis win counts as `{"speed":n,...}`, keyed by [`Axis::label`] so the sim's JSON and
+/// the game's own screens name the axes the same.
+fn axes_json(axes: &[usize; Axis::ALL.len()]) -> String {
+    let body: Vec<String> = Axis::ALL
+        .iter()
+        .zip(axes)
+        .map(|(&axis, count)| format!("\"{}\":{count}", axis.label()))
+        .collect();
+    format!("{{{}}}", body.join(","))
 }
 
 #[cfg(test)]
@@ -249,8 +326,23 @@ mod tests {
             // rather than the ladder — an arrival can be refused, so "reached rung 2"
             // and "faced two newcomers" are separate facts and the schema shows both.
             reinforcements: 2,
+            par: FIXTURE_PAR,
+            // The stars follow the row's own facts (#563): only a win is scored at all,
+            // the sample climb above put it at rung 2 so stealth is gone, and the rest
+            // rides on the turns the caller names — which is what lets one fixture
+            // produce more than one star total.
+            score: (outcome == RunOutcome::Win).then_some(Score {
+                speed: turns <= FIXTURE_PAR,
+                stealth: false,
+                thoroughness: true,
+            }),
         }
     }
+
+    /// The par the row fixtures are measured against — round, and far enough above the
+    /// turns most of them name that a caller opts *out* of the speed star by asking for a
+    /// long run.
+    const FIXTURE_PAR: u32 = 200;
 
     /// The row schema, pinned byte-for-byte: this string is what the playtest
     /// skill parses, so any change here is a deliberate, visible break.
@@ -258,7 +350,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}],\"reinforcements\":2}"
+            "{\"seed\":17,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}],\"reinforcements\":2,\"par\":200,\"stars\":1,\"score\":{\"speed\":false,\"stealth\":false,\"haul\":true}}"
         );
     }
 
@@ -276,7 +368,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"profile\":\"balanced\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000,\"silence_radio\":0.0000,\"drone\":0.0000,\"false_call\":0.0000,\"dart\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0},\"reinforcements\":8}}"
+            "{\"summary\":{\"profile\":\"balanced\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0,\"drone\":0,\"false_call\":0,\"dart\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000,\"silence_radio\":0.0000,\"drone\":0.0000,\"false_call\":0.0000,\"dart\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0},\"reinforcements\":8,\"stars\":{\"0\":0,\"1\":0,\"2\":2,\"3\":0},\"star_axes\":{\"speed\":2,\"stealth\":0,\"haul\":2}}}"
         );
     }
 
@@ -358,5 +450,49 @@ mod tests {
             mixed.diversity,
             uniform.diversity,
         );
+    }
+
+    /// **The star metric is over the wins, and `null` is not zero** (#563).
+    ///
+    /// A capture has no score at all, so it contributes to neither the distribution nor
+    /// the per-axis counts — folding losses in as zero-star wins would report the win rate
+    /// a second time under another name.
+    #[test]
+    fn the_star_metric_counts_only_the_runs_that_got_out() {
+        let short = record(1, RunOutcome::Win, 100); // inside par: speed + haul
+        let long = record(2, RunOutcome::Win, 400); // over par: haul alone
+        let lost = record(3, RunOutcome::Capture, 40);
+        let capped = record(4, RunOutcome::Timeout, 999);
+
+        let summary = Summary::of(&[short.clone(), long, lost.clone(), capped.clone()]);
+        assert_eq!(
+            summary.stars,
+            [0, 1, 1, 0],
+            "one two-star win and one one-star win, and the two losses count nowhere",
+        );
+        assert_eq!(
+            summary.axes,
+            [1, 0, 2],
+            "speed once, stealth never (the fixture climbs to rung 2), haul twice",
+        );
+        assert_eq!(summary.stars.iter().sum::<usize>(), summary.wins);
+
+        // …and the rows say the same: a loss is `null`, never a zero-star score.
+        assert!(lost.to_json_line().contains("\"stars\":null"));
+        assert!(lost.to_json_line().contains("\"score\":null"));
+        assert!(capped.to_json_line().contains("\"stars\":null"));
+        assert!(short.to_json_line().contains("\"stars\":2"));
+    }
+
+    /// A batch nothing won reports an empty distribution rather than a missing field — the
+    /// same honesty `turns_to_win_mean`'s `null` keeps one column over.
+    #[test]
+    fn a_winless_batch_scores_nothing_without_lying_about_it() {
+        let summary = Summary::of(&[record(1, RunOutcome::Capture, 40)]);
+        assert_eq!(summary.stars, [0; 4]);
+        assert_eq!(summary.axes, [0; Axis::ALL.len()]);
+        assert!(summary
+            .to_json_line()
+            .contains("\"stars\":{\"0\":0,\"1\":0,\"2\":0,\"3\":0}"));
     }
 }

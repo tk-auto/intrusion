@@ -42,6 +42,7 @@ use crate::alert::{rung_category, NO_ALERT};
 use crate::category::Category;
 use crate::guard::GuardState;
 use crate::level_seed::LevelSeed;
+use crate::score::{Axis, Score, STAR_EARNED, STAR_MISSED};
 use crate::verdict::{EndExit, Ending, RunOptions, RunStats, Verdict};
 
 /// The end screen's **view state**, owned by the shell exactly like
@@ -181,6 +182,15 @@ fn rows(verdict: Verdict, ui: EndUi, level: Option<LevelSeed>) -> Vec<Row> {
         rows.push(Row::Line(text, category));
     }
 
+    // The three stars (#563), on a won run only: a capture has no score, and rating a
+    // loss would put a verdict where §14 v2 owes the player a reason.
+    if let Some(score) = verdict.score() {
+        rows.push(Row::Blank);
+        for (text, category) in score_rows(score) {
+            rows.push(Row::Line(text, category));
+        }
+    }
+
     // The seed row, on both screens (#138): the sharing loop is "seed 8371 got me like
     // this", and the moment worth sharing a run from is the moment it ended. A
     // hand-built state has no token to print ([`seed_token`]) and simply skips the row
@@ -267,6 +277,72 @@ fn ledger(stats: RunStats) -> Vec<(String, Category)> {
         ),
     ]
 }
+
+/// The score block (§15 Q4/#563): the glance form, then **one row per axis**, each
+/// naming itself, whether it was earned, and what it was for.
+///
+/// The named rows are the deliverable and the `★★☆` headline is the garnish, not the
+/// other way round. A bare mark row would tell a player they scored two and leave them to
+/// work out which two — and the only thing a rating is worth in a game with no
+/// meta-progression is *which one you missed* (§2.2: what carries over is what you
+/// learned).
+///
+/// Every row is padded to one width so the block centres as a block: the labels line up
+/// in a column, the marks in another, and the reasons in a third. Three centred rows of
+/// different lengths would stagger, and a staggered list of three things reads as three
+/// unrelated lines rather than as one score.
+///
+/// Colour is the second reading of the same fact (§11.2): **Interest** — the goals-and-
+/// rewards channel — for a star earned, **Ground** for one missed, so the block's shape is
+/// legible before a word of it is read.
+fn score_rows(score: Score) -> Vec<(String, Category)> {
+    let cell = |axis: Axis| {
+        format!(
+            "{:<label$} {} {}",
+            axis.label(),
+            if score.earned(axis) {
+                STAR_EARNED
+            } else {
+                STAR_MISSED
+            },
+            axis.blurb(),
+            label = AXIS_LABEL_WIDTH,
+        )
+    };
+    let width = Axis::ALL
+        .iter()
+        .map(|&axis| cell(axis).chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut rows = vec![(score.marks(), Category::Interest)];
+    rows.extend(Axis::ALL.iter().map(|&axis| {
+        (
+            format!("{:<width$}", cell(axis), width = width),
+            if score.earned(axis) {
+                Category::Interest
+            } else {
+                Category::Ground
+            },
+        )
+    }));
+    rows
+}
+
+/// The column the axis marks line up in: the widest axis label, so *speed* and *stealth*
+/// put their star in the same place. Derived from [`Axis::label`] rather than typed, so a
+/// re-worded axis cannot leave the block ragged.
+const AXIS_LABEL_WIDTH: usize = {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < Axis::ALL.len() {
+        let len = Axis::ALL[i].label().len();
+        if len > widest {
+            widest = len;
+        }
+        i += 1;
+    }
+    widest
+};
 
 /// Lay the panel over a finished frame (§14 v2/#138) — the last thing drawn, over the
 /// board and over any chrome, because a verdict is the one thing on screen that
