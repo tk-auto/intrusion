@@ -390,7 +390,7 @@ at `span + 25 × consoles + 15 × crates` — quick play on 155 — and *no* all
 came in under it: a played run with the fog lifted **and** the guards blinded missed it,
 and a 100-seed bot batch at the quick-play gate scored zero speed stars against a median
 of 428 turns. The numbers had been set against the **sim's** gate, where a run takes one
-console and leaves, which is a different job from taking all three. Appendix 60 §4.
+console and leaves, which is a different job from taking all three. Appendix 61 §4.
 
 **Par lives on the help panel's Level info tab, not on the board.** It is a fact about the
 level like every active modifier (§12.6), so it is available on demand and never nagging.
@@ -428,7 +428,7 @@ entire point.
 - **The stealth star is demanding, not impossible.** Rung 1 costs one sighting *or* one
   missed ping and never comes back down (§7.3), so this was the number most likely to be
   unreachable. The sim says otherwise: over 400 bare-bot runs it was earned by **60–75% of
-  winning runs** across all four profiles (appendix 60). The threshold stays at condition
+  winning runs** across all four profiles (appendix 61). The threshold stays at condition
   0; if a played run says otherwise, it moves to ≤ 1 before the design is blamed.
 - **Par must be measured against the mode's own gate.** How long a raid takes is decided
   more by *how many objectives the exit asks for* than by anything about the building: the
@@ -1160,10 +1160,17 @@ headless sim (§13.2) can measure what they do to a run.
 
 **Hybrid: data for the common case, code for the weird case.** **[SETTLED]**
 
-Most abilities are a declarative record — cost, range, targeting mode, duration,
-cooldown, and a list of effects drawn from a small vocabulary of primitives.
-Trying "what if there were a smoke grenade" should mean **adding a row**, not
-writing a system.
+Most abilities are a declarative record — turn cost, duration, cooldown, an optional
+per-level use budget (§8.2), and a list of effects drawn from a small vocabulary of
+primitives. Trying "what if there were a smoke grenade" should mean **adding a row**,
+not writing a system.
+
+**How an ability aims is not in the record, and neither is its reach.** Aiming is
+one of the three §8.4 ways, applied by the ability's own precondition where the
+press is resolved; a reach (`CONFUSION_RADIUS`, `DART_RANGE`) is that effect's own
+constant. The record used to declare a targeting mode as a fourth field, and it was
+stored and never read — the aim was always taken at the press — so #556 removed it
+rather than leave the record asserting something nothing checked (§2.3, appendix 61).
 
 When a primitive won't stretch — piloting a drone, rewinding time — there is an
 escape hatch to plain code behind the same interface. Both named cases now have a
@@ -1420,15 +1427,48 @@ Notes carried forward, because they are good and non-obvious:
   > charging the debt on top would charge twice for the same grab. Half speed starts
   > from the first step, which is where §8.3's "one cell per two turns" lives.
 
-### 8.4 Targeting
+### 8.4 Aiming
 
 The old version had **no targeting system at all**, and its absence is the direct
 cause of the free unlimited-range neutralise: auto-target-nearest-visible was the path
-of least resistance (appendix 1).
+of least resistance (appendix 1). Everything below exists because of that sentence.
 
-**Build targeting up front.** **[SETTLED]** At minimum: **self**, **direction**,
-and **tile within range** (with a cursor). It unblocks most of the interesting
-ability space, and its absence actively distorted the design.
+**An ability aims by where you stand and which way you face.** **[SETTLED]** The
+vocabulary is **closed**, and it is these three:
+
+1. **Itself** — the player's own cell. Run, Camouflage, Dephase, Autodoors.
+2. **The facing cardinal** — the cell in front of you (Decoy), or the ray out from
+   it (the Dart, §8.3/appendix 54).
+3. **An area around the cell you fired from** — a radius taken as a **snapshot** at
+   the press. Confusion, Lockdown, False Call. Walking away does not move it.
+
+And the prohibitions, which are the load-bearing half:
+
+- **No auto-target-nearest, ever, for anything.** Not the nearest guard, not the
+  nearest door, not the nearest anything. This is the sentence the section exists
+  for (appendix 1), and there is **no target list anywhere in the implementation**
+  to snap to. Where an ability needs to know what it caught — the blast's guards,
+  the dart's line — it measures from the aim, never the reverse.
+- **No cursor, and no modal picking step.** An ability is answered by **one
+  keypress**, from the bar or its mnemonic (§11.4/§11.6). Aiming is paid for in
+  movement, exposure and turns — on the board, where the guards can punish it —
+  rather than in a UI the guards cannot see.
+- **A fourth way to aim is a design conversation**, not a quiet extension — the
+  same fence §8.2 puts around the use budget.
+
+One seam resolves all three: the press settles what it acts on *before* the ability
+commits (`state::activation`), so no ability grows its own way of picking a thing
+and therefore its own way of picking the wrong one (appendix 44). An aim that comes
+back with nothing to act on refuses the press for **free** — no turn, no cooldown,
+no use spent (§4.4) — and the §11.4 bar greys the entry from the same answer, which
+is why a refusal is never a thing the player discovers by spending a turn. What the
+record holds is the economy; **the aim is not a stored field** — it is the rule each
+ability's own precondition applies.
+
+> **[SETTLED] reversed here.** This section used to read *"build targeting up front
+> — self, direction, and tile within range (with a cursor)"*. The cursor half was
+> built, used by nothing, and cut in #556; the ban on auto-nearest — the part the
+> section was actually written for — stands unchanged. **Appendix 61.**
 
 ---
 
@@ -3906,6 +3946,29 @@ the replay Artifact build (#197 slice C) share so they cannot diverge.
 > that a token's meaning depends on. What follows here is only what the *design* turns
 > on.
 
+**Sharing is the URL** (#572) **[SETTLED]**. A run is handed over as a
+`…#seed=<token>` **link** and by no other route: the Level info tab's `copy [c]` puts
+one on the clipboard, the address bar holds one from a run's first frame, and the
+recipient clicks it. There is nowhere to type a token — the title screen's *Seed play*
+entry, the sub-screen behind it and its DOM text box are all retired — which is what
+makes the second half of the rule true: **the whole game is the character grid**
+(§11.1), with no exception outside the debug session.
+
+The **token stays displayed** on the panel, and that split is the decision rather than
+an inconsistency. Eighteen letters is what a 40-column grid can print and a human can
+read back off a screen; a URL is what the person on the other end can actually open.
+So the *display* is the short form and the *copy* is the link, and when a link arrives
+mangled — a chat client eating the fragment, a line wrap through a paste — reading the
+token off the screen and rebuilding the URL by hand is the recovery path. That is also
+why a clipboard that refuses says so instead of claiming a copy: the token is still
+printed one row above.
+
+A shared link is **the page's origin and path with a fresh fragment, and nothing
+else**. Neither a `?debug=` activation nor the `&inputs=` of a replay the sharer
+happens to be watching rides along — one strip, in one place, rather than a rule each
+copy control remembers separately. And where the sim offers a run to a *person* rather
+than to the playtest skill's parser, it offers a link too.
+
 **A number is not a token** (#333, superseding #328). A bare `?seed=8371` names *this
 build's quick-play preset applied to 8371* — not a run — so a shared link silently
 re-resolves whenever the preset moves, and it did ([token spec](level-seed-token.md)
@@ -4047,8 +4110,8 @@ a campaign of **one** facility is exactly the game v1 ships.
   source (§12.4). A whole run therefore reproduces from `(run seed, [inputs])` exactly
   as one level does, which is what makes bug repro and golden tests possible across a
   2–3 hour run. It is derived **narrowed to the level-seed token's seed field**, so
-  every facility of a campaign is also a *sayable level*: a token you can hand to
-  someone, or to the sim, and play on its own (§13.1).
+  every facility of a campaign is also a *sayable level*: a link you can hand to
+  someone, or the token inside it to the sim's `--config`, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
   (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
   intel is currency in the campaign and never a fee at the exit, which takes nothing

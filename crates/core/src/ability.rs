@@ -797,27 +797,6 @@ impl Loadout {
     }
 }
 
-/// How an ability picks what it acts on (§8.4).
-///
-/// This is the ability's *declared* targeting, stored as data. Resolving it to a
-/// concrete target — the cursor, validation, and the self/direction/tile resolution
-/// — is the [`Targeting`](crate::Targeting) session's job (shipped in #149), driven
-/// from [`State::begin_ability_targeting`](crate::State::begin_ability_targeting).
-/// Range, where an ability has one, rides in [`TargetingMode::Tile`] as the §6.1
-/// **box** radius, so "within range" is the single box notion sight already uses
-/// (§6.1) rather than a second field that could disagree.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TargetingMode {
-    /// The player's own cell — Run, Camouflage, Dephase (§8.3).
-    Itself,
-    /// A cardinal from the player, the cell they face — Decoy (§8.3).
-    Direction,
-    /// A cell within a §6.1 box of `range`. No v1 ability uses it; it is here so the
-    /// vocabulary is complete — the cursor that resolves it lives in the
-    /// [`Targeting`](crate::Targeting) session.
-    Tile { range: u32 },
-}
-
 /// The **effect vocabulary** (§8.1) — the small set of primitives a data-driven
 /// ability's behaviour is built from.
 ///
@@ -938,17 +917,23 @@ pub enum Behaviour {
 }
 
 /// The **time economy** of an activated ability (§8.2): what it costs to switch
-/// on, how it is aimed, and the two clocks the [`Deck`] runs on it.
+/// on, and the two clocks the [`Deck`] runs on it.
 ///
 /// Held apart from [`Ability`] so that a **passive** (#264) — which has none of
 /// these — cannot state one. A passive is not "an ability with duration 0 and
 /// cooldown 0"; it is an ability with no clock at all, and
 /// [`AbilityMode`] is where that difference is made unrepresentable rather than
 /// merely conventional.
+///
+/// **How an ability aims is not a field here** (§8.4/#556). It used to be — a
+/// declared `TargetingMode` beside the clocks — but the record only ever *stored*
+/// it: what a press actually acts on is resolved by the precondition ladder
+/// (`state::activation::Aimed`) from where the player stands and which way they
+/// face, and a second declaration that nothing read was §2.3's stub wearing a
+/// field's name (appendix 60).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Economy {
     cost: u32,
-    targeting: TargetingMode,
     duration: u32,
     cooldown: u32,
 }
@@ -959,12 +944,6 @@ impl Economy {
     /// it: a future multi-turn ritual would raise it here, not special-case the loop.
     pub fn cost(&self) -> u32 {
         self.cost
-    }
-
-    /// How the ability targets (§8.4), resolved by the
-    /// [`Targeting`](crate::Targeting) session.
-    pub fn targeting(&self) -> TargetingMode {
-        self.targeting
     }
 
     /// Turns the ability stays active once switched on (§8.2). Zero means instant —
@@ -1082,15 +1061,9 @@ impl Ability {
 /// row states that field explicitly — a budget is never inherited from a
 /// constructor's default, so declaring one stays a different keystroke from
 /// forgetting one.
-const fn activated(
-    cost: u32,
-    targeting: TargetingMode,
-    duration: u32,
-    cooldown: u32,
-) -> AbilityMode {
+const fn activated(cost: u32, duration: u32, cooldown: u32) -> AbilityMode {
     AbilityMode::Activated(Economy {
         cost,
-        targeting,
         duration,
         cooldown,
     })
@@ -1098,19 +1071,19 @@ const fn activated(
 
 const RUN: Ability = Ability {
     id: AbilityId::Run,
-    mode: activated(1, TargetingMode::Itself, 5, 12),
+    mode: activated(1, 5, 12),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::ExtraStep]),
 };
 const CAMOUFLAGE: Ability = Ability {
     id: AbilityId::Camouflage,
-    mode: activated(1, TargetingMode::Itself, 10, 20),
+    mode: activated(1, 10, 20),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::ConcealWhileStill]),
 };
 const DECOY: Ability = Ability {
     id: AbilityId::Decoy,
-    mode: activated(1, TargetingMode::Direction, 20, 30),
+    mode: activated(1, 20, 30),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::SpawnDecoy]),
 };
@@ -1124,7 +1097,7 @@ const DECOY: Ability = Ability {
 // 30: two knobs moved at once is neither knob measured.
 const DEPHASE: Ability = Ability {
     id: AbilityId::Dephase,
-    mode: activated(1, TargetingMode::Itself, 4, 30),
+    mode: activated(1, 4, 30),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::Phase]),
 };
@@ -1133,7 +1106,7 @@ const DEPHASE: Ability = Ability {
 // next flight (§7.6). Self-target toggle; free to cancel (§4.4).
 const AUTODOORS: Ability = Ability {
     id: AbilityId::Autodoors,
-    mode: activated(1, TargetingMode::Itself, 16, 40),
+    mode: activated(1, 16, 40),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
@@ -1151,7 +1124,7 @@ const AUTODOORS: Ability = Ability {
 // still makes spending it a real decision.
 const CONFUSION: Ability = Ability {
     id: AbilityId::Confusion,
-    mode: activated(1, TargetingMode::Itself, 0, 45),
+    mode: activated(1, 0, 45),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::Confuse]),
 };
@@ -1183,7 +1156,7 @@ const VISION: Ability = Ability {
 // activation and its budget exactly as a data ability does.
 const PIERCE_WALL: Ability = Ability {
     id: AbilityId::PierceWall,
-    mode: activated(1, TargetingMode::Itself, 0, 0),
+    mode: activated(1, 0, 0),
     uses: Some(PIERCE_WALL_USES),
     behaviour: Behaviour::Coded,
 };
@@ -1207,7 +1180,7 @@ const PIERCE_WALL: Ability = Ability {
 // an escape hatch — the effect table already knew it was coming.
 const LOCKDOWN: Ability = Ability {
     id: AbilityId::Lockdown,
-    mode: activated(1, TargetingMode::Itself, 8, 40),
+    mode: activated(1, 8, 40),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::SealDoors]),
 };
@@ -1288,7 +1261,7 @@ const SAVER: Ability = Ability {
 // re-scout every twenty turns would never have to plan under fog at all.
 const DRONE: Ability = Ability {
     id: AbilityId::Drone,
-    mode: activated(1, TargetingMode::Itself, 40, 40),
+    mode: activated(1, 40, 40),
     uses: None,
     behaviour: Behaviour::Coded,
 };
@@ -1318,7 +1291,7 @@ const DRONE: Ability = Ability {
 // doors, so it is one more row in the vocabulary (§8.1) and not an escape hatch.
 const FALSE_CALL: Ability = Ability {
     id: AbilityId::FalseCall,
-    mode: activated(1, TargetingMode::Itself, 0, 30),
+    mode: activated(1, 0, 30),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::FakeCall]),
 };
@@ -1363,9 +1336,9 @@ const GUIDE: Ability = Ability {
 // player stood. A cursor would have asked for two keypresses. This asks you to **be in
 // the corridor, on the line, pointing the right way, and unseen**, which is paid for in
 // movement, exposure and turns, on the board, where the guards can punish it. So the aim
-// is [`TargetingMode::Direction`] — Decoy's mode, and the first use of it as a **ray**
-// rather than as the single faced cell — and there is no target list anywhere in the
-// implementation to snap to (§8.4/appendix 1).
+// is **the facing cardinal** (§8.4's second way to aim) — Decoy's, and the first use of
+// it as a **ray** rather than as the single faced cell — and there is no target list
+// anywhere in the implementation to snap to (§8.4/appendix 1).
 //
 // **Instant** (`duration: 0`) and **with no cooldown at all**, which is Pierce Wall's
 // row exactly — and it is the one place this deliberately does not do what #239 asked
@@ -1415,7 +1388,7 @@ const GUIDE: Ability = Ability {
 // be gone round.
 const DART: Ability = Ability {
     id: AbilityId::Dart,
-    mode: activated(1, TargetingMode::Direction, 0, 0),
+    mode: activated(1, 0, 0),
     uses: Some(DART_USES),
     behaviour: Behaviour::Coded,
 };

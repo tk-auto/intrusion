@@ -46,95 +46,6 @@
            inline-baseline whitespace that could nudge the page into scrolling. */
         display: block;
       }
-      /* The menu's seed prompt (§13.1/#110/#245/#268): the one part of the title
-         screen that is markup rather than glyphs, because a canvas cannot raise a
-         phone's keyboard. It floats at the centre of the viewport, where the core's
-         seed screen deliberately leaves a blank band (crates/core/src/render/menu.rs),
-         and it is shown only while the shell says that screen is up. Fixed, so it
-         never affects the canvas fit; the shell keeps its taps and keystrokes off the
-         game (crates/web/src/menu.rs). Colours are its own palette echo of §11.2
-         (Owned blue, slate). */
-      #menu-seed {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 10;
-        display: none;
-        /* Only as wide as its contents, and never wider than the viewport it floats
-           in — the page is played in narrow frames (a phone, the artifact's side
-           panel) where a fixed-width row would push its last button off the edge and
-           strand the way back (§11.6's no-trap rule). The row wraps rather than
-           clipping if even the shrunk box will not fit. */
-        box-sizing: border-box;
-        width: max-content;
-        max-width: calc(100vw - 20px);
-        flex-wrap: wrap;
-        justify-content: center;
-        align-items: center;
-        /* Typeset at the board's own glyph size, which the shell publishes as
-           `--glyph` on every fit (crates/web/src/menu.rs). The canvas scales its text
-           to the viewport, so a form in fixed pixels towers over a small fit and
-           reads as another app dropped on top; in the board's own size it reads as
-           part of the same screen. Everything inside is in `em`, so the whole panel
-           scales with it. */
-        font: var(--glyph, 12px) / 1.35 ui-monospace, "SF Mono", Menlo, Consolas,
-          monospace;
-        gap: 0.6em;
-        padding: 0.8em;
-        color: var(--chrome-text);
-        background: color-mix(in srgb, var(--chrome-page) 92%, transparent);
-        border: 1px solid var(--chrome-edge);
-        border-radius: 6px;
-        /* The panel is UI, not the board: allow its own touch behaviour (the shell
-           also stops these events reaching the game's document listeners). */
-        touch-action: auto;
-      }
-      body[data-screen="seed"] #menu-seed {
-        display: flex;
-      }
-      #menu-seed .lbl {
-        color: var(--chrome-hint);
-      }
-      /* The box's text is selectable so a token can be copied back out (#110:
-         readable/copyable), unlike the rest of the page which suppresses selection
-         for touch input. */
-      #seed-input {
-        /* The one element that gives way: the buttons must stay whole and tappable,
-           so a narrow frame shrinks the box instead of clipping the row. */
-        flex: 1 1 12ch;
-        min-width: 6ch;
-        box-sizing: border-box;
-        padding: 0.35em 0.5em;
-        font: inherit;
-        color: var(--chrome-accent);
-        background: var(--chrome-inset);
-        border: 1px solid var(--chrome-line);
-        border-radius: 3px;
-        user-select: text;
-        -webkit-user-select: text;
-      }
-      #menu-seed button {
-        font: inherit;
-        /* Never shrunk by a cramped row — see the box above — and never smaller than
-           a thumb can reliably hit, however small the board's glyphs get (§11.6). */
-        flex: 0 0 auto;
-        min-height: max(2.4em, 28px);
-        padding: 0.35em 0.9em;
-        border: 0;
-        border-radius: 3px;
-        cursor: pointer;
-      }
-      #seed-go {
-        color: var(--chrome-page);
-        background: var(--chrome-accent);
-      }
-      /* The way back out, always beside the way forward — the touch player's escape
-         from the prompt (§11.6's no-trap rule). Quieter than play, but a real button. */
-      #seed-back {
-        color: var(--chrome-text);
-        background: var(--chrome-edge);
-      }
       /* Replay viewer HUD (§12.4/#197): a small bar centred at the bottom edge that
          reads the scrub position (K / total) and marks the run as a replay, not live
          play. Hidden until the shell boots into a replay (crates/web/src/replay.rs
@@ -175,33 +86,13 @@
   </head>
   <body>
     <!--
-      The menu's seed prompt (§13.1/#110/#245/#268/#333): a box for a level-seed
-      token — 18 letters carrying the seed, the modifiers, and the ability
-      loadout together — with the way
-      forward and the way back beside it. Revealed by the shell only on the title
-      screen's Seed play, and wired by crates/web/src/menu.rs, which reads
-      #seed-input on the button or Enter. Every element is optional to the shell, so
-      the game still boots if this markup is absent.
-    -->
-    <div id="menu-seed">
-      <label class="lbl" for="seed-input">seed</label>
-      <input
-        id="seed-input"
-        inputmode="text"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="paste a token…"
-        aria-label="Level seed to play"
-      />
-      <button id="seed-go" type="button">play</button>
-      <button id="seed-back" type="button">back</button>
-    </div>
-    <!--
       Replay viewer HUD (§12.4/#197): the scrub position and a "replay" marker,
       revealed by crates/web/src/replay.rs only when the shell boots into a replay
       (a baked window.__intrusionReplay or an `inputs=` in the URL). Optional to the
-      shell like the seed bar — a page without it still plays the replay, just with
-      no on-screen counter.
+      shell — a page without it still plays the replay, just with no on-screen
+      counter. It is the page's **only** element beside the canvas host (#572), and
+      it is an indicator rather than a control: nothing here is interactive, which is
+      what `crates/web/src/menu.rs::the_page_carries_no_dom_ui` pins.
     -->
     <div id="replaybar" aria-live="polite">
       <span class="lbl">replay</span>

@@ -86,7 +86,7 @@ pub const PAR_PER_CACHE: u32 = 50;
 /// game allows, and a 100-seed bot batch at the quick-play gate agreed: zero speed stars,
 /// median 428 turns. The mistake was measuring the first numbers against the **sim's**
 /// gate (`AtLeastOne`), where a run takes one console and leaves — a completely different
-/// job from taking all three. Appendix 60 §4 records it.
+/// job from taking all three. Appendix 61 §4 records it.
 ///
 /// The tuned set puts quick play on **430**, against that 428 median: a threshold roughly
 /// half of competent all-intel runs clear, which is what a demanding-but-reachable star

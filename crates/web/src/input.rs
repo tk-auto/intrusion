@@ -471,12 +471,18 @@ impl Game {
         self.ui.seed_copy = SeedCopy::default();
     }
 
-    /// Put this run's **level-seed token** on the system clipboard (§13.1/#353) — the
-    /// one thing on the panel that exists to be taken away, and until now the only
-    /// thing there the player could not actually take.
+    /// Put a **link to this run's level** on the system clipboard (§13.1/#353/#572) —
+    /// the one thing on the panel that exists to be taken away.
     ///
-    /// It mirrors the drawn control exactly ([`seed_to_copy`]): on the Level info tab,
-    /// and only when this run has a token at all. A press with no control under it
+    /// It used to copy the bare token, which was a fair handoff while the menu had a
+    /// box to paste one into. #572 took the box away, so a token is now something the
+    /// recipient can do nothing with but retype into a URL by eye; the link is one
+    /// click. The panel still **prints** the token one row above — display is the short
+    /// form, the copy is the link — which is also the recovery path when a link arrives
+    /// mangled by whatever carried it.
+    ///
+    /// It mirrors the drawn control exactly ([`level_link_to_copy`]): on the Level info
+    /// tab, and only when this run has a token at all. A press with no control under it
     /// does nothing — no acknowledgement either, because nothing was attempted.
     ///
     /// The clipboard is conditional, so the outcome comes back in two pieces. No
@@ -485,17 +491,20 @@ impl Game {
     /// own `<iframe>` may well be) only rejects a microtask later, and corrects the
     /// line then. Either way the token stays printed one row above, and nothing claims
     /// a copy that did not happen.
+    ///
+    /// [`level_link_to_copy`]: Self::level_link_to_copy
     fn copy_seed(&mut self) {
-        let Some(token) = self.seed_to_copy() else {
+        let Some(link) = self.level_link_to_copy() else {
             return;
         };
-        self.copy_to_clipboard(&token);
+        self.copy_to_clipboard(&link);
     }
 
     /// Put the whole **run** on the clipboard as a `…#seed=<token>&inputs=<script>`
     /// link (§12.4/§13.1/#411) — the options screen's `replay` row (#513),
     /// [`copy_seed`](Self::copy_seed)'s sibling, through the very same clipboard
-    /// plumbing and acknowledgement line.
+    /// plumbing, page base and acknowledgement line. Since #572 the two differ only in
+    /// how much of the run the link names: a level, or a level and how it was played.
     ///
     /// It mirrors the drawn row exactly ([`replay_to_copy`](Self::replay_to_copy)): on
     /// the options screen, in a debug session, and only when the run has a token for
@@ -549,15 +558,20 @@ impl Game {
         };
     }
 
-    /// The token the panel is currently offering to copy, or `None` when it is
+    /// The **level link** the panel is currently offering to copy, or `None` when it is
     /// offering none — the shell's side of [`help_hit`](intrusion_core::help_hit)'s
     /// rule, read off the same [`State::level`](intrusion_core::State::level) the frame
     /// was drawn from so the key can never copy something the panel is not showing.
-    fn seed_to_copy(&self) -> Option<String> {
+    ///
+    /// The gate is unchanged by #572 and deliberately so: a run whose config no token
+    /// can hold (#333) draws no token, so there is no control and nothing to copy —
+    /// the link cannot conjure a name for a run that has none.
+    fn level_link_to_copy(&self) -> Option<String> {
         if self.ui.help_tab != HelpTab::LevelInfo {
             return None;
         }
-        self.state.level().and_then(|level| level.encode())
+        let token = self.state.level()?.encode()?;
+        crate::seed::level_url(&token)
     }
 
     /// The replay link the options screen is currently offering to copy (§12.4/#411),
@@ -1102,8 +1116,7 @@ impl GesturePump {
                     // *anywhere* the controls declined — the dead band and the chrome
                     // included — because a swipe from there is unambiguous; it is only
                     // the board's Wait that the routing gates, at the moment the drag
-                    // resolves. (The seed box's own presses never reach here; its panel
-                    // stops them at itself.)
+                    // resolves.
                     Tap::Captured | Tap::Wait | Tap::Nothing => Some(Pointer::Drag(Drag {
                         pointer_id: e.pointer_id(),
                         origin: (x, y),

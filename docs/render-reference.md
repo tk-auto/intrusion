@@ -366,7 +366,7 @@ The pair was kept rather than swapped for a private mark, because `★` is the o
 every player already reads as *this is the good one* and a rating is exactly what that is
 for — and because the score row never draws a bare `★★☆`: each mark stands beside the axis
 it belongs to (`speed ★ · stealth ☆ · haul ☆`), which is both the ticket's own requirement
-and what keeps the two readings apart at a glance. Appendix 60 records the call.
+and what keeps the two readings apart at a glance. Appendix 61 records the call.
 
 The end screen draws the same pair in the same Owned (§14 v2) and has no archive on it, so
 there is nothing to tell apart there.

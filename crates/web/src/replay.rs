@@ -175,19 +175,23 @@ fn inputs_in(fragment: &str) -> Option<String> {
     field_in(fragment, "inputs").map(str::to_string)
 }
 
-/// The complete copyable replay link (#411): this page's own URL with its fragment
-/// replaced by the core's [`replay_fragment`] — so what the copy control hands over
-/// opens the run wherever the page itself lives (the Pages deploy above all).
-/// `None` when the page has no usable address to build on (a hostless test
-/// harness).
+/// The complete copyable replay link (#411): this page's own base URL with the core's
+/// [`replay_fragment`] on it — so what the copy control hands over opens the run
+/// wherever the page itself lives (the Pages deploy above all). `None` when the page
+/// has no usable address to build on (a hostless test harness).
 ///
 /// Thin on purpose: the *format* is the core's, spelled once beside the notation it
-/// carries, and what is left here is the one platform question — what this page's
-/// own address is.
+/// carries, and the one platform question — what this page's own address is — is
+/// [`crate::seed::page_base`]'s, shared with the level link `copy [c]` writes (#572).
+/// Sharing it is what makes "the link carries no debug state" a property of the base
+/// rather than a promise each caller keeps separately: the query goes with the
+/// fragment, so a session activated by `?debug=` cannot ride out on either link.
 pub(crate) fn replay_url(token: &str, script: &str) -> Option<String> {
-    let href = web_sys::window()?.location().href().ok()?;
-    let base = href.split('#').next().unwrap_or_default();
-    Some(format!("{base}#{}", replay_fragment(token, script)))
+    Some(format!(
+        "{}#{}",
+        crate::seed::page_base()?,
+        replay_fragment(token, script)
+    ))
 }
 
 /// A direction in *time* a replay gesture drives — the scrub counterpart of a

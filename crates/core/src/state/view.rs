@@ -36,28 +36,6 @@ impl State {
         self.facing
     }
 
-    /// Open a targeting session (§8.4) for `mode`, anchored on the player's cell
-    /// and facing (§5). The shell drives the returned [`Targeting`] — steering the
-    /// cursor with cardinals and confirming — while core owns validity: a `Tile`
-    /// cursor is bounded to the §6.1 range box on this facility, and cancelling is
-    /// just dropping the session (free, no turn — §4.4). Nothing here auto-targets;
-    /// that absence is the whole point of building targeting up front (§8.4).
-    pub fn begin_targeting(&self, mode: TargetingMode) -> Targeting {
-        Targeting::begin(mode, self.player, self.facing)
-    }
-
-    /// Open a targeting session for `ability` by its declared [`TargetingMode`]
-    /// (§8.4) — the seam an ability key or a bar tap resolves an ability's
-    /// target through, so no ability ever falls back to auto-targeting (the exact
-    /// §8.4/§2.3 regression this system exists to prevent).
-    ///
-    /// `None` for a **passive** (#264): it is never activated, so there is nothing
-    /// to aim and no session to open — the caller's key press is the free §4.4
-    /// no-op it already is for an ability on cooldown.
-    pub fn begin_ability_targeting(&self, ability: AbilityId) -> Option<Targeting> {
-        Some(self.begin_targeting(ability.def().economy()?.targeting()))
-    }
-
     /// The player's field of view (§6): the ~180° forward half-disc, or the full
     /// 360° on a turn spent waiting — the only way to see behind you (§8.3) —
     /// including the auto-peek around adjacent corners (#121,

@@ -1,57 +1,50 @@
-//! The shell half of the title screen (§11.4/§14, #268): the menu's input, the
-//! runs it starts, and the one piece of it that has to be real markup.
+//! The shell half of the title screen (§11.4/§14, #268): the menu's input and the
+//! runs it starts.
 //!
 //! The screen itself is drawn by the core ([`intrusion_core::render_screen`] hands
 //! the frame to the menu while [`ScreenUi::menu`] is set), so what lives here is
-//! only what the core cannot own: browser listeners, the seed text box, and the
-//! boot path a chosen entry runs.
+//! only what the core cannot own: browser listeners and the boot path a chosen
+//! entry runs.
 //!
-//! # Why the seed box is DOM
+//! # There is no markup here any more (#572)
 //!
-//! Everything else on the menu is glyphs on the canvas. The seed box is not,
-//! because **a canvas cannot raise a phone's keyboard** — a grid-drawn text field
-//! would make Seed play a desktop-only feature, which §11.6 ("touch is a real
-//! target and was never finished") is exactly about. So the box is a real
-//! `<input>` in `web/index.html`, floating over the band the core's seed prompt
-//! leaves blank, revealed by the `data-screen` attribute this module sets on
-//! `<body>`. Its *play* and *back* buttons are real buttons for the same reason:
-//! a touch player must be able to leave the prompt without a keyboard (§11.6's
-//! no-trap rule — the failure the old options dialog shipped).
+//! One thing on this screen used to be DOM: a `<input id="seed-input">` with *play*
+//! and *back* buttons, floating over a band the core's seed prompt left blank, so a
+//! player could type a level-seed token in. It was there because **a canvas cannot
+//! raise a phone's keyboard**, and it brought three event fences with it — a key
+//! swallow, an Enter-on-button special case and a pointer-down stop — to keep the
+//! panel's own input away from the document-level pumps (§11.6).
 //!
-//! The box's listeners sit on the panel itself and stop their events there, before
-//! the document-level pumps (§11.6) can read a keystroke as a move or a press as a
-//! swipe — the same guard the old seed bar needed, for the same reason.
+//! It is gone because **sharing is the URL** (§13.1): the Level info tab's `copy [c]`
+//! hands over a `…#seed=<token>` link, which the person on the other end opens rather
+//! than transcribes. Nothing is left to type, so the box, its buttons, its fences, the
+//! surface it floated over and the entry that opened it all went together — and the
+//! whole game is the character grid again, with no exception outside the debug
+//! session. What this module still does with the DOM is set one attribute
+//! ([`set_screen`]) and listen; it creates and reads no elements at all.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::{seed, Game};
 use intrusion_core::{
     Difficulty, LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, OptionsControl,
     RunMode, RunOptions, ScreenUi,
 };
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::{
-    Document, Element, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, Node, PointerEvent,
-};
 
-use crate::{seed, Game};
-
-/// What `<body data-screen>` reads on each of the shell's three surfaces. The CSS
-/// reveals the seed box on `seed` and hides it everywhere else, and it is the one
-/// signal outside the canvas that says which surface is up — which is also what
-/// lets the headless smoke check (the artifact-build skill's `verify.mjs`) tell a
-/// title screen from a live run.
+/// What `<body data-screen>` reads on each of the shell's surfaces — the one signal
+/// outside the canvas that says which surface is up, which is what lets the headless
+/// smoke check (the artifact-build skill's `verify.mjs`) tell a title screen from a
+/// live run. It reveals nothing: since #572 the page has no chrome to reveal.
 const SCREEN_ATTR: &str = "data-screen";
 const SCREEN_MENU: &str = "menu";
-const SCREEN_SEED: &str = "seed";
 const SCREEN_OPTIONS: &str = "options";
 /// The **global settings screen** (§14 v2/#513) — named apart from `options`, which is
 /// the *pre-run* level dialog (#298), for the reason the two screens are apart at all.
 pub(crate) const SCREEN_SETTINGS: &str = "settings";
 pub(crate) const SCREEN_PLAY: &str = "play";
-/// The campaign map (§14 v3/#208). Like `play` it hides the seed box; it is named
-/// separately so the headless smoke check can tell a map from a board.
+/// The campaign map (§14 v3/#208), named apart from `play` so the headless smoke
+/// check can tell a map from a board.
 pub(crate) const SCREEN_MAP: &str = "map";
 
 /// The view state a fresh load opens on: the menu's entry list, with the marker on
@@ -77,31 +70,9 @@ pub(crate) fn opening_ui(resumable: bool) -> ScreenUi {
     }
 }
 
-/// Publish the board's current glyph size to the page as the `--glyph` custom
-/// property, in CSS pixels — the size the seed box types itself at.
-///
-/// The canvas scales its text to fit the viewport (§11.4: the whole level, always,
-/// at any size), so the *same words* are ten pixels tall in a narrow frame and twice
-/// that on a desktop. A form measured in fixed pixels does not follow, and in a
-/// narrow frame it ends up shouting over a board drawn half its size. Handing the
-/// fit's own number to the stylesheet keeps the one piece of DOM chrome the same
-/// size as the glyphs beside it, at every fit and through every rotation — the shell
-/// does not restyle anything, it just says how big a letter currently is.
-pub(crate) fn set_glyph_size(css_px: f64) {
-    if let Some(root) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.document_element())
-        .and_then(|e| e.dyn_into::<HtmlElement>().ok())
-    {
-        let _ = root
-            .style()
-            .set_property("--glyph", &format!("{css_px:.2}px"));
-    }
-}
-
-/// Mirror the current surface onto `<body data-screen>`. Best-effort: a page whose
-/// body is somehow unavailable simply keeps the seed box hidden, which is the safe
-/// direction — the box is never the only way out of anything.
+/// Mirror the current surface onto `<body data-screen>`. Best-effort and purely
+/// informational: nothing on the page is styled off it since #572, so a page whose
+/// body is somehow unavailable simply plays on with a stale attribute.
 pub(crate) fn set_screen(screen: &str) {
     if let Some(body) = web_sys::window()
         .and_then(|w| w.document())
@@ -117,7 +88,6 @@ pub(crate) fn set_screen(screen: &str) {
 pub(crate) fn screen_for(menu: MenuUi) -> &'static str {
     match menu.screen {
         MenuScreen::Entries => SCREEN_MENU,
-        MenuScreen::SeedPrompt => SCREEN_SEED,
         MenuScreen::LevelOptions => SCREEN_OPTIONS,
     }
 }
@@ -148,8 +118,8 @@ impl Game {
             return;
         };
         match nav {
-            // The list walks only while the list is showing: with the seed prompt up,
-            // up/down belong to the text box, not to a selection nobody can see.
+            // The list walks only while the list is showing: on a sub-screen up/down
+            // belong to that screen's own controls, not to a selection nobody can see.
             MenuNav::Prev if on_list(menu) => self.select(menu.prev_entry()),
             MenuNav::Next if on_list(menu) => self.select(menu.next_entry()),
             MenuNav::Activate if on_list(menu) => self.choose(menu.selection()),
@@ -164,18 +134,16 @@ impl Game {
             MenuNav::Easier if on_options(menu) => self.set_difficulty(menu.difficulty.easier()),
             MenuNav::Harder if on_options(menu) => self.set_difficulty(menu.difficulty.harder()),
             MenuNav::Activate if on_options(menu) => self.activate(menu.options_control),
-            // Held back on the seed prompt, where `n` is an ordinary letter of the
-            // token being typed (§13.1/#245): the box has the keyboard there, and a
-            // key that recoloured the screen mid-token would be a trap, not an
-            // option. Everywhere else on the menu — the list and the level-options
-            // dialog, both of which draw the control — it is the same free view
-            // toggle as anywhere in the game, and the key matches the drawn control.
-            MenuNav::ToggleTheme if menu.screen != MenuScreen::SeedPrompt => {
+            // Free on every menu surface. It used to be held back on the seed prompt,
+            // where `n` was an ordinary letter of the token being typed and a key that
+            // recoloured the screen mid-token would have been a trap; with typing gone
+            // (§13.1/#572) no menu screen wants the letter for anything else.
+            MenuNav::ToggleTheme => {
                 self.toggle_theme();
                 self.draw();
             }
-            // Back out of the seed prompt. On the list itself there is nowhere
-            // further back — the menu is the root — so Escape there does nothing.
+            // Back out of a sub-screen. On the list itself there is nowhere further
+            // back — the menu is the root — so Escape there does nothing.
             MenuNav::Back if !on_list(menu) => self.show_entries(),
             _ => {}
         }
@@ -214,7 +182,6 @@ impl Game {
             // there is a run. Deliberately not `MenuEntry::Options`, which is §14 v2's
             // *global* settings screen — a different thing entirely (#513).
             MenuEntry::QuickPlay => self.show_level_options(),
-            MenuEntry::SeedPlay => self.show_seed_prompt(),
             // Story mode goes **straight to the map** (§14 v3/#208), with no dialog in
             // front of it. There is nothing to ask: a campaign scales through its own
             // alert (#210) rather than through the §12.6 difficulty axis, so the one
@@ -266,9 +233,8 @@ impl Game {
         self.draw();
     }
 
-    /// Show the level-options dialog. Every control on it is glyphs, so unlike the
-    /// seed prompt there is no markup to reveal — only the screen attribute, which
-    /// keeps the seed box hidden and tells the smoke check which surface is up.
+    /// Show the level-options dialog. Every control on it is glyphs, so all the
+    /// screen attribute does is tell the smoke check which surface is up.
     fn show_level_options(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
             menu.screen = MenuScreen::LevelOptions;
@@ -285,20 +251,7 @@ impl Game {
         self.draw();
     }
 
-    /// Show the seed prompt: the core draws the instructions, the DOM box appears in
-    /// the band they leave clear, and the box takes focus so a desktop player can
-    /// type straight away and a phone raises its keyboard on the screen that exists
-    /// to be typed into.
-    fn show_seed_prompt(&mut self) {
-        if let Some(menu) = self.ui.menu.as_mut() {
-            menu.screen = MenuScreen::SeedPrompt;
-        }
-        self.draw();
-        set_screen(SCREEN_SEED);
-        focus_seed_input();
-    }
-
-    /// Return from the seed prompt to the entry list, hiding the box again.
+    /// Return from a sub-screen to the entry list.
     fn show_entries(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
             menu.screen = MenuScreen::Entries;
@@ -364,197 +317,90 @@ impl Game {
     }
 }
 
-/// Focus the seed box, if the page has one. Best-effort like every other DOM reach
-/// here: a page without the markup still shows the prompt, it just cannot be typed
-/// into — which is why the prompt is never the only way to start a run.
-fn seed_input() -> Option<HtmlInputElement> {
-    web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("seed-input"))
-        .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
-}
-
-fn focus_seed_input() {
-    if let Some(input) = seed_input() {
-        let _ = input.focus();
-    }
-}
-
-/// Ignore any click on the panel whose **press began somewhere else** — the
-/// "ghost click" a touch leaves behind (§11.6).
+/// Publish the surface the shell opened on — the menu's whole remaining business with
+/// the page (§11.4/#268).
 ///
-/// One tap is one `pointerdown` on the board followed, on release, by a `click`
-/// aimed at whatever is under the finger *by then*. The press that chooses Seed
-/// play therefore opens the prompt and *then* clicks whatever part of the
-/// just-revealed panel happens to sit under that finger. On a narrow frame that is
-/// the `back` button — the panel wraps it to a second row, centred, exactly where
-/// the menu row that opened the prompt was tapped — so a single tap opened the
-/// prompt and closed it again, the form and the keyboard flashing on the way past.
+/// It was `install` until #572, and it wired real markup: the seed box, its two
+/// buttons and the three event fences that kept the panel's own keystrokes and presses
+/// away from the document-level pumps (§11.6). All of that went with the prompt, and
+/// what is left is not an installation at all — no element is looked up, no listener
+/// added, nothing that can fail — so it is named for the one thing it does and takes
+/// neither a `Document` nor a `Result` it would always answer `Ok` to.
 ///
-/// The rule that fixes it is the one a control already implies: **an interaction
-/// that started on the board is not an interaction with this panel.** A pointerdown
-/// or a keystroke *inside* the panel arms it; a pointerdown anywhere else disarms it
-/// (both read in the capture phase, so they are seen before the panel stops the
-/// event reaching the game's pumps); and an unarmed click is swallowed before any
-/// button's own handler runs. Arming on the keystroke is what keeps Enter or Space
-/// on a focused button working — the click those synthesise is indistinguishable
-/// from a touch's by its own fields (both report a click count of zero), so *what
-/// came before it* is the only honest test.
-fn guard_ghost_clicks(document: &Document, panel: &Element) -> Result<(), JsValue> {
-    let armed = Rc::new(Cell::new(false));
-
-    {
-        let armed = armed.clone();
-        let panel = panel.clone();
-        let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
-            let inside = e
-                .target()
-                .and_then(|t| t.dyn_into::<Node>().ok())
-                .is_some_and(|n| panel.contains(Some(&n)));
-            armed.set(inside);
-        });
-        document.add_event_listener_with_callback_and_bool(
-            "pointerdown",
-            cb.as_ref().unchecked_ref(),
-            true, // capture: before the panel stops the event going any further
-        )?;
-        cb.forget();
-    }
-
-    {
-        let armed = armed.clone();
-        let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |_e: KeyboardEvent| armed.set(true));
-        panel.add_event_listener_with_callback_and_bool(
-            "keydown",
-            cb.as_ref().unchecked_ref(),
-            true,
-        )?;
-        cb.forget();
-    }
-
-    {
-        let armed = armed.clone();
-        let cb = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
-            if armed.replace(false) {
-                return;
-            }
-            e.stop_propagation();
-            e.prevent_default();
-        });
-        panel.add_event_listener_with_callback_and_bool(
-            "click",
-            cb.as_ref().unchecked_ref(),
-            true, // capture: swallowed before any button's own handler runs
-        )?;
-        cb.forget();
-    }
-
-    Ok(())
-}
-
-/// Wire the menu's DOM: the seed box, its *play* and *back* buttons, and the event
-/// guards that keep the panel's own input away from the game's document-level pumps
-/// — and the board's presses away from the panel ([`guard_ghost_clicks`], §11.6).
-/// Every element is optional — a page hosted without the markup still boots and
-/// still plays, it just has no seed prompt — so each lookup falls out quietly rather
-/// than failing the boot.
+/// The attribute stays because it is read from *outside* the wasm: `data-screen` is
+/// how the headless smoke check (the artifact-build skill's `verify.mjs`) tells a title
+/// screen from a live run.
 ///
 /// Called in live play only, never in the replay viewer (a replay has no menu: it
 /// was told exactly which run to show).
-pub(crate) fn install(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
+pub(crate) fn publish_screen(game: &Rc<RefCell<Game>>) {
     set_screen(if game.borrow().menu().is_some() {
         SCREEN_MENU
     } else {
         SCREEN_PLAY
     });
+}
 
-    let (Some(panel), Some(input), Some(go), Some(back)) = (
-        document.get_element_by_id("menu-seed"),
-        seed_input(),
-        document.get_element_by_id("seed-go"),
-        document.get_element_by_id("seed-back"),
-    ) else {
-        return Ok(()); // no seed-prompt markup on this page — nothing to wire
-    };
+#[cfg(test)]
+mod tests {
+    /// The page as it is served — the one file the shell's DOM claims can be checked
+    /// against without a browser.
+    const PAGE: &str = include_str!("../../../web/index.html");
 
-    guard_ghost_clicks(document, &panel)?;
-
-    // Loading a token: decode the box and play it. An empty or unreadable box rolls
-    // a fresh quick-play run rather than refusing (#110) — the prompt must never be
-    // a dead end, and a typo costs a level, not the page.
-    let load: Rc<dyn Fn()> = {
-        let game = game.clone();
-        let input = input.clone();
-        Rc::new(move || {
-            let level = LevelSeed::decode(&input.value()).unwrap_or_else(seed::random_level);
-            input.set_value("");
-            // A token names a level, never a difficulty — the draw is already
-            // resolved into the modifiers it carries (§12.6/#298) — so the run's
-            // framing is quick play at the baseline setting. That is what its end
-            // screen's *new run* will roll; *retry* hands back this very token.
-            game.borrow_mut().start_run(
-                level,
-                RunOptions {
-                    mode: RunMode::QuickPlay,
-                    difficulty: Difficulty::Standard,
-                },
+    /// **The game is the character grid, and the page carries no UI** (§11.1/#572).
+    ///
+    /// This is the assertion the seed box's removal is *for*: a control that is not in
+    /// the markup cannot be revealed by a stray CSS rule, cannot swallow a keystroke
+    /// the pumps wanted, and cannot be tapped by a ghost click. The check is on the
+    /// markup rather than on a live DOM because the gate has no browser — but it is
+    /// the honest half, since every element the shell ever reached for was authored
+    /// here and this module now creates none.
+    ///
+    /// The replay HUD is the deliberate survivor and is *not* a control: it is a
+    /// `<div>` of text with `pointer-events: none`, so a tap on it reaches the scrub
+    /// surface underneath. Hence the check is for **interactive** markup, not for any
+    /// element at all.
+    #[test]
+    fn the_page_carries_no_dom_ui() {
+        for control in ["<input", "<button", "<select", "<textarea", "<form"] {
+            assert!(
+                !PAGE.contains(control),
+                "web/index.html carries a `{control}` — the page is the canvas (§11.1)",
             );
-        })
-    };
-
-    {
-        let load = load.clone();
-        let cb = Closure::<dyn FnMut(MouseEvent)>::new(move |_e: MouseEvent| load());
-        go.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())?;
-        cb.forget();
+        }
+        // And nothing of the retired seed prompt is left behind to be revived by a
+        // stylesheet or found by a lookup that outlived its element.
+        for leftover in ["menu-seed", "seed-input", "seed-go", "seed-back", "--glyph"] {
+            assert!(
+                !PAGE.contains(leftover),
+                "web/index.html still mentions `{leftover}` from the retired seed prompt",
+            );
+        }
     }
 
-    // The touch player's way back to the entry list, beside the way forward (§11.6).
-    {
-        let game = game.clone();
-        let cb = Closure::<dyn FnMut(MouseEvent)>::new(move |_e: MouseEvent| {
-            game.borrow_mut().show_entries();
-        });
-        back.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())?;
-        cb.forget();
-    }
-
-    // Keys typed into the panel are the box's own, never the menu's: swallow them
-    // before the document key pump sees a `j` as "next entry" or an Enter as
-    // "activate". Enter submits the token; Escape leaves the prompt, the keyboard
-    // twin of the back button. Nothing is `preventDefault`ed, so the box still types
-    // normally.
-    //
-    // Enter on a **focused button** is that button's own activation, not the box's
-    // submit: the browser turns it into a click, so intercepting it here as well
-    // would fire *play* while the click fires *back*.
-    {
-        let load = load.clone();
-        let game = game.clone();
-        let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
-            e.stop_propagation();
-            let on_button = e
-                .target()
-                .and_then(|t| t.dyn_into::<Element>().ok())
-                .is_some_and(|el| el.tag_name() == "BUTTON");
-            match e.key().as_str() {
-                "Enter" if !on_button => load(),
-                "Escape" => game.borrow_mut().show_entries(),
-                _ => {}
+    /// The shell's own side of the same promise: this module **reaches for no
+    /// element**. Every DOM lookup the menu ever made belonged to the seed box, so a
+    /// new one appearing here is the exception growing back — which is exactly the
+    /// thing #572 removed and the thing a reviewer would have to notice by eye.
+    #[test]
+    fn the_menu_shell_looks_up_no_element() {
+        // The shipping half of this file — everything above these very tests, which
+        // have to name the reaches in order to forbid them.
+        let source = include_str!("menu.rs");
+        let code = source
+            .split_once("#[cfg(test)]")
+            .expect("this module has tests")
+            .0;
+        // Comments are dropped too, so the prose above about the retired box does not
+        // count against it.
+        for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            for reach in ["get_element_by_id", "create_element", "query_selector"] {
+                assert!(
+                    !line.contains(reach),
+                    "the menu shell reaches for an element again: {}",
+                    line.trim(),
+                );
             }
-        });
-        panel.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())?;
-        cb.forget();
+        }
     }
-
-    // A press on the panel is a UI interaction, not a menu tap or a swipe: keep it
-    // from the gesture pump on the document, which would otherwise read it as one.
-    {
-        let cb =
-            Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| e.stop_propagation());
-        panel.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
-        cb.forget();
-    }
-
-    Ok(())
 }
