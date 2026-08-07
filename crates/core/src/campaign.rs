@@ -77,6 +77,7 @@ use crate::level_seed::LevelSeed;
 use crate::modifiers::{IntelGate, LevelModifiers, ModifierDirection, ModifierSources};
 use crate::rng::Rng;
 use crate::salvage::cache_contents;
+use crate::score::Score;
 use crate::state::Outcome;
 use crate::verdict::{Ending, RunMode, RunOptions, RunStats, Verdict};
 
@@ -335,6 +336,20 @@ pub struct Campaign {
     /// slot (§12.7): there is nothing to carry into the raid, only something to say at the
     /// hub.
     manifests: Vec<NodeId>,
+    /// **What each completed facility was worth** (§15 Q4/#563), in the order the run
+    /// raided them — the three stars per raid, kept per node rather than summed.
+    ///
+    /// Per facility because that is what a score *is*: a verdict on one raid, and the
+    /// campaign's own surface for it is the map, where a run reads what it has done as a
+    /// route rather than as a total. The run's total falls out of them
+    /// ([`stars`](Self::stars)) rather than being stored beside them, so the two can
+    /// never disagree.
+    ///
+    /// It is written by [`complete`](Self::complete) and read by **nothing** — not an
+    /// ability, not a modifier, not the wallet (§2.2). The archive gate (#573) will be the
+    /// one reader, and the tests keep the set at zero until it lands: a score a system can
+    /// spend is a currency the player plays toward instead of playing well.
+    scores: Vec<(NodeId, Score)>,
 }
 
 impl Campaign {
@@ -366,6 +381,7 @@ impl Campaign {
             unlocked: Vec::new(),
             scouted: Vec::new(),
             manifests: Vec::new(),
+            scores: Vec::new(),
         }
     }
 
@@ -955,6 +971,13 @@ impl Campaign {
             Ending::Captured { .. } | Ending::Entombed { .. } => self.stage = CampaignStage::Lost,
             Ending::Escaped => {
                 self.bank(verdict.stats);
+                // The raid's three stars (#563), recorded against the facility that was
+                // just emptied — the node the run is still standing on, since `choose`
+                // has not been called yet.
+                if let Some(score) = verdict.score() {
+                    let node = self.node();
+                    self.scores.push((node, score));
+                }
                 self.stage = if self.map.is_archive(self.node()) {
                     CampaignStage::Won
                 } else {
@@ -1011,5 +1034,40 @@ impl Campaign {
     /// piece of tech for another is #266's exchange screen.
     pub fn salvage(&mut self, id: AbilityId) {
         self.loadout = self.loadout.with(id);
+    }
+
+    /// **What each completed facility was worth** (§15 Q4/#563), in raid order.
+    ///
+    /// Only facilities the run *walked out of* appear: a raid that ended in capture ends
+    /// the campaign, so there is never a lost facility to score. The list is therefore
+    /// also the run's record of what it has actually finished.
+    pub fn scores(&self) -> &[(NodeId, Score)] {
+        &self.scores
+    }
+
+    /// **What the raid just finished was worth**, or `None` before the run has completed
+    /// one — what the map screen reports under its alert line (#208).
+    pub fn last_score(&self) -> Option<Score> {
+        self.scores.last().map(|&(_, score)| score)
+    }
+
+    /// The score of one facility, or `None` for one this run has not completed.
+    pub fn score_at(&self, node: NodeId) -> Option<Score> {
+        self.scores
+            .iter()
+            .find(|&&(at, _)| at == node)
+            .map(|&(_, score)| score)
+    }
+
+    /// **The run's accumulated stars** (§2.2/#563) — the sum over every facility it has
+    /// completed, 0–3 apiece.
+    ///
+    /// Derived from [`scores`](Self::scores) rather than stored, so the total and the
+    /// per-facility record cannot drift. It is the number the archive gate (#573) will
+    /// read, and — until that ships — the number **nothing** reads: it is offered here so
+    /// the sim can report it (§13.2) and the map can draw it, neither of which changes how
+    /// a facility plays. It dies with the run, exactly as intel does.
+    pub fn stars(&self) -> u32 {
+        self.scores.iter().map(|&(_, score)| score.stars()).sum()
     }
 }

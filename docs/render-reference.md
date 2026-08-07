@@ -332,7 +332,7 @@ table is that a glyph is not free to mean two things.
 | `▪` | A **Depot** — the ordinary facility | Neutral; **Interest** when marked |
 | `$` | A **Vault** — worth robbing, and watched | Neutral; **Interest** when marked |
 | `¤` | A **Workshop** — salvage, at intel's cost | Neutral; **Interest** when marked |
-| `★` | The **archive** — the run's terminus | Interest |
+| `★` | The **archive** — the run's terminus *(and, in the score row, an earned star — below)* | Interest |
 | `?` | An intel-locked route, not yet bought | Ground |
 | `▫` | A facility on the map, not on offer | Ground |
 | `·` | A road between two facilities | Ground |
@@ -346,8 +346,30 @@ meaning, across both screens. And a facility that has been raided
 recolours to Ground exactly as a spent console does (§2.2's recolour rule): shape is
 what it is, colour is what it means to you now.
 
-`★` is the one glyph on this screen the game does not use elsewhere, which is right
-for the one place a run is trying to reach.
+`★` has **two readings on this screen**, and they are told apart by kind, by place and by
+colour. As a **node in the picture** it is the archive — the one place a run is trying to
+reach. As a **mark in the score row**, beside a named axis, it is a star the last raid
+earned, with `☆` for one it missed (§4.6/#563):
+
+| Glyph | Means | Category |
+|---|---|---|
+| `★` | *(a node in the picture)* the **archive** | Interest |
+| `★` | *(in the score row)* an axis **earned** | **Owned** |
+| `☆` | *(in the score row)* an axis **missed** | Ground |
+
+**The colour is what completes the split.** The archive is Interest — the thing worth
+reaching for — and an earned star is Owned, the player's own channel, because it is a
+verdict on you and already yours. The picture still holds exactly **one** Interest star:
+the terminus.
+
+The pair was kept rather than swapped for a private mark, because `★` is the one glyph
+every player already reads as *this is the good one* and a rating is exactly what that is
+for — and because the score row never draws a bare `★★☆`: each mark stands beside the axis
+it belongs to (`speed ★ · stealth ☆ · haul ☆`), which is both the ticket's own requirement
+and what keeps the two readings apart at a glance. Appendix 61 records the call.
+
+The end screen draws the same pair in the same Owned (§14 v2) and has no archive on it, so
+there is nothing to tell apart there.
 
 **Why `▫` and not the flavour.** The country's *shape* is public and its *contents* are
 not — the §11.5a rule one scale up, which is why it reads without being taught.

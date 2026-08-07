@@ -73,6 +73,7 @@ use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
 use crate::region::{DoorCell, DoorId, RegionId, RegionKind};
 use crate::rng::Rng;
+use crate::score::par_for;
 use crate::status::MessageHistory;
 use crate::verdict::{Ending, RunStats, Verdict};
 use crate::vision::{

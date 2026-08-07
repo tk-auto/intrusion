@@ -83,6 +83,7 @@ mod render;
 mod replay;
 mod rng;
 mod salvage;
+mod score;
 mod scout;
 mod state;
 mod status;
@@ -143,6 +144,10 @@ pub use replay::{
 };
 pub use rng::Rng;
 pub use salvage::cache_contents;
+pub use score::{
+    par_for, Axis, Score, NO_SCORE, PAR_PER_CACHE, PAR_PER_INTEL, PAR_SPAN, STAR_EARNED,
+    STAR_MISSED,
+};
 pub use scout::scouted_cells;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,

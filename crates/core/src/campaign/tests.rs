@@ -195,6 +195,25 @@ fn extracted(intel: usize, alert_peak: u32) -> Verdict {
     extracted_holding(Loadout::innate(), intel, alert_peak)
 }
 
+/// A raid that got out with a score worth reading (#563): it ended at `alert_peak`,
+/// took `intel` of `intel_total` consoles, and — at 40 turns against a par of 200 —
+/// comfortably inside par, so the speed star is the fixture's constant and the other two
+/// are what a caller varies.
+fn scored(alert_peak: u32, intel: usize, intel_total: usize) -> Verdict {
+    Verdict {
+        ending: Ending::Escaped,
+        stats: RunStats {
+            turns: 40,
+            par: 200,
+            intel,
+            intel_total,
+            held: Loadout::innate(),
+            alert_peak,
+            ..RunStats::default()
+        },
+    }
+}
+
 /// A capture, anywhere, by anyone.
 fn captured() -> Verdict {
     Verdict {
@@ -1993,4 +2012,129 @@ fn the_same_seed_and_the_same_spends_read_the_same_manifest() {
         run.manifest(node).expect("bought")
     };
     assert_eq!(read(), read());
+}
+
+/// **A completed facility is scored, and the score is kept against that facility**
+/// (§15 Q4/#563). The campaign's record is per node and in raid order, which is what lets
+/// the map say what a run has done as a route rather than as a total.
+#[test]
+fn every_completed_facility_keeps_its_own_score() {
+    let mut run = Campaign::to_depth(5, 4);
+    assert_eq!(run.scores(), &[], "nothing raided, nothing scored");
+    assert_eq!(run.stars(), 0);
+    assert_eq!(run.last_score(), None);
+
+    // A perfect raid of the first facility: inside par, never noticed, everything taken.
+    let first = run.node();
+    run.enter();
+    run.complete(&scored(0, 3, 3));
+    assert_eq!(run.score_at(first).map(|s| s.stars()), Some(3));
+    assert_eq!(run.stars(), 3);
+    assert_eq!(run.last_score(), run.score_at(first));
+
+    // …and a loud, half-empty one of the next.
+    let second = run.offers()[0].node;
+    assert!(run.choose(second));
+    run.enter();
+    run.complete(&scored(2, 1, 3));
+    let score = run.score_at(second).expect("the second facility is scored");
+    assert_eq!(
+        (score.speed, score.stealth, score.thoroughness),
+        (true, false, false),
+        "seen, and two consoles left standing",
+    );
+    assert_eq!(
+        run.stars(),
+        4,
+        "the run's total is the sum of its facilities"
+    );
+    assert_eq!(run.last_score(), Some(score), "the map reports the latest");
+    assert_eq!(
+        run.scores().iter().map(|&(at, _)| at).collect::<Vec<_>>(),
+        vec![first, second],
+        "in the order they were raided",
+    );
+}
+
+/// **A run that ends in capture scores nothing** (§14 v2): the raid it died in has no
+/// score, and the facilities behind it keep the ones they earned.
+#[test]
+fn a_capture_adds_no_score() {
+    let mut run = Campaign::to_depth(5, 4);
+    run.enter();
+    run.complete(&scored(0, 3, 3));
+    let before = run.scores().to_vec();
+
+    let next = run.offers()[0].node;
+    assert!(run.choose(next));
+    run.enter();
+    run.complete(&captured());
+    assert_eq!(
+        run.scores(),
+        before.as_slice(),
+        "the last raid is not scored"
+    );
+    assert_eq!(run.score_at(next), None);
+    assert_eq!(run.stars(), 3, "and the total did not move");
+}
+
+/// **Nothing but the archive gate may read the score** (§2.2/#563/#573) — and until #573
+/// lands, that set is empty.
+///
+/// Asserted the only way that means anything: two runs given raids that differ *only* in
+/// what they score are stepped side by side, and every other thing the campaign hands out
+/// — the next facility's whole config, the loadout, the wallet, the alert, the offers — is
+/// asserted identical. A system that started spending stars would move one of them.
+///
+/// This is the criterion that stops the score drifting into meta-progression. #573 will
+/// **narrow** it to exactly one reader; it must never be deleted.
+#[test]
+fn nothing_reads_the_score() {
+    // Same haul, same noise, same held set — so `bank` sees identical inputs — and a
+    // different score: one raid was inside par with every crate opened, the other was
+    // slow and left them.
+    let brilliant = Verdict {
+        stats: RunStats {
+            turns: 40,
+            par: 200,
+            caches: 2,
+            caches_total: 2,
+            ..scored(0, 3, 3).stats
+        },
+        ..scored(0, 3, 3)
+    };
+    let plodding = Verdict {
+        stats: RunStats {
+            turns: 400,
+            par: 200,
+            caches: 0,
+            caches_total: 2,
+            ..brilliant.stats
+        },
+        ..brilliant
+    };
+
+    let mut good = Campaign::to_depth(5, 4);
+    let mut bad = Campaign::to_depth(5, 4);
+    for (run, verdict) in [(&mut good, brilliant), (&mut bad, plodding)] {
+        run.enter();
+        run.complete(&verdict);
+        let next = run.offers()[0].node;
+        assert!(run.choose(next));
+    }
+
+    assert_ne!(
+        good.stars(),
+        bad.stars(),
+        "the fixture has to actually score differently, or this proves nothing",
+    );
+    assert_eq!(good.next_level(), bad.next_level(), "the facility ahead");
+    assert_eq!(good.loadout(), bad.loadout(), "the tech carried");
+    assert_eq!(good.intel(), bad.intel(), "the wallet");
+    assert_eq!(good.alert(), bad.alert(), "the alert carried forward");
+    assert_eq!(good.offers(), bad.offers(), "what the map offers");
+    assert_eq!(good.stage(), bad.stage());
+    assert_eq!(good.run_options(), bad.run_options());
+    // And the two runs differ in exactly one thing — the record itself.
+    assert_ne!(good.scores(), bad.scores());
 }

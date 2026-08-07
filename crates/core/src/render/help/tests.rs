@@ -42,6 +42,10 @@ pub(super) fn show(tab: HelpTab, copy: SeedCopy) -> ScreenUi {
     }
 }
 
+/// The par a hand-built panel fixture reports (§14 v2/#563) — a real 40×40 quick-play
+/// number, so the row these tests read is the width the game actually draws.
+pub(super) const FIXTURE_PAR: u32 = 430;
+
 /// The run a test draws the panel *about* — the facts the tabs read, in the order
 /// they were passed one by one before [`PanelRun`] bundled them.
 pub(super) fn panel_run<'a>(
@@ -61,6 +65,7 @@ pub(super) fn panel_run<'a>(
         bar: loadout.iter().collect(),
         debug: DebugModifiers::default(),
         ghosted: false,
+        par: FIXTURE_PAR,
     }
 }
 
@@ -265,6 +270,66 @@ fn the_help_tab_carries_the_glyphs_colours_and_controls() {
     assert!(
         !text.contains("MODIFIERS"),
         "MODIFIERS lives on the other tab"
+    );
+}
+
+/// **Par is a level fact, so it lives on the Level info tab** (§14 v2/#563) — beside the
+/// modifiers, available on demand and never nagging.
+#[test]
+fn the_level_info_tab_states_the_facilitys_par() {
+    let grid = render_help(
+        W,
+        H,
+        show(HelpTab::LevelInfo, SeedCopy::default()),
+        panel_run(
+            None,
+            LevelModifiers::default(),
+            &quiet_alert(),
+            Loadout::innate(),
+        ),
+    );
+    let text = text_of(&grid);
+    assert!(text.contains(PAR_HEADING), "the section: {text}");
+    assert!(
+        text.contains(&par_row(FIXTURE_PAR)),
+        "the number, and what beating it is worth: {text}",
+    );
+    // The blurb is the end screen's own, so the two surfaces cannot promise different
+    // things about one star.
+    assert!(text.contains(Axis::Speed.blurb()), "{text}");
+    // It is *this* facility's number, never a constant baked into the panel.
+    let other = render_help(
+        W,
+        H,
+        show(HelpTab::LevelInfo, SeedCopy::default()),
+        PanelRun {
+            par: FIXTURE_PAR + 40,
+            ..panel_run(
+                None,
+                LevelModifiers::default(),
+                &quiet_alert(),
+                Loadout::innate(),
+            )
+        },
+    );
+    assert!(text_of(&other).contains(&par_row(FIXTURE_PAR + 40)));
+}
+
+/// **And par is nowhere on the board** (#563). A par counting down in the corner would
+/// turn a stealth game into a speedrun, which is the opposite of what §1 and §7.6 reward
+/// — so the HUD says nothing about it and the panel is where you go to look.
+#[test]
+fn the_board_never_mentions_par() {
+    let state = crate::level_seed::start_level(&crate::level_seed::LevelSeed::quick_play(8371))
+        .expect("the v1 footprint carves");
+    let frame = crate::render::render_screen(&state, ScreenUi::default())
+        .to_text()
+        .join("\n");
+    assert!(!frame.contains(PAR_HEADING), "{frame}");
+    assert!(!frame.contains(&par_row(state.par())), "{frame}");
+    assert!(
+        !frame.contains(&format!("par {}", state.par())),
+        "nor any other spelling of it: {frame}",
     );
 }
 
