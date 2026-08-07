@@ -4781,22 +4781,72 @@ which is worse than shipping no speed star at all.
 So par is derived, from the building's own contents rather than from the recipe that asked
 for them:
 
-    par = span + 25 × consoles + 15 × crates          (span = width + height)
+    par = 2 × span + 90 × consoles + 50 × crates      (span = width + height)
 
 Three decisions inside that:
 
-- **Span, not area.** The raid a par measures is mostly crossing the building and coming
-  back; 40×40 gives 80, which is roughly the there-and-back with nothing spare. Area would
-  have made a bigger board quadratically more forgiving, and the board is screen-bound
-  anyway (§10.2/§11.4), so the term has nowhere to run.
+- **Span, not area, and doubled.** The ground a raid covers is *across and back*; 40×40
+  gives 80 cells of span, and the factor of two is the admission that the way in is not a
+  straight line — a raid that walked one would be walking through guards. Area would have
+  made a bigger board quadratically more forgiving, and the board is screen-bound anyway
+  (§10.2/§11.4), so the term has nowhere to run.
 - **From the facility, not from `LevelConfig`.** The number is read off the built level —
   its carved span, the consoles seated in it, the crates hidden in it — so a hand-built
   fixture with no recipe behind it still has a par, and so the flavours are handled with no
-  per-flavour table: an *Outpost* lands on 130 and a *Vault* on 225 because that is what
+  per-flavour table: an *Outpost* lands on 340 and a *Vault* on 670 because that is what
   they hold.
-- **A crate is worth less than a console.** A crate is a detour the player *chooses*; par
-  allows for taking it rather than funding it comfortably, and the thoroughness star is
-  what pays for the choice.
+- **The console term carries the number, and a crate is worth less.** A console is not a
+  detour off a route, it is a *search*: the room it stands in is fogged until you have been
+  in it (§11.5a). A crate is a detour the player *chooses*; par allows for taking it rather
+  than funding it comfortably, and the thoroughness star is what pays for the choice.
+
+### 3a. The first set of numbers was wrong, and the way it was wrong is the lesson
+
+Par shipped at `span + 25 × consoles + 15 × crates`, putting quick play on **155**. It was
+wrong by a factor of nearly three, and both the report and the confirmation are worth
+recording because the mistake is easy to make again.
+
+**The report.** A played run with **omni-vision and ghost both on** — the fog lifted and
+the guards blinded, which is about as close to the optimal walk as this game allows — did
+not make par. That is a decisive kind of evidence: a threshold no *cheating* run can clear
+is not demanding, it is broken.
+
+**The confirmation.** A 100-seed bot batch at the **quick-play** gate:
+
+| Profile (`--intel-gate all`) | Wins | Median turns | speed stars |
+|---|---|---|---|
+| balanced | 4 | 428 | **0** |
+| cautious | 20 | 683 | **0** |
+
+Not one all-intel win in two hundred runs came in under par.
+
+**The mistake was measuring against the wrong gate.** The first numbers were sanity-checked
+against the sim's own baseline, which runs at `IntelGate::AtLeastOne` — a bot that takes
+*one* console and leaves, median 137 turns. Quick play asks for **all three**, and that is
+not the same job with a bigger number on it: each further console is a fresh search of a
+fogged building. 63% of those one-console wins were "inside par", which read like a healthy,
+discriminating threshold and was in fact a measurement of a different game.
+
+**The general rule this leaves behind:** *how long a raid takes is decided more by the
+exit's gate than by anything about the building.* Par is a fact about the facility, but the
+**calibration** of par is a fact about the mode, and the mode a human plays (quick play,
+all the intel) is the one it has to be right for.
+
+The tuned set puts quick play on **430** against that 428 median. Re-measured on the same
+two batches:
+
+| Profile (`--intel-gate all`) | Wins | Median turns | speed stars | best total |
+|---|---|---|---|---|
+| balanced | 4 | 428 | **2** (50%) | 3★ |
+| cautious | 20 | 683 | **3** (15%) | 3★ |
+
+Half of *balanced* wins clear it and a seventh of *cautious* ones do — the temperament that
+buys safety with turns pays for it in the speed star, which is the trade the axis exists to
+price. A three-star run appears for the first time. The consequence to keep in view is the other end: at the
+campaign's minimum haul (§4.5/#574) the speed star is *cheap*, because a run that grabs one
+objective and leaves clears par easily and pays for it in the haul star. That tension is the
+axes doing their job; if beelining ever becomes the only sane play, the lever is the gate
+and not par.
 
 ### 4. What the sim measured, and the one worry it retired
 
@@ -4816,10 +4866,13 @@ Three findings:
   and the one thing worth measuring before shipping. It is earned by **60–75% of winning
   runs** across every temperament. The threshold stays at condition 0; had this read near
   zero, the honest response was to move it to ≤ 1 rather than blame the design.
-- **The speed star discriminates, which is what a threshold is for.** At par 155 against a
-  quick-play facility, 63% of *balanced* wins are inside it and only 28% of *cautious*
-  ones — the profile whose whole temperament is spending turns to stay safe. A threshold
-  that every win or no win cleared would be a row with nothing behind it (§2.3).
+- **The speed star discriminates between temperaments**, which is what a threshold is for:
+  63% of *balanced* wins were inside the *original* par against 28% of *cautious* ones —
+  the profile whose whole temperament is spending turns to stay safe. That the numbers
+  themselves were wrong (§3a) does not touch the shape: a threshold every win or no win
+  cleared would be a row with nothing behind it (§2.3), and this one separates the two
+  temperaments at whatever value it sits at. **These rows are at the sim's own gate**, and
+  §3a is the reason that sentence now has to be said out loud.
 - **`haul` is zero everywhere, and that is the sim's gate rather than the axis.** The sim
   leaves after one console (§13.2), so it never takes everything; the axis is unearned
   rather than unearnable. It is exactly the opposite degeneracy to quick play's, where the

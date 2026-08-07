@@ -201,24 +201,24 @@ fn par_is_derived_per_flavour() {
     // separates these numbers is entirely what each building *holds*.
     assert_eq!(
         par_of(Composite::None),
-        155,
+        430,
         "quick play: 3 intel, no crate"
     );
-    assert_eq!(par_of(Composite::Outpost), 130, "one console fewer");
-    assert_eq!(par_of(Composite::Depot), 170, "the plain recipe, one crate");
+    assert_eq!(par_of(Composite::Outpost), 340, "one console fewer");
+    assert_eq!(par_of(Composite::Depot), 480, "the plain recipe, one crate");
     assert_eq!(
         par_of(Composite::Workshop),
-        160,
+        440,
         "two crates, one console fewer"
     );
     assert_eq!(
         par_of(Composite::Vault),
-        225,
+        670,
         "one more of each, three crates"
     );
     assert_eq!(
         par_of(Composite::Archive),
-        205,
+        610,
         "two more consoles, no crate"
     );
 

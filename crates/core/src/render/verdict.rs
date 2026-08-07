@@ -116,10 +116,6 @@ const CAPTURED_HEADING: &str = "CAPTURED";
 const ENTOMBED_HEADING: &str = "ENTOMBED";
 const ESCAPED_HEADING: &str = "ESCAPED";
 
-/// The won run's one line of cause, where a lost run carries its capture line: §1's
-/// promise, kept — you came in by your own tunnel and left by it.
-const ESCAPED_CAUSE: &str = "the tunnel closes behind you";
-
 /// What the [`Entombed`](Ending::Entombed) loss says (§8.3/#329): the phase window ran
 /// out inside a solid with nowhere to be thrown clear to.
 const ENTOMBED_CAUSE: &str = "the wall closed around you";
@@ -150,9 +146,19 @@ enum Row {
 
 /// The panel's rows for `verdict`, top to bottom.
 ///
-/// Every screen has the same shape — rule, heading, cause, ledger, seed, exits, footer,
-/// rule — and the two verdicts differ in what they put in the slots, which is what
-/// makes them tell apart at a glance while staying one screen to reason about.
+/// Every screen has the same shape — rule, heading, cause, score, ledger, seed, exits,
+/// footer, rule — and the two verdicts differ in what they put in the slots, which is
+/// what makes them tell apart at a glance while staying one screen to reason about.
+///
+/// **A won run has no cause line.** A loss owes the player one — §2.2's promise is that
+/// every capture is traceable, and the guard's mood at contact is what makes it so — but
+/// a win's cause was never a cause: it restated the heading in prettier words, and the
+/// rows under it now carry something the player can actually read. The slot simply goes
+/// unfilled, which is what makes it a slot.
+///
+/// **The score sits above the numbers**, because it is the reading and they are the
+/// evidence: *you were quick and quiet and you left a console* first, then the turns and
+/// the haul it was worked out from.
 fn rows(verdict: Verdict, ui: EndUi, level: Option<LevelSeed>) -> Vec<Row> {
     let mut rows = vec![Row::Rule, Row::Blank];
     let (heading, cause) = match verdict.ending {
@@ -167,28 +173,35 @@ fn rows(verdict: Verdict, ui: EndUi, level: Option<LevelSeed>) -> Vec<Row> {
         // Interest is the goals-and-rewards colour (§11.2): a won run is the one thing
         // on this screen that *is* the reward, and it is the furthest possible read
         // from the losses' red.
-        Ending::Escaped => (
-            (ESCAPED_HEADING, Category::Interest),
-            vec![(ESCAPED_CAUSE.to_string(), Category::Interest)],
-        ),
+        Ending::Escaped => ((ESCAPED_HEADING, Category::Interest), Vec::new()),
     };
     rows.push(Row::Line(heading.0.to_string(), heading.1));
-    rows.push(Row::Blank);
     for (text, category) in cause {
-        rows.push(Row::Line(text, category));
-    }
-    rows.push(Row::Blank);
-    for (text, category) in ledger(verdict.stats) {
+        rows.push(Row::Blank);
         rows.push(Row::Line(text, category));
     }
 
     // The three stars (#563), on a won run only: a capture has no score, and rating a
     // loss would put a verdict where §14 v2 owes the player a reason.
     if let Some(score) = verdict.score() {
-        rows.push(Row::Blank);
-        for (text, category) in score_rows(score) {
+        let mut block = score_rows(score).into_iter();
+        if let Some((text, category)) = block.next() {
+            // The glance row stands off on its own — it is the headline, and the three
+            // rows under it are what it is made of.
+            rows.push(Row::Blank);
+            rows.push(Row::Line(text, category));
+            rows.push(Row::Blank);
+        }
+        // …and the axes read **contiguously**, as one list. A blank between each would
+        // make three unrelated lines out of the one thing the block exists to be.
+        for (text, category) in block {
             rows.push(Row::Line(text, category));
         }
+    }
+
+    rows.push(Row::Blank);
+    for (text, category) in ledger(verdict.stats) {
+        rows.push(Row::Line(text, category));
     }
 
     // The seed row, on both screens (#138): the sharing loop is "seed 8371 got me like
@@ -285,16 +298,21 @@ fn ledger(stats: RunStats) -> Vec<(String, Category)> {
 /// other way round. A bare mark row would tell a player they scored two and leave them to
 /// work out which two — and the only thing a rating is worth in a game with no
 /// meta-progression is *which one you missed* (§2.2: what carries over is what you
-/// learned).
+/// learned). The headline says **whose** it is (`your score:`) rather than standing as
+/// three loose marks: it is the one row on this screen that is a judgement of the player
+/// rather than a fact about the run, and it says so.
 ///
 /// Every row is padded to one width so the block centres as a block: the labels line up
 /// in a column, the marks in another, and the reasons in a third. Three centred rows of
 /// different lengths would stagger, and a staggered list of three things reads as three
 /// unrelated lines rather than as one score.
 ///
-/// Colour is the second reading of the same fact (§11.2): **Interest** — the goals-and-
-/// rewards channel — for a star earned, **Ground** for one missed, so the block's shape is
-/// legible before a word of it is read.
+/// **The block wears the player's own colour** (§11.2): **Owned** — the blue the `@` and
+/// the cupboard you are hidden in are drawn in — for a star earned, **Ground** for one
+/// missed. It used to be Interest, and Interest is spoken for twice on this screen
+/// already: the `ESCAPED` heading and the seed row both wear it, so a third claim left
+/// the score reading as more of the same. Owned is the right word as well as the right
+/// contrast: the stars are a verdict on *you*, in the same sense the `@` is you.
 fn score_rows(score: Score) -> Vec<(String, Category)> {
     let cell = |axis: Axis| {
         format!(
@@ -314,12 +332,12 @@ fn score_rows(score: Score) -> Vec<(String, Category)> {
         .map(|&axis| cell(axis).chars().count())
         .max()
         .unwrap_or(0);
-    let mut rows = vec![(score.marks(), Category::Interest)];
+    let mut rows = vec![(format!("{SCORE_LABEL}{}", score.marks()), Category::Owned)];
     rows.extend(Axis::ALL.iter().map(|&axis| {
         (
             format!("{:<width$}", cell(axis), width = width),
             if score.earned(axis) {
-                Category::Interest
+                Category::Owned
             } else {
                 Category::Ground
             },
@@ -327,6 +345,12 @@ fn score_rows(score: Score) -> Vec<(String, Category)> {
     }));
     rows
 }
+
+/// What the glance row leads with (§11.8's plain register). *Score* names the game's
+/// judgement of the run, not anything inside the facility, so it stays the meta word —
+/// and *your* is what makes the row a verdict addressed to the player rather than three
+/// marks floating above the numbers.
+const SCORE_LABEL: &str = "your score: ";
 
 /// The column the axis marks line up in: the widest axis label, so *speed* and *stealth*
 /// put their star in the same place. Derived from [`Axis::label`] rather than typed, so a

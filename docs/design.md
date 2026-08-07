@@ -371,15 +371,26 @@ one more of everything (§14 v3) and legitimately takes longer than an *Outpost*
 number would be wrong for half the facilities on the map and would read as the game being
 arbitrary, which is worse than having no speed star at all.
 
-    par = span + 25 × consoles + 15 × crates          (span = width + height)
+    par = 2 × span + 90 × consoles + 50 × crates      (span = width + height)
 
-All three **[START]**. The span term is the there-and-back: crossing a 40×40 twice is
-eighty cells of walking before a single detour, and the size is screen-bound (§10.2/§11.4)
-so the span is a fair stand-in for how far the ground goes. The per-objective terms are
-the detour *and the looking that finds it* — exploration is most of a raid (§10) — with a
-crate worth less than a console because a crate is a detour the player chooses rather than
-one the level asks for. Quick play's facility lands on **155**, an *Outpost* on 130, a
-*Vault* on 225.
+All three **[START]**. The span term is the ground: a 40×40 is eighty cells across and
+back, doubled because the way in is not a straight line — a raid that walked one would be
+walking through guards. **The console term carries the number**, and it is large on
+purpose: a console is not a detour off a route, it is a *search*, since the room it stands
+in is fogged until you have been in it (§11.5a) and exploration is most of a raid (§10). A
+crate is worth less, because a crate is a detour the player chooses rather than one the
+level asks for.
+
+| | Outpost | quick play | Workshop | Depot | Archive | Vault |
+|---|---|---|---|---|---|---|
+| **par** | 340 | 430 | 440 | 480 | 610 | 670 |
+
+**The first set of numbers was wrong, and how it was wrong is worth keeping.** Par shipped
+at `span + 25 × consoles + 15 × crates` — quick play on 155 — and *no* all-intel run ever
+came in under it: a played run with the fog lifted **and** the guards blinded missed it,
+and a 100-seed bot batch at the quick-play gate scored zero speed stars against a median
+of 428 turns. The numbers had been set against the **sim's** gate, where a run takes one
+console and leaves, which is a different job from taking all three. Appendix 60 §4.
 
 **Par lives on the help panel's Level info tab, not on the board.** It is a fact about the
 level like every active modifier (§12.6), so it is available on demand and never nagging.
@@ -419,6 +430,15 @@ entire point.
   unreachable. The sim says otherwise: over 400 bare-bot runs it was earned by **60–75% of
   winning runs** across all four profiles (appendix 60). The threshold stays at condition
   0; if a played run says otherwise, it moves to ≤ 1 before the design is blamed.
+- **Par must be measured against the mode's own gate.** How long a raid takes is decided
+  more by *how many objectives the exit asks for* than by anything about the building: the
+  same facility is a ~140-turn job at the minimum haul (§4.5) and a ~430-turn one when the
+  exit wants all the intel. So a par tuned on one gate is wrong on the other — which is
+  exactly the mistake the first set of numbers made. The consequence to keep in view is
+  that the speed star is **cheap at the minimum haul**: a campaign run that grabs one
+  objective and leaves clears par easily, and pays for it in the haul star. That tension is
+  the axes working, not a hole — but if beelining ever becomes the *only* sane play, par is
+  the wrong lever and the gate is the right one.
 
 ---
 

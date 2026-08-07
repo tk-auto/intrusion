@@ -44,7 +44,7 @@ pub(super) fn show(tab: HelpTab, copy: SeedCopy) -> ScreenUi {
 
 /// The par a hand-built panel fixture reports (§14 v2/#563) — a real 40×40 quick-play
 /// number, so the row these tests read is the width the game actually draws.
-pub(super) const FIXTURE_PAR: u32 = 155;
+pub(super) const FIXTURE_PAR: u32 = 430;
 
 /// The run a test draws the panel *about* — the facts the tabs read, in the order
 /// they were passed one by one before [`PanelRun`] bundled them.

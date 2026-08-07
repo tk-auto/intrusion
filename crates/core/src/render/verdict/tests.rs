@@ -141,7 +141,6 @@ fn a_won_run_draws_the_victory_screen_and_its_ledger() {
     let rows = screen(&state, EndUi::default());
 
     assert!(shows(&rows, ESCAPED_HEADING), "the verdict: {rows:#?}");
-    assert!(shows(&rows, ESCAPED_CAUSE), "and what it means: {rows:#?}");
     assert!(!shows(&rows, CAPTURED_HEADING), "a win is not a loss");
 
     let stats = state.run_stats();
@@ -185,6 +184,83 @@ fn a_won_run_names_each_axis_and_whether_it_was_earned() {
         shows(&rows, &score.marks()),
         "the glance form too: {rows:#?}"
     );
+}
+
+/// **A win has no cause line, and a loss does.** A capture owes the player a traceable
+/// reason (§2.2); a win's old line restated its own heading in prettier words, and the
+/// rows that replaced it say something the player can act on.
+#[test]
+fn only_a_lost_run_explains_itself() {
+    let state = captured_run();
+    let Some(Ending::Captured { state: mood, .. }) = state.ending() else {
+        panic!("the fixture ends captured");
+    };
+    let lost = screen(&state, EndUi::default());
+    assert!(shows(&lost, capture_cause(mood)), "{lost:#?}");
+
+    let won = screen(&won_run(), EndUi::default());
+    for row in &won {
+        assert!(
+            !row.contains("tunnel"),
+            "the win screen still narrates its own ending: {row:?}",
+        );
+    }
+}
+
+/// **The score reads above the numbers it was worked out from** (#563): the verdict
+/// first, then the evidence. And it says whose it is.
+#[test]
+fn the_score_sits_above_the_ledger_and_is_addressed_to_the_player() {
+    let state = won_run();
+    let rows = screen(&state, EndUi::default());
+    let score = state
+        .verdict()
+        .expect("a finished run")
+        .score()
+        .expect("a run that got out is scored");
+
+    let headline = format!("{SCORE_LABEL}{}", score.marks());
+    assert!(shows(&rows, &headline), "the glance row: {rows:#?}");
+    assert!(
+        row_of(&rows, &headline) < row_of(&rows, &ledger(state.run_stats())[0].0),
+        "the score reads before the turns it was derived from: {rows:#?}",
+    );
+    for axis in Axis::ALL {
+        assert!(
+            row_of(&rows, axis.blurb()) < row_of(&rows, &ledger(state.run_stats())[0].0),
+            "…and so does every axis: {rows:#?}",
+        );
+    }
+}
+
+/// **The block wears the player's own colour** (§11.2/#563) — Owned, not the Interest the
+/// heading and the seed row already claim, so the score is told apart from both at a
+/// glance. A star missed stays Ground.
+#[test]
+fn the_score_is_drawn_in_the_players_colour() {
+    let earned = Score {
+        speed: true,
+        stealth: false,
+        thoroughness: true,
+    };
+    let drawn = score_rows(earned);
+    assert_eq!(drawn[0].1, Category::Owned, "the headline is the player's");
+    for (axis, (_, category)) in Axis::ALL.iter().zip(&drawn[1..]) {
+        assert_eq!(
+            *category,
+            if earned.earned(*axis) {
+                Category::Owned
+            } else {
+                Category::Ground
+            },
+            "{axis:?} is coloured as it is marked",
+        );
+        assert_ne!(
+            *category,
+            Category::Interest,
+            "Interest is the heading's and the seed's on this screen",
+        );
+    }
 }
 
 /// **A lost run is not scored** (§14 v2): the screen owes it a reason, and three empty
@@ -351,7 +427,6 @@ fn every_line_fits_the_v1_board() {
         CAPTURED_HEADING.into(),
         ENTOMBED_HEADING.into(),
         ESCAPED_HEADING.into(),
-        ESCAPED_CAUSE.into(),
         ENTOMBED_CAUSE.into(),
         FOOTER_CHOOSE.into(),
         FOOTER_ONE_WAY.into(),
@@ -426,4 +501,32 @@ fn the_marker_stays_inside_the_modes_exits() {
     );
     assert_eq!(campaign.next(), EndExit::Menu, "a one-exit list stays put");
     assert_eq!(campaign.prev(), EndExit::Menu);
+}
+
+/// A look at the finished screen, for a human reading the diff — not an assertion about
+/// wording, only a guard that the block reads as one thing top to bottom.
+#[test]
+fn the_won_screen_reads_as_a_verdict_then_its_evidence() {
+    let rows = screen(&won_run(), EndUi::default());
+    let shown: Vec<&String> = rows.iter().filter(|r| !r.trim().is_empty()).collect();
+    println!(
+        "{}",
+        shown
+            .iter()
+            .map(|r| r.trim_end())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let heading = row_of(&rows, ESCAPED_HEADING);
+    let score = row_of(&rows, SCORE_LABEL);
+    let turns = row_of(&rows, "turns ");
+    assert!(
+        heading < score && score < turns,
+        "heading, then the score, then the numbers it came from: {rows:#?}",
+    );
+    // The axes read as one list, with nothing between them (the hand-built fixture has
+    // no level, so there is no seed row on this screen to order against).
+    let first = row_of(&rows, Axis::Speed.blurb());
+    assert_eq!(row_of(&rows, Axis::Stealth.blurb()), first + 1);
+    assert_eq!(row_of(&rows, Axis::Thoroughness.blurb()), first + 2);
 }

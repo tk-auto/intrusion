@@ -45,24 +45,26 @@ use crate::verdict::{RunStats, Verdict};
 ///
 /// It is charged **per cell of span** (width + height) rather than as a flat number,
 /// because the raid a par is measuring is mostly *crossing the building*: in and out of a
-/// 40×40 is eighty cells of walking before a single detour, and the size is screen-bound
-/// (§10.2/§11.4) so the span is a fair stand-in for how far the ground goes. One turn per
-/// cell of span gives that 40×40 an allowance of 80 — roughly the there-and-back, with
-/// nothing spare for looking around.
-pub const PAR_SPAN: u32 = 1;
+/// 40×40 is eighty cells of walking, and the size is screen-bound (§10.2/§11.4) so the
+/// span is a fair stand-in for how far the ground goes. **Two** turns per cell of span,
+/// not one: the way in is not a straight line, because a raid that walked one would be
+/// walking through guards.
+pub const PAR_SPAN: u32 = 2;
 
 /// What each **intel console** adds to par (§14 v2) — **[START]**.
 ///
-/// The detour to a console and back, plus the looking that finds it: exploration is most
-/// of a raid (§10), so this is deliberately more than the walk alone.
-pub const PAR_PER_INTEL: u32 = 25;
+/// **This is the term that carries the number**, and it is large on purpose: a console is
+/// not a detour off a route, it is a *search* — the room it stands in is fogged until you
+/// have been in it (§11.5a), and exploration is most of a raid (§10). Finding one, taking
+/// it, and getting back out to look for the next is most of what the clock is spent on.
+pub const PAR_PER_INTEL: u32 = 90;
 
 /// What each **equipment cache** adds to par (§8.3/#209) — **[START]**.
 ///
 /// Less than a console's, because a crate is not a thing the level asks for: it is a
 /// detour the player chooses, and the thoroughness star is what pays for taking it. Par
 /// allows for the detour rather than funding it comfortably.
-pub const PAR_PER_CACHE: u32 = 15;
+pub const PAR_PER_CACHE: u32 = 50;
 
 /// **A facility's par turn count** (§14 v2/#563): the allowance the speed star is
 /// measured against, derived from the building's own contents.
@@ -75,6 +77,20 @@ pub const PAR_PER_CACHE: u32 = 15;
 /// `span` is `width + height`; `intel` and `caches` are what the facility actually
 /// **holds**, not what the recipe asked for — a par is a fact about the building the
 /// player is standing in.
+///
+/// # The numbers come from measurement, and the first set was badly wrong
+///
+/// Par shipped at `span + 25×consoles + 15×crates`, which put quick play on **155** — and
+/// **no** all-intel run has ever come in under it. A human playing with the fog lifted
+/// *and* the guards blinded missed it, which is about as close to the optimal walk as the
+/// game allows, and a 100-seed bot batch at the quick-play gate agreed: zero speed stars,
+/// median 428 turns. The mistake was measuring the first numbers against the **sim's**
+/// gate (`AtLeastOne`), where a run takes one console and leaves — a completely different
+/// job from taking all three. Appendix 60 §4 records it.
+///
+/// The tuned set puts quick play on **430**, against that 428 median: a threshold roughly
+/// half of competent all-intel runs clear, which is what a demanding-but-reachable star
+/// looks like.
 pub fn par_for(span: u32, intel: usize, caches: usize) -> u32 {
     PAR_SPAN * span + PAR_PER_INTEL * intel as u32 + PAR_PER_CACHE * caches as u32
 }
