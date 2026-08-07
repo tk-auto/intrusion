@@ -139,8 +139,8 @@ pub use render::{
     SeedCopy, SettingsRow, SettingsUi, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
-    ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
-    to_script,
+    ability_script_letter, field_in, input_token, level_fragment, parse_replay_link, parse_script,
+    replay_fragment, to_script,
 };
 pub use rng::Rng;
 pub use salvage::cache_contents;
