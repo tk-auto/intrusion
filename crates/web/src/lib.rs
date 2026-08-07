@@ -185,10 +185,18 @@ pub fn start() -> Result<(), JsValue> {
     // the theme and the renderer come back from the settings record, and a `?tiles=`
     // URL (or a baked preview build) states the renderer for this load over the top.
     let preferences = settings::Settings::boot(tiles::boot_choice());
-    let ui = if chosen.is_none() && replay.is_none() {
-        menu::opening_ui(resume.is_some())
-    } else {
-        ScreenUi::default()
+    let ui = match (chosen, &replay) {
+        // A bare load opens on the title screen; the run it starts a moment later
+        // raises its own level-start card through `for_fresh_run` (#497).
+        (None, None) => menu::opening_ui(resume.is_some()),
+        // A load that was *told* which run to play boots straight into it (#268), so
+        // this is that run's level start and the card is up for it — the same first
+        // frame the menu's Quick play would have produced.
+        (Some(_), None) => ScreenUi::default().for_fresh_run(),
+        // A replay is a pure view of a run that has already been played (§12.4): there
+        // is no first turn to stand in front of, and the card would only be a thing to
+        // dismiss before the playback could be scrubbed.
+        (_, Some(_)) => ScreenUi::default(),
     };
     // Whether the panel carries the **Debug tab** — and with it the copy-replay
     // control (#411/#478) — is a fact about the *session* (#459), decided once here

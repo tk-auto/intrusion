@@ -1236,6 +1236,7 @@ mod menu;
 mod message_log;
 mod modifier_rows;
 mod settings;
+mod splash;
 mod usable;
 mod verdict;
 pub use campaign_map::{

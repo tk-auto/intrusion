@@ -41,11 +41,11 @@ use std::rc::Rc;
 
 use intrusion_core::{
     ability_in_slot, ability_slot_for_code, ability_slot_for_letter, declines_exchange,
-    end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture, help_nav_for_key,
-    input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture, map_nav_for_key,
-    menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, Cell, Direction, EndExit, EndNav,
-    Gesture, HelpHit, HelpNav, HelpTab, Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand,
-    BOTTOM_ROWS, TOP_ROWS,
+    dismisses_splash, end_nav_for_gesture, end_nav_for_key, gesture_dismisses_splash,
+    help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key, key_for_code,
+    map_nav_for_gesture, map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key,
+    ui_command_for_key, Cell, Direction, EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab,
+    Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -80,6 +80,18 @@ impl Game {
         // It folds onto the arrows rather than onto `8` `2` `4` `6` deliberately
         // (#369): those characters are the top row's too, and the top row is the bar's.
         let key = key_for_code(code).unwrap_or(key);
+        // **The level-start card comes first, and it swallows the press whole**
+        // (§11.4/#497). It is up before the first turn with nothing underneath it the
+        // player may act on, so a key that fell through would be read as their first
+        // action — a move, an ability, possibly a step into a cone — which is the very
+        // failure an auto-dismiss would have caused from the other direction. Every key
+        // but a bare modifier dismisses it and stops there; a genuinely unowned key (F5,
+        // a browser shortcut) still dismisses but is left to the page, as it is on every
+        // other modal screen.
+        if splash_swallows(self.ui.splash_open, key) {
+            self.dismiss_splash();
+            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
+        }
         // **The open help panel comes before the menu** (#513): it is the one surface
         // raised *over* another — the menu's `Options` entry opens it on the Options tab
         // — so a key that fell through to the list underneath would be walking a screen
@@ -218,12 +230,30 @@ impl Game {
     /// every other §11.6 rule here; this reads the two view flags it needs.
     fn gesture_command(&self, gesture: Gesture) -> Option<GestureCommand> {
         surface_command(
-            self.ui.help_open,
-            self.ui.menu.is_some(),
-            self.map_open(),
-            self.run_over(),
+            Surfaces {
+                splash_open: self.ui.splash_open,
+                help_open: self.ui.help_open,
+                menu_up: self.ui.menu.is_some(),
+                map_open: self.map_open(),
+                run_over: self.run_over(),
+            },
             gesture,
         )
+    }
+
+    /// Dismiss the level-start card and repaint (§11.4/#497) — a pure view change like
+    /// closing the help panel: no [`State`](intrusion_core::State), no turn (§4.4), and
+    /// **no [`Input`]**, so the dismissal never reaches
+    /// [`step_and_draw`](Self::step_and_draw) and so never enters the recorded stream a
+    /// replay is (§12.4). What the player is answering is *"I have read it"*, which is a
+    /// fact about the screen and not about the run.
+    ///
+    /// Nothing schedules this: it is called from the key pump and the gesture pump and
+    /// from nowhere else, so there is no timer anywhere in the feature that could fire
+    /// between the player deciding to press and the press landing.
+    pub(crate) fn dismiss_splash(&mut self) {
+        self.ui.splash_open = false;
+        self.draw();
     }
 
     /// Whether the game would claim this press *in play*, used by the modal screens
@@ -728,6 +758,10 @@ enum GestureCommand {
     /// An ordinary board input — the only kind that steps the world and spends a
     /// turn (§4.1/§4.3).
     Play(Input),
+    /// Dismiss the level-start card (§11.4/#497). Free like every other view action
+    /// (§4.4), and produced by *every* gesture there is: the card carries no control, so
+    /// a finger cannot miss it.
+    DismissSplash,
     /// A title-screen navigation (§14/#268): walk the list. Costs no turn, changes
     /// no [`State`](intrusion_core::State).
     Menu(MenuNav),
@@ -743,26 +777,59 @@ enum GestureCommand {
     End(EndNav),
 }
 
-/// Which surface a [`Gesture`] is aimed at, and what it means there (§11.6/#336) —
-/// the pure rule behind [`Game::gesture_command`], in the spirit of
-/// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
+/// Whether the **level-start card** takes this press for itself (§11.4/#497) — the pure
+/// rule behind [`Game::handle_key`]'s first arm, in the spirit of [`play_key`] and
+/// [`surface_command`], so *"the dismissing press never reaches the world"* is pinned by
+/// a native test rather than argued about at a review.
 ///
-/// The precedence is the keyboard's, deliberately: the open help panel, then the menu,
-/// then the campaign map, then the end screen, then the board. The panel leads because
-/// it is the one surface raised *over* another — the menu's `Options` entry opens it on
-/// the Options tab (#513). The map sits above the end screen because
-/// between facilities there is a *finished* raid on the state underneath it (#208).
-/// Only the last arm can produce a [`Play`](GestureCommand::Play), which is what
-/// makes the two board-only gates in [`GesturePump::apply`] structurally
-/// unreachable from a modal screen — #223 asks about visible danger and #306's dead
-/// band about the board's edges, and a title screen has neither.
-fn surface_command(
+/// A swallowed press dismisses the card and stops there: it never reaches [`play_key`],
+/// so it cannot step, fire an ability, or open a menu underneath — the same failure an
+/// auto-dismiss would have caused from the other direction, arriving by the other door.
+/// With the card down nothing is swallowed at all, so the rule adds nothing to the
+/// keyboard of a run in progress.
+fn splash_swallows(splash_open: bool, key: &str) -> bool {
+    splash_open && dismisses_splash(key)
+}
+
+/// Which surfaces are up, as the gesture rule reads them — the view flags
+/// [`surface_command`] adjudicates between, bundled so the *order* stays readable as
+/// they multiply and so a caller cannot pass them in the wrong order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct Surfaces {
+    splash_open: bool,
     help_open: bool,
     menu_up: bool,
     map_open: bool,
     run_over: bool,
-    gesture: Gesture,
-) -> Option<GestureCommand> {
+}
+
+/// Which surface a [`Gesture`] is aimed at, and what it means there (§11.6/#336) —
+/// the pure rule behind [`Game::gesture_command`], in the spirit of
+/// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
+///
+/// The precedence is the keyboard's, deliberately: the level-start card, then the open
+/// help panel, then the menu, then the campaign map, then the end screen, then the
+/// board. **The card leads** because it is up before the first turn with nothing
+/// underneath it the player may act on (#497), and because every gesture dismisses it —
+/// a finger that fell through to the board would spend the turn the card exists to stand
+/// in front of. The panel comes next because it is the one surface raised *over* another
+/// — the menu's `Options` entry opens it on the Options tab (#513). The map sits above
+/// the end screen because between facilities there is a *finished* raid on the state
+/// underneath it (#208). Only the last arm can produce a [`Play`](GestureCommand::Play),
+/// which is what makes the two board-only gates in [`GesturePump::apply`] structurally
+/// unreachable from a modal screen — #223 asks about visible danger and #306's dead
+/// band about the board's edges, and a title screen has neither.
+fn surface_command(surfaces: Surfaces, gesture: Gesture) -> Option<GestureCommand> {
+    let Surfaces {
+        splash_open,
+        help_open,
+        menu_up,
+        map_open,
+        run_over,
+    } = surfaces;
+    if splash_open {
+        return gesture_dismisses_splash(gesture).then_some(GestureCommand::DismissSplash);
+    }
     if help_open {
         return help_nav_for_gesture(gesture).map(GestureCommand::Help);
     }
@@ -1069,6 +1136,10 @@ impl GesturePump {
             // #223 asks about visible danger and #306's dead band about the board's
             // edges, and a title screen has neither. It owns the whole viewport, so
             // there is nowhere on it a swipe could be a misaimed something else.
+            // The level-start card (#497): every gesture is the same answer, so there is
+            // nothing here to aim and nothing to gate — and the world it is standing in
+            // front of has not been stepped.
+            Some(GestureCommand::DismissSplash) => game.dismiss_splash(),
             Some(GestureCommand::Menu(nav)) => game.apply_menu_nav(nav),
             Some(GestureCommand::Map(nav)) => game.apply_map_nav(nav),
             Some(GestureCommand::End(nav)) => game.apply_end_nav(nav),
@@ -1550,6 +1621,103 @@ mod tests {
         assert_eq!(drag_gesture(f64::NAN, 0.0), None);
     }
 
+    /// The surfaces up, with the **level-start card down** — the arrangement every
+    /// precedence test below was written against, so the card's own precedence is
+    /// asserted once, on its own, rather than threaded through all of them.
+    fn surfaces(help_open: bool, menu_up: bool, map_open: bool, run_over: bool) -> Surfaces {
+        Surfaces {
+            splash_open: false,
+            help_open,
+            menu_up,
+            map_open,
+            run_over,
+        }
+    }
+
+    /// **The dismissing press is consumed by the card and never reaches the game**
+    /// (§11.4/#497) — the acceptance criterion the whole no-timeout argument rests on.
+    ///
+    /// Every key the game owns is swallowed while the card is up: the movement keys, the
+    /// wait, the bar's digits and mnemonic letters, the UI toggles. None of them can
+    /// reach [`play_key`], because the arm this rule guards returns first — so the press
+    /// that says *"I have read it"* cannot also be a first move into a cone. Only the
+    /// bare modifiers fall through, and only because they are not an answer at all.
+    #[test]
+    fn the_press_that_dismisses_the_card_never_reaches_the_game() {
+        for key in [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "w",
+            ".",
+            "?",
+            "m",
+            "n",
+            "Escape",
+            "Enter",
+            " ",
+            "c",
+            "r",
+            "F5",
+            "q",
+        ] {
+            assert!(
+                splash_swallows(true, key),
+                "{key:?} is swallowed by the card",
+            );
+            // …and with the card down the rule adds nothing: the keyboard of a run in
+            // progress is the one it always was.
+            assert!(!splash_swallows(false, key), "{key:?} with no card up");
+        }
+        // The bar's digits bind by *code* (#359) and never reach a character table at
+        // all, so what the arm has to swallow is the press itself — asserted here on the
+        // character the layout produced, which is what `handle_key` folds and passes.
+        for digit in '0'..='9' {
+            assert!(splash_swallows(true, &digit.to_string()));
+        }
+        for held in ["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"] {
+            assert!(
+                !splash_swallows(true, held),
+                "{held:?} is not the press the card is waiting for",
+            );
+        }
+    }
+
+    /// **Every gesture dismisses the level-start card, and reaches nothing under it**
+    /// (§11.4/§11.6/#497). The card is up before the first turn; a swipe that fell
+    /// through to the board would spend the very turn it is standing in front of, which
+    /// is the failure an auto-dismiss would have caused from the other direction. It
+    /// outranks every other surface, so it cannot matter what a stale flag underneath
+    /// says either.
+    #[test]
+    fn every_gesture_dismisses_the_level_start_card_and_nothing_else() {
+        for gesture in [
+            Gesture::Press,
+            Gesture::Swipe(Direction::North),
+            Gesture::Swipe(Direction::East),
+            Gesture::Swipe(Direction::South),
+            Gesture::Swipe(Direction::West),
+        ] {
+            for (help_open, menu_up, map_open, run_over) in
+                [(false, false, false, false), (true, true, true, true)]
+            {
+                let up = Surfaces {
+                    splash_open: true,
+                    help_open,
+                    menu_up,
+                    map_open,
+                    run_over,
+                };
+                assert_eq!(
+                    surface_command(up, gesture),
+                    Some(GestureCommand::DismissSplash),
+                    "{gesture:?} dismisses the card and reaches nothing under it",
+                );
+            }
+        }
+    }
+
     /// One pump, every surface, and the keyboard's own precedence (§11.6/#336): the
     /// open help panel owns the frame wherever it is raised, the menu owns it before a
     /// run starts, and only underneath them all is there a board to walk. Each outranks
@@ -1559,7 +1727,7 @@ mod tests {
         let up = Gesture::Swipe(Direction::North);
         let left = Gesture::Swipe(Direction::West);
         assert_eq!(
-            surface_command(false, true, false, false, up),
+            surface_command(surfaces(false, true, false, false), up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
         );
         // **The panel outranks the menu** (#513): the menu's `Options` entry raises it
@@ -1567,34 +1735,34 @@ mod tests {
         // aimed at it. This is the one place two modal surfaces stack.
         for menu_up in [true, false] {
             assert_eq!(
-                surface_command(true, menu_up, false, false, up),
+                surface_command(surfaces(true, menu_up, false, false), up),
                 Some(GestureCommand::Help(HelpNav::PrevRow)),
                 "the panel outranks what it was raised over (menu: {menu_up})",
             );
         }
         assert_eq!(
-            surface_command(true, false, false, false, left),
+            surface_command(surfaces(true, false, false, false), left),
             Some(GestureCommand::Help(HelpNav::PrevTab)),
         );
         // A finished run outranks the board underneath it (#138): there is nothing left
         // to navigate but the way on.
         assert_eq!(
-            surface_command(false, false, false, true, up),
+            surface_command(surfaces(false, false, false, true), up),
             Some(GestureCommand::End(EndNav::Prev)),
         );
         // And the **campaign map** outranks the finished run under *it* (§14 v3/#208):
         // between facilities there is a raid that ended on the state below, so its end
         // screen must not answer a swipe aimed at the map drawn over it.
         assert_eq!(
-            surface_command(false, false, true, true, up),
+            surface_command(surfaces(false, false, true, true), up),
             Some(GestureCommand::Map(MapNav::Prev)),
         );
         assert_eq!(
-            surface_command(false, false, false, false, up),
+            surface_command(surfaces(false, false, false, false), up),
             Some(GestureCommand::Play(Input::Step(Direction::North))),
         );
         assert_eq!(
-            surface_command(false, false, false, false, Gesture::Press),
+            surface_command(surfaces(false, false, false, false), Gesture::Press),
             Some(GestureCommand::Play(Input::Wait)),
         );
     }
@@ -1623,7 +1791,7 @@ mod tests {
             ] {
                 assert!(
                     !matches!(
-                        surface_command(help_open, menu_up, map_open, run_over, gesture),
+                        surface_command(surfaces(help_open, menu_up, map_open, run_over), gesture),
                         Some(GestureCommand::Play(_))
                     ),
                     "{gesture:?} on a modal must never reach the board's gates",
@@ -1631,7 +1799,7 @@ mod tests {
             }
             assert!(
                 matches!(
-                    surface_command(false, false, false, false, gesture),
+                    surface_command(surfaces(false, false, false, false), gesture),
                     Some(GestureCommand::Play(_))
                 ),
                 "{gesture:?} on the board still goes through the gates",
@@ -1647,14 +1815,14 @@ mod tests {
     #[test]
     fn a_tap_on_empty_menu_space_never_activates_an_entry() {
         assert_eq!(
-            surface_command(false, true, false, false, Gesture::Press),
+            surface_command(surfaces(false, true, false, false), Gesture::Press),
             None
         );
         // And on the panel's Options tab, for the same reason one step down (#513): a
         // stray tap on empty panel must not flip a setting, nor — in a debug session —
         // lift the fog on a run mid-raid.
         assert_eq!(
-            surface_command(true, false, false, false, Gesture::Press),
+            surface_command(surfaces(true, false, false, false), Gesture::Press),
             None,
         );
         // Nor does a swipe across the list's grain: the horizontal pair sets the
@@ -1663,7 +1831,10 @@ mod tests {
         for direction in [Direction::East, Direction::West] {
             assert!(
                 matches!(
-                    surface_command(false, true, false, false, Gesture::Swipe(direction)),
+                    surface_command(
+                        surfaces(false, true, false, false),
+                        Gesture::Swipe(direction)
+                    ),
                     Some(GestureCommand::Menu(MenuNav::Easier | MenuNav::Harder)),
                 ),
                 "a horizontal swipe on the menu may only move the slider",
@@ -1690,7 +1861,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(false, true, false, false, gesture),
+                surface_command(surfaces(false, true, false, false), gesture),
                 menu_nav_for_key(key).map(GestureCommand::Menu),
                 "{gesture:?} and {key} drive the menu the same way",
             );
@@ -1702,7 +1873,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(true, false, false, false, gesture),
+                surface_command(surfaces(true, false, false, false), gesture),
                 help_nav_for_key(key).map(GestureCommand::Help),
             );
         }

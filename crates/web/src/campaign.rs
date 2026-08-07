@@ -63,6 +63,13 @@ impl Game {
         self.ui = ScreenUi {
             map: Some(MapUi::default()),
             menu: None,
+            // …and the level-start card with it (#497), for that same reason: it is the
+            // *facility's* card, the map is not a facility, and a flag left up would be
+            // a surface the pumps ask about before the map without a row of it on
+            // screen. Reaching here with it still up would mean a raid that ended
+            // without an input, which cannot happen — but the clear is the seam's job,
+            // not an argument's.
+            splash_open: false,
             ..self.ui
         };
         self.draw();

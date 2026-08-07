@@ -61,7 +61,7 @@
 
 mod abilities;
 
-use super::modifier_rows::modifier_rows;
+use super::modifier_rows::{modifier_rows, MODIFIERS_HEADING};
 use super::settings::{self, SettingsRow};
 use super::{
     blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
@@ -609,7 +609,7 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
         y += 1;
     }
 
-    draw(grid, 2, y, "MODIFIERS", Category::System);
+    draw(grid, 2, y, MODIFIERS_HEADING, Category::System);
     y += 1;
 
     // The list itself is [`modifier_rows`](super::modifier_rows) — the one derivation

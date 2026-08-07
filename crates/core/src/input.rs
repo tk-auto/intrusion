@@ -354,6 +354,45 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
     }
 }
 
+/// The keys that are **not** a dismissal of the level-start splash (§11.6/#497): the
+/// bare modifiers, which a browser reports as keydowns of their own.
+///
+/// Holding Shift before typing, tabbing away with Alt, reaching for Control — none of
+/// those is the press the card is waiting for, which is *"yes, I have read it"*. Every
+/// other key is, including the ones the game owns and the ones it does not: a card that
+/// picked and chose would be a card the player has to guess at.
+const SPLASH_HELD_KEYS: [&str; 6] = ["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"];
+
+/// Whether `key` **dismisses the level-start splash** (§11.4/§11.6/#497) — every key
+/// but the bare modifiers ([`SPLASH_HELD_KEYS`]).
+///
+/// The card is up before the first turn and carries no control of its own, so there is
+/// nothing here to navigate: the only question a key can answer is *have you read it*,
+/// and the shell **consumes** the answer rather than letting it fall through to a step,
+/// an ability or a menu underneath. That consumption is the whole rule — the failure a
+/// timeout would have caused (the press meant as a dismissal landing in the game as a
+/// first move) arrives by this door too if the key is passed on.
+///
+/// It is a table here, beside the other §11.6 bindings, so *which* presses count is
+/// pinned by a native test rather than discovered in a browser — and so nothing about it
+/// can quietly become a clock, which the core has none of in any case (§12.1).
+pub fn dismisses_splash(key: &str) -> bool {
+    !SPLASH_HELD_KEYS.contains(&key)
+}
+
+/// Whether a gesture dismisses the level-start splash (§11.6/#336/#497) — the touch half
+/// of [`dismisses_splash`], and **every** gesture there is.
+///
+/// A press, a swipe in any direction: the card has no list to walk and no control to
+/// aim at, so a finger cannot miss it. This is the one screen where an unbound press
+/// would be the trap rather than the safeguard — §11.6's no-trap rule is satisfied here
+/// by *everything* working, not by one drawn `[x]`.
+pub fn gesture_dismisses_splash(gesture: Gesture) -> bool {
+    match gesture {
+        Gesture::Swipe(_) | Gesture::Press => true,
+    }
+}
+
 /// Whether `key` **declines an open exchange** (§8.3/§11.6/#266) — `Escape`, and
 /// nothing else.
 ///

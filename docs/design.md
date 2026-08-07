@@ -2536,6 +2536,53 @@ state does (§11.6's touch rule). Touch is forgiven **one row of slack above and
 below the bar** (#386) — the drawn slot is unchanged, and the slack rows are the
 ones the router already answered with silence; see §11.6.
 
+**A run opens on a card that says what the job is** (#497). Before the first turn, a
+small block is laid over the middle of the map — the same overlay the verdict is
+(§14 v2), so the facility reads above and below it and the fit never changes — carrying
+exactly two sections: the **objective**, and the **modifiers** bending this run (§12.6).
+
+```
+────────────────────────────────────────
+  THE JOB
+
+  OBJECTIVE
+   Take all 3 intel
+   Get back out through your tunnel
+
+  MODIFIERS
+   Intel to exit: all of it
+
+  any key to begin
+────────────────────────────────────────
+```
+
+It is a **reduced** Level info tab, and what it leaves out is as deliberate as what it
+carries: no level-seed token and no copy control — those are the run's setup, read and
+shared at leisure from a panel you can call up — and no facility alert, which is the one
+section of that tab that moves while you play (§7.3) and has nothing to say before the
+first turn. The modifier rows are the tab's own, from the one derivation both draw
+(§12.6), so a rule in force on one is in force on the other. The **objective line is
+derived from the run's own gate and console count**, not from the modifier list: §4.5's
+baseline gate surfaces no row there (§12.6), so a card built from that list alone would
+leave a baseline run with no statement of what it is being asked to do. It names the way
+out as well as the taking, because there is only one way out and it is the tunnel you dug
+(§1/§4.5).
+
+**It dismisses on any input, and on nothing else — there is no timeout.** An auto-dismiss
+has a losing race in it: press at roughly the moment it fires and the keypress meant as
+*"I have read it"* lands in the game as your first move, possibly a step into a cone, in
+a run with no undo (§2.1). Making the window smaller does not close it. So the card
+waits; every key but a bare modifier dismisses it, every gesture dismisses it, and the
+dismissing input is **consumed** rather than also reaching the world — which is the same
+failure arriving by the other door. Like the help panel it is a pure view state: no world
+change, no turn (§4.4), and escapable by construction (§11.6's no-trap rule), since there
+is no input that does not dismiss it. The dismissal is not an `Input`, so it never enters
+a replay's recorded stream and `(seed, [inputs])` stays about the game (§12.4).
+
+It is raised for a **fresh facility** — quick play, a shared link, *retry*, a campaign
+raid — and not for a **resumed** run (§12.5), which is already underway and past the turn
+the card stands in front of.
+
 ### 11.5 Field of view and the danger overlay
 
 Field of view controls *lighting*, not knowledge — what is **fogged** is settled
@@ -3166,6 +3213,7 @@ Two rules for a player-facing word:
 | `FalseCall` (§8.3) | **False Call** — the bar's `Call` says what it *does*; the full name says the transmission is *forged*, which is the half that matters and the half a four-cell slot cannot carry | ability bar (as `Call`), help panel, near line |
 | `Dephase` (§8.3) | **Phase Out** — the bar's short `Phase` reads as its *opposite* beside *Dephase*, so the short name taught the wrong verb | ability bar (as `Phase`), help panel, near line |
 | the **schematic** (§11.5a) | *"not yet seen"* — the building and the floor of it | glyph legend |
+| the **run**, as the level-start card heads it (§11.4/#497) | **the job** — `THE JOB`. *Level* is the help panel's tab bar, *this run* that tab's own heading and *brief* the campaign map's facility brief (§14 v3), so all three collide; and unlike them this word is not meta — the card is read by the intruder standing in the building, not by the player choosing a run | level-start card |
 
 **No row is the good case.** Where the design word is already the world's word — intel,
 guard, body, door, exit, cupboard-as-terrain, Takedown, the ability names — there is
@@ -3389,6 +3437,12 @@ source keeps its row, because with deltas every source's contribution is in the 
 no row here stands for a rule the facility does not have, and no rule of the facility's is
 missing a row. The tab therefore grows **downward**, by exactly as many rows as there are
 rules. The argument, and the two questions #565 had to answer, is *appendix 55*.
+
+**Two surfaces list those rows, and they are one derivation** (#497): the Level info tab
+you call up mid-raid, and the **level-start card** that opens a run (§11.4). Neither
+hand-copies the other — both read `LevelModifiers::active`, in the same words and in the
+same §11.2 direction colours — so a newly added modifier appears on both on its own, and
+neither can list a rule the other omits.
 
 > **Several modifiers reach generation, and they reach different depths of it**
 > (§10.4/#452, §10.2/#232, §10.4/#236). Each is resolved **before** `generate_level`

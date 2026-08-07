@@ -25,6 +25,12 @@ use crate::modifiers::{
 };
 use crate::place::LevelConfig;
 
+/// What the section is called wherever it is listed — §11.8's **untranslated meta
+/// vocabulary**: a level modifier names the run's *setup*, not anything inside the
+/// facility, so making it diegetic would be a fiction about the wrong thing. Shared, so
+/// the two cards cannot come to call the same list two names.
+pub(super) const MODIFIERS_HEADING: &str = "MODIFIERS";
+
 /// What a **baseline** run reads as (#248): legible as *none active*, never blank or
 /// absent — a card that simply had no modifier section would read as the readout being
 /// broken rather than as the run being unmodified.

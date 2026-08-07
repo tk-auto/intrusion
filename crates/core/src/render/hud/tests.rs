@@ -1818,6 +1818,8 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
             selected: EndExit::NewRun,
         },
         modality: InputModality::Touch,
+        // Off, so the raise below is this seam's doing and not the fixture's.
+        splash_open: false,
     };
 
     let ScreenUi {
@@ -1826,6 +1828,8 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         theme,
         renderer,
         debug_mode,
+        // Raised — the one field a fresh facility *starts* rather than carries.
+        splash_open,
         // Dropped — the last screen's.
         message_log_open,
         help_open,
@@ -1844,6 +1848,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         "the renderer they chose (§11.1/#513)"
     );
     assert!(debug_mode, "the session's own switches (§12.6/#459)");
+    assert!(
+        splash_open,
+        "a fresh facility opens on its own card (§11.4/#497)",
+    );
 
     assert!(
         !message_log_open,
@@ -1873,13 +1881,19 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
 }
 
 /// The carry is **idempotent and total**: a default view state comes back
-/// unchanged, and a run started from the end screen of a run started from the menu
-/// still opens in the theme chosen before any of it (#473). Chaining is the real
-/// path — quick play, end screen, *new run* — and each hop must not shed a little
-/// more.
+/// unchanged but for the card every fresh facility opens on (#497), and a run started
+/// from the end screen of a run started from the menu still opens in the theme chosen
+/// before any of it (#473). Chaining is the real path — quick play, end screen, *new
+/// run* — and each hop must not shed a little more.
 #[test]
 fn the_theme_survives_run_after_run() {
-    assert_eq!(ScreenUi::default().for_fresh_run(), ScreenUi::default());
+    assert_eq!(
+        ScreenUi::default().for_fresh_run(),
+        ScreenUi {
+            splash_open: true,
+            ..ScreenUi::default()
+        },
+    );
 
     let chosen = ScreenUi {
         theme: Theme::default().toggled(),

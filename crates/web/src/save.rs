@@ -382,6 +382,12 @@ impl crate::Game {
         // and not the run — the same fall-through a bad token gets (#110).
         self.recorded = parse_script(&save.script).unwrap_or_default();
         self.ui = self.ui.for_fresh_run();
+        // …but **not** the level-start card (§11.4/#497), which that seam raises for a
+        // *fresh facility*: a resumed run is one already underway, and a card that said
+        // "any key to begin" over a raid three rooms deep would be describing a moment
+        // that has passed. The run's rules stay a keypress away on the Level info tab,
+        // which is where a player who has been away goes to re-read them.
+        self.ui.splash_open = false;
         self.ui.end.options = save.options;
         self.ui.map = save.map_row.map(|selected| MapUi {
             selected,
