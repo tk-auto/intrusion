@@ -3193,6 +3193,47 @@ system — it is derived from adjacency every frame and carries no state.
   it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
+- **The top rung pops in** (#576). Some events are too important to be lost on the
+  near line: the player's eye is on the board — on the guard two rooms over and on the
+  cell they are about to step into — not on the top row of the screen, and a one-row
+  band at the far edge of their attention is exactly what gets missed. The near line is
+  the right home for *what is around you*; it is the wrong home for *the thing you came
+  here for just happened*. So the loudest rung gets a **second surface**: a small
+  **pop-in box** drawn over the board next to what it is about, bordered in the
+  message's §11.2 category colour, which appears when the event fires, sits for about
+  **2 s [START]**, and goes. Not a strobe and not a pulse — it appears, it is read, it
+  disappears, with no animation in between. The near line keeps its copy unchanged; the
+  box is additive, and it is transient precisely so it can afford to be over the map.
+  - **Which messages qualify is derived from the ladder, never hand-flagged.** The gate
+    is a threshold on the priority every message already carries — the objective-
+    feedback rung, **20 [START]**. Nothing gets a "loud" bit set at the raise site, so a
+    future objective event inherits the pop-in for free and cannot be forgotten, and the
+    ladder stays the single place importance is decided. That it derives from the ladder
+    is **[SETTLED]**; the threshold is not.
+  - **It rides out its life.** A message dies on the player's next action; the box does
+    **not**. A player who acts inside two seconds is the very case where the near line
+    lost the message, so a box a quick key-press erases fails at its only job. It
+    outlives the near line's copy and keeps drawing over the following turn — and it is
+    not dismissible, for the same reason.
+  - **It never queues.** A second qualifying message replaces the first and restarts the
+    clock. One box at a time, always the newest fact; a backlog of stale boxes is the
+    opposite of the point. It is not a second message log either — the deployed log
+    already answers *what just happened*, and this surface answers *do not miss this*.
+  - **It is anchored, not centred**, because the complaint being fixed is that the eye
+    is on the board: a panel under the top rows would be missed for the same reason the
+    near line is. Every message on the rung today is something the player did to a thing
+    they are standing next to, or to themselves, so the anchor is the **player's cell**
+    and the box is placed clear of that cell *and all eight of its neighbours* — the
+    ring the console, crate or exit being reported is standing in, which is what makes
+    "never covers what it's talking about" true for the whole rung without knowing which
+    message is up. It is clamped to the board, never clipped; and among the legal
+    placements it takes the one covering the **fewest §11.5 danger cells**, because
+    burying the lose condition is the failure mode every surface drawn over the map is
+    bounded against.
+  - **The clock is the shell's, never the core's** (§12.1). The rules stay pure and
+    turn-based: the core says what to draw and is told when the box has expired, so no
+    wall clock reaches the rules and a replay of the same seed and inputs is identical
+    whether or not a box was ever drawn.
 - **Objective messaging derives from the gate, never from a fixed intel count**
   (§4.5/#310). Whether the exit is open is `exit_ready()`, and how much it still
   wants is `intel_needed_to_exit()` — which is *not* the tally of consoles still out

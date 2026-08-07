@@ -33,7 +33,7 @@ use super::*;
 use crate::ability::{max_bar_name, AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
 use crate::place::LevelConfig;
-use crate::status::near_line;
+use crate::status::{near_line, PopIn};
 
 /// The rows the screen adds **above** the map (§11.4): the near line and the
 /// usable line — read-only status, kept clear of the thumb (#267). A shell
@@ -239,6 +239,26 @@ pub struct ScreenUi {
     /// draws neither verdict and a finished one always draws its own. That is the one
     /// thing about this screen a shell cannot get wrong.
     pub end: EndUi,
+    /// The **loud-message pop-in** currently up (§11.7/#576), or `None` — the box drawn
+    /// over the board beside the player when a message reaches the ladder's top rung
+    /// ([`POP_IN_PRIORITY`](crate::POP_IN_PRIORITY)).
+    ///
+    /// It is view state like everything else here — the message is already on the near
+    /// line and in the log, and the box changes no world and costs no turn (§4.4) — but
+    /// it is the one field with a **clock** behind it, and the clock is deliberately the
+    /// shell's: `crates/core` is pure and turn-based (§12.1), and two seconds is not a
+    /// number the rules may know. The shell raises it from
+    /// [`pop_in`](crate::pop_in) on the turn it fires, arms a timer, and puts it back to
+    /// `None` when that timer says so.
+    ///
+    /// Being the shell's is also what gives the surface its two rules for free. It
+    /// **rides out its life**: the near line's copy clears on the player's next action
+    /// (§11.7) and this does not, because nothing about a step touches it — which is the
+    /// case the box exists for, a player who acts inside two seconds. And it **never
+    /// queues**: there is one field, so a second loud message overwrites the first and
+    /// re-arms the one timer, exactly as the autosave's debounce replaces rather than
+    /// stacks.
+    pub pop_in: Option<PopIn>,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable`](super::usable)), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -608,6 +628,15 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         height,
         cells,
     };
+    // The loud-message pop-in (§11.7/#576), laid over the board: the top rung of the
+    // ladder said a second time, next to the thing it is about, because the eye reading
+    // the board is the eye that misses the near line. It goes on **first** of the
+    // overlays, so every surface the player deliberately raised — the log they deployed,
+    // the card a fresh run opens on, the verdict the run ended with — is drawn over a
+    // transient they did not ask for and cannot dismiss.
+    if let Some(raised) = ui.pop_in {
+        super::pop_in::overlay_pop_in(&mut screen, raised, state.player());
+    }
     // The deployed message log is laid over the finished frame (§11.7/#300), not over
     // the map alone: it hangs from the near line's band across the **whole** row,
     // covering the usable line and as much board as it needs. Nothing else overlays

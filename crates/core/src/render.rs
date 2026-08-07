@@ -1193,6 +1193,21 @@ pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Catego
 /// reads as one family rather than as a series of inventions.
 pub(super) const RULE_GLYPH: char = '─';
 
+/// The corners and verticals a **boxed** overlay closes itself with — the level-start
+/// card (§11.4/#497) and the loud-message pop-in (§11.7/#576).
+///
+/// A card bounded by rules alone reads as a *cut through the level*, the board above and
+/// the board below looking like two halves of the facility with something wedged between
+/// them; the sides and the corners are what say *this is one object, laid on top*. They
+/// live here beside [`RULE_GLYPH`] rather than in either surface, because they are the
+/// same box-drawing block: a font that has the rule the verdict and the deployed log
+/// already draw has these too.
+pub(super) const CORNER_TOP_LEFT: char = '┌';
+pub(super) const CORNER_TOP_RIGHT: char = '┐';
+pub(super) const CORNER_BOTTOM_LEFT: char = '└';
+pub(super) const CORNER_BOTTOM_RIGHT: char = '┘';
+pub(super) const SIDE_GLYPH: char = '│';
+
 /// Where an overlay card `rows` tall starts on a `height`-tall screen: the block
 /// centred in the **map area**, so the board reads above and below it (§11.4 — the
 /// screen is the board, and a card that covered it would take away the very thing
@@ -1235,6 +1250,7 @@ mod hud;
 mod menu;
 mod message_log;
 mod modifier_rows;
+mod pop_in;
 mod settings;
 mod splash;
 mod usable;

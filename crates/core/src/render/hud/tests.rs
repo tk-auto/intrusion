@@ -19,6 +19,27 @@ fn granted() -> Loadout {
         .with(AbilityId::Dephase)
 }
 
+/// A live pop-in (§11.7/#576) — a run whose last action took the intel, which is the
+/// top of the ladder and so raises the box. Any loud message would do; this is the
+/// cheapest one to reach from a hand-built state.
+fn a_pop_in() -> Option<crate::PopIn> {
+    let mut state = State::new(
+        open_room(12, 12),
+        Cell::new(5, 6),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 5)],
+        Cell::new(10, 10),
+    );
+    state.step(Input::Step(Direction::North));
+    let raised = crate::pop_in(&state);
+    assert!(
+        raised.is_some(),
+        "taking the intel is loud enough to pop in"
+    );
+    raised
+}
+
 /// The same grant with the **passive** in it (#264/#287) — Run, two activated
 /// tech, and Vision — so the bar's always-on marker is exercised beside the
 /// clocks it has to sit next to.
@@ -1820,6 +1841,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         modality: InputModality::Touch,
         // Off, so the raise below is this seam's doing and not the fixture's.
         splash_open: false,
+        pop_in: a_pop_in(),
     };
 
     let ScreenUi {
@@ -1839,6 +1861,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         help_tab,
         seed_copy,
         end,
+        pop_in,
     } = carried.for_fresh_run();
 
     assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
@@ -1878,6 +1901,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         "a new token, unacknowledged"
     );
     assert_eq!(end, EndUi::default(), "no verdict has been reached yet");
+    assert!(
+        pop_in.is_none(),
+        "and the last run's loud message does not pop in over this one (§11.7/#576)",
+    );
 }
 
 /// The carry is **idempotent and total**: a default view state comes back
