@@ -181,10 +181,16 @@ impl Inspection {
         out
     }
 
-    /// What the run was played on: the level's token and seed, the modifiers bending
-    /// it, the tech it held, and where the player opened.
+    /// What the run was played on: the level's token and seed, a link that opens it,
+    /// the modifiers bending it, the tech it held, and where the player opened.
+    ///
+    /// The **link** is there because this narration is prose for a person, and the
+    /// obvious next thing they want after reading what somebody did is to go and try
+    /// it themselves (§13.1/#572). A bare token would leave them building the URL by
+    /// hand; the token stays beside it because that is what fits in a sentence.
     fn header(&self) -> String {
         let token = self.level.encode().unwrap_or_else(|| "<none>".to_string());
+        let play = crate::play_link(&self.level).unwrap_or_else(|| "<none>".to_string());
         let modifiers = self.state.modifiers().active();
         let rules = if modifiers.is_empty() {
             "none active — baseline rules".to_string()
@@ -201,6 +207,7 @@ impl Inspection {
         let tech: Vec<&str> = self.state.loadout().iter().map(|id| id.name()).collect();
         format!(
             "level  {token}  (seed {})\n\
+             play   {play}\n\
              rules  {rules}\n\
              tech   {}\n\
              start  {} facing north, {} input(s) to replay\n",
