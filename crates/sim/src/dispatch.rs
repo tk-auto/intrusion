@@ -249,10 +249,16 @@ mod tests {
     #[test]
     fn a_dispatch_that_can_get_there_does() {
         // A **rate** cannot be witnessed by one seed (appendix 36), so this pins a
-        // prefix instead: `0..15` across the four temperaments already resolves 15
-        // errands, comfortably over the "enough to conclude anything" floor asserted
-        // below, and `INTRUSION_SLOW_TESTS` restores the full sweep the 19%-to-none
-        // collapse was measured over.
+        // prefix instead, and `INTRUSION_SLOW_TESTS` restores the full sweep the
+        // 19%-to-none collapse was measured over.
+        //
+        // The prefix is `0..24` since #554, up from `0..15`: the ticket's §7.5 fix — a
+        // searching guard picks its sweep target out of ground it can actually reach —
+        // ends some searches sooner and so *starts* fewer §7.7 call-ins on these seeds,
+        // which took the prefix's yield to 9 errands, one under the floor below. What
+        // moved is the sample, not the property: the expiry rate this test exists to pin
+        // is unchanged at zero, and widening the window back to a sample big enough to
+        // read is the honest repair rather than lowering the floor.
         let config = RunConfig::sim();
         let mut tally = DispatchTally::default();
         for profile in [
@@ -261,7 +267,7 @@ mod tests {
             Profile::AGGRESSIVE,
             Profile::CARELESS,
         ] {
-            for seed in pinned_sweep(0..15, 0..50) {
+            for seed in pinned_sweep(0..24, 0..50) {
                 let mut bot = StealthBot::with_profile(profile);
                 let run = watch_one(&config, seed, &mut bot, DEFAULT_INPUT_CAP)
                     .expect("the sim config generates");

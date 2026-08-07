@@ -1383,7 +1383,21 @@ impl Guard {
             .destination
             .is_none_or(|d| d == self.pos || !facility.can_enter(d, ACTOR_FILL));
         if need_target {
-            let area = path::reachable_within(focus, SEARCH_RADIUS, |c| patrollable(facility, c));
+            // The sweep is picked out of the ground the guard can **actually reach**, so
+            // `blocked` narrows the area as well as the route (§7.5/#554). Without it the
+            // farthest cell of the neighbourhood could be one nothing may walk to — a
+            // colleague's cell, a sealed doorway (§8.3/#242), a cell inside a Repel field
+            // (§8.3/#554) — and a target with no route reads to the loop below as *"nothing
+            // left to poke at"*, which **ends the search**. A player could then call a
+            // sweep off by putting a wall over the corner of it, which is a §7.6 pressure
+            // release nobody asked for and the opposite of what a wall is supposed to cost.
+            //
+            // A flood fill from the focus, so the narrowing is honest in the other
+            // direction too: the guard sweeps the side of the obstruction it is on and
+            // does not plan across one.
+            let area = path::reachable_within(focus, SEARCH_RADIUS, |c| {
+                patrollable(facility, c) && !blocked.contains(&c)
+            });
             // Farthest from the guard's current cell (no inspected filter): a plain
             // paced sweep across the neighbourhood, deterministic (§12.4).
             self.destination = pick_farthest(&area, &VisibleSet::default(), self.pos);
