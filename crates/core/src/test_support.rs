@@ -20,7 +20,8 @@ use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::region::{DoorKind, RegionGraph, RegionKind};
-use crate::state::{Event, State};
+use crate::guard::Guard;
+use crate::state::{Event, Input, State};
 
 /// The default sampled sweep width — small enough to keep the routine gate fast,
 /// wide enough to spread across each sweep's range.
@@ -221,6 +222,70 @@ pub(crate) fn leave_by_the_tunnel(state: &mut State) -> Vec<Event> {
         state.step(Input::Step(dir));
     }
     panic!("the tunnel is not that long")
+}
+
+/// A hand-built wide strip: a left room and a right room joined by one **manual**
+/// door at column 6 (hinges at `(6,1)`/`(6,3)`, panel at `(6,2)`), with a guard
+/// patrolling from the left room through the door — so on its beat it walks the
+/// closed panel open (§10.4), a change the player did not cause. The player starts at
+/// `player` **facing east**, ahead of the door, and the drive below walks it further
+/// east each turn: the guard opens the door *behind* the eastward-facing player, so
+/// the changed cell is reliably out of the forward FOV (a Wait's 360° look would
+/// otherwise see straight through the open doorway — sight and door-sense share the
+/// same range, §9.1/§10.4). The close-behind is disabled so the open is isolated.
+/// Returns the state and the door's panel cell.
+pub(crate) fn guard_door_strip(width: u32, player: Cell) -> (State, Cell) {
+    let mut f = Facility::walled_box(width, 6);
+    let mut g = RegionGraph::new(width, 6);
+    let column =
+        |x0: u32, x1: u32| (1..5).flat_map(move |y| (x0..x1).map(move |x| Cell::new(x, y)));
+    let left = g.add_region(RegionKind::Room, column(1, 6));
+    let right = g.add_region(RegionKind::Room, column(7, width - 1));
+    for y in 1..5 {
+        f.set_terrain(6, y, Terrain::Wall);
+    }
+    f.set_terrain(6, 1, Terrain::DoorHinge);
+    f.set_terrain(6, 2, Terrain::DoorPanelClosed);
+    f.set_terrain(6, 3, Terrain::DoorHinge);
+    g.add_door(
+        left,
+        right,
+        [Cell::new(6, 1), Cell::new(6, 3)],
+        [Cell::new(6, 2)],
+        DoorKind::Manual,
+    );
+    let mut s = State::new(
+        Layout::from_parts(f, g),
+        player,
+        Direction::East,
+        vec![Guard::patrolling_to(Cell::new(4, 2), Cell::new(8, 2))],
+        Vec::new(),
+        Cell::new(width - 2, 4),
+    );
+    s.set_guard_close_chance(0); // isolate the open from the close-behind (#146)
+    (s, Cell::new(6, 2))
+}
+
+/// Walk the player east until the patrolling guard opens the door behind them (the
+/// first `by_player: false` open), returning once it has. Stepping east keeps the
+/// player facing *away* from the door so the changed cell stays out of the forward
+/// FOV. Panics if the guard never opens it.
+pub(crate) fn drive_until_guard_opens(s: &mut State) {
+    for _ in 0..8 {
+        let e = s.step(Input::Step(Direction::East));
+        if e.iter().any(|ev| {
+            matches!(
+                ev,
+                Event::DoorOpened {
+                    by_player: false,
+                    ..
+                }
+            )
+        }) {
+            return;
+        }
+    }
+    panic!("the patrolling guard never opened the door");
 }
 
 /// A player in an empty room, facing north, no guards or objectives, exit unused
