@@ -44,6 +44,7 @@ mod lockdown;
 mod narrowed_cones;
 mod reinforcements;
 mod saver;
+mod sense_suppressed;
 mod traversal;
 mod tunnel;
 mod turn;

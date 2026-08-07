@@ -607,10 +607,25 @@ impl State {
     /// the sensed dot. The overlay that cone paints stays truthful — the guard's
     /// own detection uses its plain cast, which cannot see around the corner
     /// back ([`field_of_view_with_peek`]'s one-sidedness).
+    ///
+    /// **The `sense_suppressed` modifier (§12.6/#493) removes the second arm**, and only
+    /// the second: with it on no guard is ever `Sensed`, at any range, through any wall,
+    /// while a guard in the field of view is `Seen` exactly as it always was. This is one
+    /// of the modifier's two seams (the door-cue pass is the other), and it is where the
+    /// guard trail stops too — [`record_guard_cues`](Self::record_guard_cues) stamps a cue
+    /// on precisely what this call returns `Sensed` for.
+    ///
+    /// The suppression is deliberately **not** applied by zeroing
+    /// [`sense_range`](Self::sense_range), which stays the honest rule input every clamp
+    /// reads (Confusion's **[SETTLED]** `min(CONFUSION_RADIUS, sense_range())`, §8.3): a
+    /// zeroed range would delete an ability rather than take away information. See the
+    /// field's own note for the argument.
     pub fn perceive_guard(&self, guard: &Guard) -> Option<GuardPerception> {
         if self.player_fov.contains(guard.pos()) {
             Some(GuardPerception::Seen)
-        } else if self.player.sight_distance(guard.pos()) <= self.sense_range() {
+        } else if !self.modifiers.sense_suppressed
+            && self.player.sight_distance(guard.pos()) <= self.sense_range()
+        {
             Some(GuardPerception::Sensed)
         } else {
             None

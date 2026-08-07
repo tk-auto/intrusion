@@ -109,6 +109,11 @@ const _: () = assert!(GUARD_CUE_DECAY_TURNS <= DOOR_CUE_DECAY_TURNS);
 /// [`confusion_blast`](State::confusion_blast), which clamps it down to the live
 /// [`sense_range`](State::sense_range) so the blast can never outreach what the player
 /// perceives — inside a duct, that is [`DUCT_SENSE_RANGE`].
+///
+/// The clamp is stated over the **range**, and that is what makes it survive a run whose
+/// sense is switched off entirely (§12.6/#493): that modifier suppresses the perceived
+/// channel and leaves this ladder alone, so the blast keeps its reach and the clamp keeps
+/// its wording. A modifier that had zeroed the range would have zeroed the ability.
 pub const CONFUSION_RADIUS: u32 = 6;
 
 /// The **Lockdown** seal radius (§8.3/§10.4/#242 **[START]**): activating Lockdown

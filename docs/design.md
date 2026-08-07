@@ -1370,6 +1370,26 @@ later change is a deliberate, visible edit.
   of the player's out-senses-the-guards asymmetry (§5). No cost, no cooldown, no
   toggle; it is simply how the player perceives. It is *body and training* (§1),
   not hardware you have to find.
+- **A run can be dealt it switched off** (§12.6/#493). The *"nothing felt through
+  walls"* modifier suppresses this channel and the door channel (§9.4) whole: no dot
+  at any range, through any wall, and no door cue. It takes away **scouting**
+  information and never **fairness** information — a seen guard, its cone and the
+  §11.5 danger overlay are untouched, and so is the standing watcher line of an
+  unseen guard that has you (§11.5/#465), which is §2.2's floor rather than part of
+  this channel. Three consequences follow, and they are stated rather than left to be
+  found:
+  - **Wait keeps its sight half and loses its sense half.** The 360° look remains —
+    still the only way to see behind you (§8.3) — and the widening above does nothing.
+    That is the innate verb narrowed on purpose, not hollowed out.
+  - **Confusion is unaffected**, because the suppression is of the *channel* and not
+    of the range. §8.3's **[SETTLED]** clamp `min(CONFUSION_RADIUS, sense_range())`
+    reads the range, which keeps its value, so the blast still freezes every guard a
+    sensing player would have sensed — you simply do not see it land. A modifier that
+    had zeroed the range would have deleted an ability instead of taking away
+    information, which is the dead-verb failure §13.2's histogram exists to catch.
+  - **A duct's cost narrows with it** (§10.7): `DUCT_SENSE_RANGE` has nothing left to
+    shrink, so the crawlspace still costs its blinded sight and no longer its degraded
+    sense. Ducts are relatively *safer* under this modifier.
 
 ### 9.2 Seen vs. sensed — the two states of a perceived guard
 
@@ -1457,7 +1477,10 @@ on-grid cue**, exactly like the sensed guard.
   lights no cue — you already know; the cue is for the doors you did *not* move.
 
 This shares the `Sensed` category with the guard sense, so the light-mode reskin
-(§11.2) covers both at once.
+(§11.2) covers both at once — and it is switched off with it: the §12.6 *"nothing felt
+through walls"* modifier (#493) suppresses **both** halves of the one channel, so a run
+that cannot feel a guard through a wall cannot feel a door change either. One channel,
+one switch (§9.5).
 
 ### 9.5 One channel, one fade [SETTLED]
 
@@ -2134,6 +2157,14 @@ per-entry one-mouth geometry; the §10.6/§10.1a guarantees hold untouched, sinc
 the two entries are restamped (a wall→entry swap that is wall-like both ways) and
 every interior cell keeps its terrain — reachability and sightlines on the finished
 grid are byte-identical with the duct in place or reverted.
+
+> **What the crawlspace costs when the sense is already off** (§9.1/§12.6/#493). The
+> reduced `DUCT_SENSE_RANGE` is half of what a duct charges, and a run whose sense is
+> suppressed has nothing there to shrink — so what a duct still costs is its blinded
+> sight and the deliberate pause on the entry cell, and it is *relatively* safer under
+> that modifier than under the baseline. Said here so §9 and §10.7 are not later found
+> to disagree; it is a consequence taken deliberately, not a hole to plug by
+> special-casing the crawlspace.
 
 `[START]` knobs (all pinned by tests): **`DUCT_RUNS_PER_LEVEL`** = 2 (a spice, not the
 main route — base solvability never depends on a duct); duct length in
@@ -3318,6 +3349,7 @@ flips a rule an existing system already owns rather than adding a parallel one:
 | **Locked room** | harder | key-gates every doorway of the room holding the facility's prize and puts a key on every guard (§10.4/#236 — the fifth generation-read entry, and the one reaching *past* placement: it draws nothing, so both settings are the same board and only one room's doorways differ) |
 | **Guard cones: shorter** | easier | every guard's reach 10 → 6, the same ~90° wedge watched late, and §7.6's two zones shorten with it (§6.1/#495 — the first easier entry that bends a rule rather than handing over knowledge or slack) |
 | **Guards watch their sides** | harder | the §6.2 flank carve withdrawn: a **Calm** patrol detects its two flank cells like every other mood, so the flank takedown and the tail through a corner are both off. The **harder arm** of the rule #442 settled the other way — a new field and a new slot, never a revival of the tombstone below — and **out of the directed pool**, because appendix 28 measured the unconditional carve as a real mover and a draw would re-open that call by lottery. Its one source is the archive (§14 v3/#217) |
+| **Nothing felt through walls** | harder | the §9 sense is switched off, both channels: no guard felt through a wall (§9.1/§9.2), no door-change cue (§9.4). It takes away *scouting* information and never *fairness* information — seen guards, their cones, the §11.5 overlay and the #465 watcher line are all untouched, which is the whole shape of it. Read at the **perception** seam, so the board is the baseline's down to the cell. The **largest** harder step measured (14–34 points of bot win rate against §10.2's 8–10 for one guard), and the one whose magnitude most wants a human verdict — appendix 58 (#493) |
 | **Calm guards detect only their cone** | easier | a Calm guard's two flank cells drop from detection while a hunting guard keeps its sides — shipped as an experiment (#410), then **adopted and retired in place** (#442, see below) |
 
 This is the **mechanism** difficulty and mode rules flow through — the shared seam
@@ -3470,11 +3502,17 @@ modifier the policy cannot use measures the bot, and its numbers do not belong i
 balance argument — which is an argument for teaching the bot (#498, #517) and for
 labelling the batch, never for a thinner game. It was never a small problem either:
 three of the four *easier* entries are already bot-blind, so a `−N` bot batch has long
-been drawing no-ops.
+been drawing no-ops. The **suppressed sense** (#493) is the case that shows what the
+criterion should have been all along: it is the first entry that bends what the *player
+perceives* rather than what the world does, so the obvious guess is that the bot cannot
+feel it — and the truth is the opposite, because the bot perceives through the player's
+own channels by construction, and losing them costs it its keep-away, its flight and its
+cover exactly as it costs a player theirs.
 
-So the pool now holds **thirteen** entries, **eight harder and five easier**. The three
+So the pool now holds **fourteen** entries, **nine harder and five easier**. The three
 admitted by #518 are all harder, which is why the sides stopped being the same depth;
-the short-sighted guards (#495) are the first step back the other way. Nothing lies about the
+the short-sighted guards (#495) are the first step back the other way, and the
+suppressed sense (#493) has since put the harder side back where it was. Nothing lies about the
 gap (the slider's blurb counts *picks*, not pool depth), but a `+N` run still has more
 variety than a `−N` one, and the easier side is still the one to grow.
 

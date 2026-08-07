@@ -49,7 +49,7 @@ outranks knowledge**, always.
 | `@` | The player | Owned |
 | `@` | A decoy you placed | Owned |
 | `g` | A guard you can see | Caution / Warning / Danger, by its state |
-| *(none)* | A guard you only sense through a wall | Sensed — a background highlight on its cell, no glyph, with a short fading trail behind it (§5) |
+| *(none)* | A guard you only sense through a wall | Sensed — a background highlight on its cell, no glyph, with a short fading trail behind it (§5). Never drawn at all under the §12.6 modifier that switches the sense off (#493) |
 | `z` | A body | Caution — trouble waiting to be found |
 | `z` | A body in your hands | Owned — yours, and in play |
 | `z` | A body stowed in a cupboard | Neutral — the cupboard is spent |
@@ -706,6 +706,16 @@ mark) > investigation area > Effect wash.**
 | **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
 | **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
 | **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
+
+> **The `Sensed` channel is suppressible** (§9/§12.6/#493). With the *"nothing felt
+> through walls"* modifier on, **neither** `Sensed` strength is ever painted: no guard
+> dot, no trail, no ghost, no door cue, for the whole run. It is the only category here a
+> level modifier can silence outright, and the board reads correspondingly quiet — which
+> is why the Level info card names it before turn one, so a player does not read the
+> absence as a broken render. Nothing else moves: `Danger` still paints the cones of the
+> guards you can see *and* the watcher line of one you cannot (§11.5/#465), which is the
+> fairness floor this modifier is bounded by (§2.2) rather than part of the channel it
+> switches off.
 | **Warning** (orange) | The area a §7.6 search is sweeping — the `SEARCH_RADIUS` box around a searching guard's focus. Only with the `show_search_areas` modifier on (§12.6); baseline the board draws no investigation area at all |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over, **the line a Dart flew** (§8.3/#239) — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
 

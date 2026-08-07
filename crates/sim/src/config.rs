@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 16] = [
+const MODIFIERS: [(&str, SetModifier); 17] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -360,6 +360,21 @@ const MODIFIERS: [(&str, SetModifier); 16] = [
     // (the sim plays single facilities and has no wallet), so a batch here measures what
     // foreknowledge is worth, never whether it is worth three intel.
     ("scouted", |m| m.scouted = true),
+    // The §9 sense switched **off** (§9/§9.4/§12.6/#493), read at the perception seam: no
+    // guard felt through a wall, no door cue, and the cones of the guards the player can
+    // see left exactly as they were. A batch that names it plays the baseline's building
+    // with the same guards in it, so the comparison is byte-identical board against
+    // byte-identical board.
+    //
+    // **The bot plays this one honestly, with no cue of its own** — and it is the modifier
+    // that most repays saying so (`docs/bot-behaviour.md` §2). The policy perceives guards
+    // through `State::perceive_guard` exactly as the player does and reads *both* arms: a
+    // seen guard's cone is its danger set, and every perceived guard — sensed ones included
+    // — feeds the route's keep-away cost, the flee and hide-until-clear radii, the bench it
+    // takes cover behind, and the `nearest_guard` every ability cue is weighed against.
+    // With this on all of that goes quiet for the guards behind walls, so the bot loses
+    // what the player loses, through the same channel.
+    ("sense-suppressed", |m| m.sense_suppressed = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -664,6 +679,7 @@ mod tests {
             narrowed_guard_cones,
             scouted,
             guards_watch_their_sides,
+            sense_suppressed,
             intel_to_exit,
             composite,
         } = all.modifiers;
@@ -677,6 +693,7 @@ mod tests {
         assert!(show_search_areas);
         assert!(narrowed_guard_cones);
         assert!(scouted);
+        assert!(sense_suppressed);
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);

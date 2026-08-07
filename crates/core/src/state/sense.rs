@@ -34,6 +34,13 @@
 //! - a guard **moving** was already legible frame to frame (the dot was there, now it
 //!   is here). The trail makes what an attentive player could already read *legible*,
 //!   rather than adding a channel.
+//!
+//! **The whole channel can be switched off** (§12.6/#493): with `sense_suppressed` on,
+//! neither half ever stamps a cue, so the board carries no orange and what the player
+//! knows about the facility is what they can see. Nothing here is conditional on the
+//! modifier beyond the door pass's early return — the guard half goes quiet because
+//! [`perceive_guard`](State::perceive_guard) stops returning `Sensed`, which is the one
+//! thing [`record_guard_cues`](State::record_guard_cues) reads.
 
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +159,16 @@ impl State {
     /// measured to the panel the event named; the cue then lights the door's whole
     /// footprint (§9.4).
     pub(super) fn record_door_cues(&mut self, events: &[Event]) {
+        // The sense is off for this run (§12.6/#493), so its door half lights nothing —
+        // the second of the modifier's two seams, the first being the `Sensed` arm of
+        // [`perceive_guard`](Self::perceive_guard) (which silences the guard half by
+        // silencing what [`record_guard_cues`](Self::record_guard_cues) reads). The check
+        // is here rather than in [`door_sense_range`](Self::door_sense_range), which stays
+        // the truthful rule input: a range of zero would still light a door the player is
+        // standing in, and a suppressed *channel* is not a shortened one.
+        if self.modifiers.sense_suppressed {
+            return;
+        }
         let range = self.door_sense_range();
         for event in events {
             let at = match *event {
