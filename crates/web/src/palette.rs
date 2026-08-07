@@ -54,7 +54,7 @@ const PAGE: usize = 0;
 const INK: usize = 1;
 const FLOOR: usize = 2;
 /// Claimed by the page **chrome** ([`chrome_css`]): the DOM's secondary text —
-/// the letterbox, the replay bar, the seed box — reads in the spare light grey,
+/// the letterbox and the replay bar — reads in the spare light grey,
 /// per the convention above that a spare row is named the day a system claims it.
 const GREY: usize = 3;
 const SLATE: usize = 4;
@@ -214,23 +214,25 @@ const fn palette(theme: Theme) -> &'static Palette {
 ///
 /// One block per theme, keyed off `body[data-theme]` exactly as the canvas theme
 /// is mirrored (`crates/web/src/lib.rs`), so the CSS flip and the board flip are
-/// one fact. Alpha (the replay bar's translucency, the seed panel's) stays in the
-/// stylesheet as `color-mix` over these variables — a transparency is a chrome
-/// choice, not a palette value.
+/// one fact. Alpha (the replay bar's translucency) stays in the stylesheet as
+/// `color-mix` over these variables — a transparency is a chrome choice, not a
+/// palette value.
+///
+/// The list is **exactly what the page wears**, in both directions. It was three
+/// longer until #572 — an edge, an inset and a line, the seed box's border, field and
+/// rule — and they went out with the box: a variable nothing reads is a second palette
+/// starting to grow again, which is the failure this whole function exists to prevent.
+/// The next piece of chrome adds its own back.
 pub(crate) fn chrome_css() -> String {
     let block = |p: &Palette| {
         format!(
             "--chrome-page:{page};--chrome-text:{text};--chrome-accent:{accent};\
-             --chrome-label:{label};--chrome-hint:{hint};--chrome-edge:{edge};\
-             --chrome-inset:{inset};--chrome-line:{line};",
+             --chrome-label:{label};--chrome-hint:{hint};",
             page = p.page(),
             text = p.rows[GREY].fg,
             accent = p.rows[BLUE].fg,
             label = p.rows[PURPLE].fg,
             hint = p.rows[SLATE].fg,
-            edge = p.rows[SLATE].bg,
-            inset = p.rows[SLATE].bg_dim,
-            line = p.rows[INK].bg_dim,
         )
     };
     format!(

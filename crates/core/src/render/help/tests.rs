@@ -1003,6 +1003,10 @@ fn the_copy_control_is_drawn_clear_of_the_token() {
 /// a plain "copied" after one, and a failure that says the clipboard did *not*
 /// take it rather than claiming it did. It lands in the blank spacer the token
 /// already had beneath it, so saying so shifts no row of the modifier list below.
+///
+/// Since #572 it says a **link** was copied, which is what actually went onto the
+/// clipboard — the token stays *displayed* one row up, and a line that said "copied"
+/// beside a token would read as a claim about the token.
 #[test]
 fn the_copy_acknowledgement_says_only_what_happened() {
     let level = Some(run_with_a_token());
@@ -1016,6 +1020,10 @@ fn the_copy_acknowledgement_says_only_what_happened() {
 
     let copied = level_info(level, SeedCopy::Copied);
     assert!(row_text(&copied, ack_row).contains(COPIED_ACK));
+    assert!(
+        COPIED_ACK.contains("link"),
+        "the copy is a link, so the line must say so (#572): {COPIED_ACK:?}",
+    );
     assert_eq!(copied.get(CONTENT_INDENT, ack_row).fg, Category::System);
 
     let failed = level_info(level, SeedCopy::Unavailable);

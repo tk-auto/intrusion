@@ -29,7 +29,7 @@ cargo run --release -p intrusion-sim -- --inspect LINK
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `balanced` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
-| `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
+| `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay on stdout — the `seed` field a level-seed token (#245) — instead of the metrics batch; a play link goes to stderr with the summary | off |
 | `--inspect LINK` | read a replay someone pasted and narrate it turn by turn (below) — a mode of its own, taking no other flag | — |
 
 And the **run config** (below): what every run of the batch boots from.
@@ -212,7 +212,15 @@ replay reproduces rather than approximates, and the default one reproduces the s
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
 {"seed":"nfdxttsytrdorexcqn","inputs":"NNE+rN..SS-r…"}
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
+play: https://tk-auto.github.io/intrusion/#seed=nfdxttsytrdorexcqn
 ```
+
+The **play link** on stderr is for a person, not a pipe (§13.1/#572): it opens the
+facility this run was measured on in the published build, so a flagged seed is one
+click from being played rather than a number to be typed in somewhere. Nowhere in the
+game takes a typed token any more — sharing is the URL — which is why the sim prints
+one wherever it hands a run to a human. (For the *run* rather than the level, build a
+`…#seed=<token>&inputs=<script>` link out of the stdout pair.)
 
 The only ability in that stream is `r` (Run), because the default config boots the
 **bare, innate-only** loadout (§8.3) — a level must be winnable with no salvaged
@@ -245,6 +253,7 @@ one — the help panel's `replay [r]` control copies the run a player just had.
 ```
 $ cargo run --release -p intrusion-sim -- --inspect '…#seed=hwqcwzlhzanrdsdfzd&inputs=NNNNNEEEEEESS'
 level  hwqcwzlhzanrdsdfzd  (seed 18900)
+play   https://tk-auto.github.io/intrusion/#seed=hwqcwzlhzanrdsdfzd
 rules  Intel to exit: all of it
 tech   Run, Camouflage, Decoy, Pierce Wall
 start  (31,12) facing north, 13 input(s) to replay

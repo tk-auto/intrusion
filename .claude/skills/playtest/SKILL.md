@@ -295,8 +295,9 @@ Produce a short report, in this order:
 3. **Suspicious seeds — "go play these."** Scan the per-run rows and flag seeds
    that trip any of the watermarks below (all `[START]`, tune to taste). For each
    flagged seed give its number, the profile it was played under, the flag it
-   tripped, and the exact replay command. **Never rule** — the human plays them and
-   decides.
+   tripped, the exact replay command, and **a play link** (below — a seed number is
+   the sim's handle, not something a human can open). **Never rule** — the human plays
+   them and decides.
 4. **The §13.4 disclaimer**, restated: these are numbers, not verdicts.
 
 Watermarks for flagging a seed (or the batch):
@@ -330,9 +331,32 @@ same *run* under the same one):
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 1 --seed <SEED>
 ```
 
-The seed is the shareable handle (§13.1): the same seed reproduces the same
-facility for a human to play. (Entering a seed in the web shell to play it is
-#110; until it lands, the seed reproduces exactly in the sim as above.)
+**Hand a human a link, never a bare seed** (§13.1/#572). A seed number is the sim's
+handle; a person needs something they can click, and since #572 there is nowhere in
+the game to type a token into. The sim prints the link for you — `--emit-replay` puts
+it on **stderr** beside the one-line summary, so it costs one command per flagged
+seed:
+
+```
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --seed <SEED> --emit-replay >/dev/null
+# seed 61: capture in 88 turns, 213 inputs
+# play: https://tk-auto.github.io/intrusion/#seed=<token>
+```
+
+That link opens the **facility the sim measured** — the sim preset's modifiers and
+loadout ride in the token (#245), so it is the same level, not quick play's variation
+on it — and leaves the playing to the human, which is the point of flagging it.
+
+Two things it deliberately is not:
+
+- **Not the bot's run.** `--emit-replay`'s *stdout* is the `{seed,inputs}` pair; turn
+  that into a `…#seed=<token>&inputs=<script>` link when what you want to hand over is
+  *what the bot did* rather than *the level it did it on*. Watching a flagged run back
+  is often the faster read — `--inspect <link>` narrates it turn by turn without a
+  browser, and prints the play link in its own header.
+- **Not a `--guards`/`--alert` sweep.** No token can carry those (§7.3/#376), so a link
+  from a swept batch opens the level under the *shipped* knobs. Say so in the report
+  when you hand one over from a sweep.
 
 ## Example invocation
 

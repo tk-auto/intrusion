@@ -54,8 +54,10 @@ summary row (schema: crates/sim/README.md).
                  (e.g. +r) activates/deactivates; after the
                  script the player waits out the run          (default: empty)
   --emit-replay  play one run (seed S) and print its captured
-                 replay `{seed,inputs}` (§12.4) instead of the
-                 metrics batch — the shareable form            (default: off)
+                 replay `{seed,inputs}` (§12.4) on stdout instead
+                 of the metrics batch — the shareable form; a
+                 link to the level goes on stderr with the
+                 summary, for a human to open                   (default: off)
   --inspect LINK read a replay someone pasted and narrate it:
                  the run's trajectory turn by turn and the
                  frame it ended on. Takes the link as pasted —
@@ -96,7 +98,9 @@ config can encode it, so a swept run reproduces only under the same --alert.
 and prints the `(seed, inputs)` replay: with --bot, the exact run the bot
 played, ready to hand to the web viewer or bake into an Artifact (#197). Its
 token carries the config the run was played under, so a non-default batch's
-replay reproduces rather than approximates.
+replay reproduces rather than approximates. The stream on stdout is the
+machine's; the summary on stderr is the human's and carries a **play link** to
+the level, because a seed number is not something anyone can open (§13.1/#572).
 
 --inspect is the read half of that (#411): hand it a link a player copied out
 of a build — the help panel's replay control writes one — and it says what they
@@ -400,12 +404,19 @@ fn emit_replay(args: &Args) -> ExitCode {
         }
     };
     println!("{}", replay.to_json_line());
+    // stdout stays the machine's — the `{seed,inputs}` pair, byte-for-byte, for
+    // `assemble.py` to bake. stderr is the human's, so it gets the **link** (§13.1/#572):
+    // a play link names the facility this run was measured on, which is what somebody
+    // reading a flagged seed wants to open. The replay itself rides in stdout, and the
+    // playtest skill turns the pair into a `…&inputs=` link when the *run* is the thing
+    // to hand over rather than the level.
     eprintln!(
-        "seed {}: {} in {} turns, {} inputs",
+        "seed {}: {} in {} turns, {} inputs\nplay: {}",
         args.seed,
         record.outcome.as_str(),
         record.turns,
-        replay.inputs.len()
+        replay.inputs.len(),
+        intrusion_sim::play_link(&replay.level).unwrap_or_else(|| "<no token>".to_string()),
     );
     ExitCode::SUCCESS
 }
