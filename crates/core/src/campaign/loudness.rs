@@ -388,8 +388,11 @@ mod tests {
                         .collect();
                     assert_eq!(added.len(), 1, "seed {seed}: one rule, not a package");
                     assert_eq!(added[0].direction, direction, "seed {seed}");
-                    // And it must not ask for a gate the campaign settles as `None`
-                    // (§2.2): intel is currency, so the exit never refuses.
+                    // And it must not ask about the gate at all: a contribution starts
+                    // from `LevelModifiers::neutral`, whose `None` is the identity union
+                    // composes from, and the §12.6 pool holds no entry that moves it. The
+                    // campaign's own gate (#574) is the `chosen` set's business, and an
+                    // alert that could tighten it would be dealing a rule nobody drew.
                     assert_eq!(drawn.intel_to_exit, IntelGate::None, "seed {seed}");
                 }
             }

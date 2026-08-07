@@ -13,6 +13,7 @@
 
 use crate::state::*;
 use crate::test_support::{climb_out_of_the_tunnel, exit_tunnel_cells, room_with_tunnel};
+use crate::IntelGate;
 
 /// A 12×12 room whose exit sits at `(5, 4)` with its tunnel running **north** to the
 /// border — so `E` is bumped from the south and the way out is `(5, 0)`. The player
@@ -142,7 +143,13 @@ fn the_way_out_wins_or_refuses_and_a_refusal_is_free() {
     assert!(!s.exit_ready());
     let (turn, at) = (s.turn(), s.player());
     let events = s.step(Input::Step(Direction::North));
-    assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
+    assert_eq!(
+        events,
+        vec![Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }],
+    );
     assert_eq!(s.outcome(), Outcome::Playing);
     assert_eq!(s.turn(), turn, "a refusal spends nothing (§4.4)");
     assert_eq!(s.player(), at, "and moves nobody");
@@ -199,7 +206,13 @@ fn the_mouth_refuses_short_of_the_intel_gate() {
     );
     let (turn, at) = (s.turn(), s.player());
     let events = s.step(Input::Step(Direction::North));
-    assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
+    assert_eq!(
+        events,
+        vec![Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }],
+    );
     assert!(!s.in_duct(), "and it never let us into the tunnel");
     assert_eq!(s.turn(), turn, "a refusal spends nothing (§4.4)");
     assert_eq!(s.player(), at, "and moves nobody");

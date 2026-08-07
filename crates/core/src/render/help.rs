@@ -9,7 +9,8 @@
 //!
 //! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
 //!   the run's own **level-seed token**, with a `copy [c]` control that puts it on the
-//!   clipboard (§13.1/#353), the active [`LevelModifiers`] by name and direction
+//!   clipboard (§13.1/#353), the **objective** the exit will hold the run to (§4.5/#574,
+//!   drawn by [`super::objective`]), the active [`LevelModifiers`] by name and direction
 //!   (§12.6), and the **facility alert** — the rung reached and the retaliation it has
 //!   in force (§7.3/#375, drawn by [`super::alert`]). The first two are fixed at boot;
 //!   the third is the one thing on the card that moves while you play, which is why the
@@ -62,6 +63,7 @@
 mod abilities;
 
 use super::modifier_rows::{modifier_rows, MODIFIERS_HEADING};
+use super::objective::{objective_line, EXIT_LINE, OBJECTIVE_HEADING};
 use super::settings::{self, SettingsRow};
 use super::{
     blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
@@ -81,6 +83,14 @@ use crate::place::LevelConfig;
 /// [`ui_command_for_key`](crate::input::ui_command_for_key) (to open) and
 /// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
 pub(crate) const HELP_KEY: char = '?';
+
+/// The **second spelling** of [`HELP_KEY`] (#551) — `Escape`, printed as the `Esc` the
+/// footer and the exchange's usable line already print.
+///
+/// It is drawn beside `?` in the controls list because a binding a legend omits is one
+/// no player can find, and because the two keys are one command: whichever opens the
+/// panel, it comes up on the tab it was last left on and closes on either.
+pub(crate) const HELP_KEY_ALT: &str = "Esc";
 
 /// The key that flips the colour theme (§11.2/#189) — `n`, for *night* mode. A
 /// **standing** shortcut: it is listed in this card's controls block, and matched in
@@ -534,6 +544,12 @@ pub(super) struct PanelRun<'a> {
     pub(super) level: Option<LevelSeed>,
     /// The level modifiers in force (§12.6) — the Level info tab's list.
     pub(super) modifiers: LevelModifiers,
+    /// The facility's **whole** console count and crate count (§10.2/§8.3) — what the
+    /// Level info tab's objective section states the gate against (#574). Whole rather
+    /// than remaining, because the section says what the run is *for* and not how far
+    /// through it is; progress is the near line's ambient floor (§11.4/#421).
+    pub(super) intel: usize,
+    pub(super) caches: usize,
     /// The facility alert as it stands (§7.3/#375) — the one section that moves while
     /// the panel is closed.
     pub(super) alert: &'a AlertReadout,
@@ -579,15 +595,21 @@ fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
 
 /// The **Level info** tab (§12.6/#248/#272): the run's **level-seed token** in
 /// full — the one token that reproduces this exact run (§13.1/#245), spelling out
-/// its modifiers and loadout rather than implying them — then its active level
-/// modifiers, each by name and direction, or a clear "none active" when the run is
-/// baseline. The modifier list is [`LevelModifiers::active`], so it is derived and
-/// cannot drift — a new modifier field surfaces here on its own — and the token is
-/// [`LevelSeed::encode`] of the run's own config, so the panel can never show a
-/// string that boots a different game.
+/// its modifiers and loadout rather than implying them — then the **objective** its
+/// gate asks for (§4.5/#574), then its active level modifiers, each by name and
+/// direction, or a clear "none active" when the run is baseline. The modifier list is
+/// [`LevelModifiers::active`], so it is derived and cannot drift — a new modifier field
+/// surfaces here on its own — and the token is [`LevelSeed::encode`] of the run's own
+/// config, so the panel can never show a string that boots a different game.
+///
+/// **The objective is a section of its own and not a modifier row**, because the two
+/// answer different questions: the list says what *departs* from the baseline, and the
+/// gate a run is held to is a fact whether or not it departs from anything. Since the
+/// campaign plays on §4.5's baseline gate (#574), a run's whole exit rule would
+/// otherwise be nowhere on the card that exists to state its rules.
 fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCopy) {
     let (level, modifiers, alert) = (run.level, run.modifiers, run.alert);
-    draw(grid, 2, y, "THIS RUN", Category::Interest);
+    draw(grid, SECTION_INDENT, y, "THIS RUN", Category::Interest);
     y += 2;
 
     // The level-seed token (§13.1/#245/#333): the handle that hands this run around.
@@ -595,7 +617,7 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
     // and all — is simply not there rather than showing an honest-looking string that
     // boots something else.
     if let Some(token) = seed_token(level) {
-        draw(grid, 2, y, "LEVEL SEED", Category::System);
+        draw(grid, SECTION_INDENT, y, "LEVEL SEED", Category::System);
         y += 1;
         debug_assert_eq!(y, SEED_TOKEN_ROW, "the token row and its hit-test agree");
         // Interest, the goal/reward colour: this is the thing worth taking away
@@ -628,7 +650,23 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
         y += 1;
     }
 
-    draw(grid, 2, y, MODIFIERS_HEADING, Category::System);
+    // **What the exit will ask for** (§4.5/#574), between what the run *is* (the token)
+    // and what is bending it (the modifiers). It cannot be left to the modifier list:
+    // that surfaces a knob only when it departs from baseline, and §4.5's baseline gate
+    // is the very rule the campaign now plays under — so a player looking up the rule
+    // mid-raid would find the section that names it empty. It is the level-start card's
+    // own derivation ([`super::objective`]), so the two surfaces state one gate.
+    draw(grid, SECTION_INDENT, y, OBJECTIVE_HEADING, Category::System);
+    y += 1;
+    let (text, category) = objective_line(modifiers.intel_to_exit, run.intel, run.caches);
+    draw(grid, CONTENT_INDENT, y, &text, category);
+    y += 1;
+    // Interest is the goal-and-reward colour (§11.2), and the way out is the goal every
+    // run shares: the exit is the one piece of this building that is yours (§4.5).
+    draw(grid, CONTENT_INDENT, y, EXIT_LINE, Category::Interest);
+    y += 2;
+
+    draw(grid, SECTION_INDENT, y, MODIFIERS_HEADING, Category::System);
     y += 1;
 
     // The list itself is [`modifier_rows`](super::modifier_rows) — the one derivation
@@ -881,7 +919,13 @@ fn control_rows() -> Vec<(String, String)> {
         // which is precisely what belongs on a legend.
         ("1234".to_string(), "abilities".to_string()),
         ("m".to_string(), "messages".to_string()),
-        (HELP_KEY.to_string(), "this help".to_string()),
+        // Both spellings of the panel's own key (#551): `Escape` opens it as `?` does,
+        // and a legend that named only one of them would leave the other to be
+        // stumbled on.
+        (
+            format!("{HELP_KEY} / {HELP_KEY_ALT}"),
+            "this help".to_string(),
+        ),
         // The theme toggle (#189) is a standing shortcut like the rest: it is true of
         // every run, and it is the one row that also works *while this card is up*.
         (THEME_KEY.to_string(), "colour theme".to_string()),

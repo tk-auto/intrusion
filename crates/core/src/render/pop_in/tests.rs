@@ -335,7 +335,16 @@ fn every_pop_in_message_fits_its_box() {
             remaining: 9,
             still_needed: 9,
         },
-        Event::ExitRefused { still_needed: 9 },
+        // Both refusal wordings (#584): a count under `All`, and the gate that asks for
+        // any one thing.
+        Event::ExitRefused {
+            still_needed: 9,
+            gate: crate::IntelGate::All,
+        },
+        Event::ExitRefused {
+            still_needed: 1,
+            gate: crate::IntelGate::AtLeastOne,
+        },
         Event::CommsSilenced { at },
         Event::KeyTaken { at },
         Event::Won,

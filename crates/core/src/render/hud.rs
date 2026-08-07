@@ -537,6 +537,8 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             super::help::PanelRun {
                 level: state.level(),
                 modifiers: state.modifiers(),
+                intel: state.intel_total(),
+                caches: state.cache_total(),
                 alert: &state.alert_readout(),
                 bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
@@ -662,6 +664,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             &mut screen,
             state.modifiers(),
             state.intel_total(),
+            state.cache_total(),
             ui.modality,
         );
     }

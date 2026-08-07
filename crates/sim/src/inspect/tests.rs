@@ -1,5 +1,5 @@
 use super::*;
-use intrusion_core::{parse_replay_link, parse_script, Direction};
+use intrusion_core::{parse_replay_link, parse_script, Direction, IntelGate};
 
 /// The link this mode was built to read, kept verbatim — the run a player copied
 /// out of a preview build and pasted back (#411). Parsing it is the core's job
@@ -76,9 +76,13 @@ fn the_pasted_link_reproduces_the_run_that_was_played() {
     // tunnel's border cell — refused, and saying what the gate still wants.
     for turn in &seen.turns[5..11] {
         assert!(
-            turn.events
-                .iter()
-                .any(|e| matches!(e, Event::ExitRefused { still_needed: 3 })),
+            turn.events.iter().any(|e| matches!(
+                e,
+                Event::ExitRefused {
+                    still_needed: 3,
+                    gate: IntelGate::All,
+                }
+            )),
             "input {} was the refused way out: {:?}",
             turn.index,
             turn.events,

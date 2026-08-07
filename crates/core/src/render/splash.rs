@@ -10,8 +10,10 @@
 //!
 //! Two sections, and nothing else:
 //!
-//! - **THE JOB's objective** — what the exit will ask for ([`take_line`]) and the fact
-//!   that there is only one way out of the building, which is the one you dug (§1/§4.5).
+//! - **THE JOB's objective** — what the exit will ask for and the fact that there is
+//!   only one way out of the building, which is the one you dug (§1/§4.5). Derived by
+//!   [`objective`](super::objective), which the Level info tab draws from too, so the
+//!   two cards cannot come to state the same gate differently.
 //! - **MODIFIERS** — [`LevelModifiers::active`] through the one derivation every card
 //!   draws ([`modifier_rows`](super::modifier_rows)), each row in its §11.2 direction
 //!   colour, so a rule that is in force here is in force on the Level info tab too and
@@ -49,12 +51,13 @@
 
 use super::hud::InputModality;
 use super::modifier_rows::{modifier_rows, MODIFIERS_HEADING};
+use super::objective::{objective_line, EXIT_LINE, OBJECTIVE_HEADING};
 use super::{
     clear_row, draw, draw_rule, help, overlay_top, Grid, CORNER_BOTTOM_LEFT, CORNER_BOTTOM_RIGHT,
     CORNER_TOP_LEFT, CORNER_TOP_RIGHT, SIDE_GLYPH,
 };
 use crate::category::Category;
-use crate::modifiers::{IntelGate, LevelModifiers};
+use crate::modifiers::LevelModifiers;
 use crate::place::LevelConfig;
 
 /// The card's own heading (§11.8): the run stated as the **job** it is.
@@ -65,19 +68,6 @@ use crate::place::LevelConfig;
 /// *seed* and a *level modifier* belong to the player choosing a run (§11.8), and the
 /// job belongs to the intruder standing in the building.
 const HEADING: &str = "THE JOB";
-
-/// The objective section's heading — what the exit will ask for before it opens (§4.5).
-const OBJECTIVE_HEADING: &str = "OBJECTIVE";
-
-/// The way out, on every card whatever the gate says: §1's promise stated before the
-/// first step rather than discovered at a wall — you came in by your own tunnel and
-/// there is no other way out of the building (§4.5/§7.6).
-const EXIT_LINE: &str = "Get back out through your tunnel";
-
-/// What a facility with **no consoles** says. Rare — the §12.6 intel knob floors at
-/// [`LevelConfig::INTEL_MIN`] — but reachable by a hand-built state, and a card that
-/// silently dropped its objective row there would read as broken rather than as empty.
-const NO_INTEL: &str = "There is no intel here";
 
 /// The dismissal hint, in the vocabulary the player's hands are actually using
 /// (§11.6/#323) — the same choice the usable line's floor makes, and for its reason: a
@@ -118,7 +108,12 @@ impl Row {
 /// Shaped so it can only grow **downward**: every row is one line, the objective is at
 /// most two, and the modifier rows are bounded at the caption width the whole set is
 /// checked against at compile time ([`super::modifier_rows`]).
-fn rows(modifiers: LevelModifiers, intel: usize, modality: InputModality) -> Vec<Row> {
+fn rows(
+    modifiers: LevelModifiers,
+    intel: usize,
+    caches: usize,
+    modality: InputModality,
+) -> Vec<Row> {
     let mut rows = vec![
         Row::Top,
         Row::Blank,
@@ -126,7 +121,8 @@ fn rows(modifiers: LevelModifiers, intel: usize, modality: InputModality) -> Vec
         Row::Blank,
         Row::heading(OBJECTIVE_HEADING, Category::System),
     ];
-    rows.push(objective_row(modifiers.intel_to_exit, intel));
+    let (text, category) = objective_line(modifiers.intel_to_exit, intel, caches);
+    rows.push(Row::content(text, category));
     // Interest is the goal-and-reward colour (§11.2), and the way out is the goal every
     // run shares: the exit is the one piece of this building that is yours (§4.5), drawn
     // in the same tint the board gives your own tunnel.
@@ -143,48 +139,6 @@ fn rows(modifiers: LevelModifiers, intel: usize, modality: InputModality) -> Vec
     rows
 }
 
-/// The objective's first row: what the exit will ask for.
-///
-/// **It cannot be read off [`LevelModifiers::active`]** (§4.5/§12.6): that surfaces the
-/// gate only when it is *non-baseline*, so a baseline run — the sim's, and any run whose
-/// card says `none active` — would be handed a card with no objective on it at all. It
-/// is derived from the run's own gate and console count instead, so **every** run gets a
-/// positive statement of what it is being asked to do.
-///
-/// A facility with nothing to take says so under every gate: the exit is vacuously open
-/// (an empty `all` is satisfied), and the row that would have named a number instead
-/// names the emptiness.
-fn objective_row(gate: IntelGate, intel: usize) -> Row {
-    let category = if intel == 0 {
-        // Nothing to reach for, so nothing wears the reward colour: the row recedes to
-        // Ground, the same reading the modifier list's own "none active" row takes.
-        Category::Ground
-    } else {
-        Category::Interest
-    };
-    Row::content(take_line(gate, intel), category)
-}
-
-/// What the gate asks for, in words — one line per §12.6 setting, since the three modes
-/// want three different things of the same facility (§4.5/#244):
-///
-/// - [`All`](IntelGate::All) — quick play: every console, then out.
-/// - [`AtLeastOne`](IntelGate::AtLeastOne) — the §4.5 baseline and the sim (§13.2): one
-///   is a complete run, and pressing on for more is the aggressive style's trade rather
-///   than a requirement, which is exactly what the row has to say.
-/// - [`None`](IntelGate::None) — campaign (§14 v3): intel is currency (§2.2), not an
-///   exit key. The row says both halves, because "no intel required" alone would read as
-///   *there is no point taking any*, which is the opposite of true.
-fn take_line(gate: IntelGate, intel: usize) -> String {
-    match (gate, intel) {
-        (_, 0) => NO_INTEL.to_string(),
-        (IntelGate::All, 1) => "Take the one intel".to_string(),
-        (IntelGate::All, n) => format!("Take all {n} intel"),
-        (IntelGate::AtLeastOne, _) => "Take intel — one is enough".to_string(),
-        (IntelGate::None, _) => "Take intel — none is required".to_string(),
-    }
-}
-
 /// How to dismiss, in the modality the shell says the player is using (§11.6/#323).
 fn begin_hint(modality: InputModality) -> &'static str {
     match modality {
@@ -196,22 +150,15 @@ fn begin_hint(modality: InputModality) -> &'static str {
 /// **The card's rows fit the board they are drawn on.** Every fixed line is measured at
 /// compile time against the narrowest screen a real run renders on (the v1 board, 40
 /// wide — §10.2) with the one-column right margin every card keeps; the modifier
-/// captions are bounded by [`super::modifier_rows`], and the objective's one variable
-/// row — a console count — is measured over its whole envelope by
-/// `no_objective_line_is_clipped_on_the_board`.
+/// captions are bounded by [`super::modifier_rows`] and the objective's lines by
+/// [`super::objective`].
 ///
 /// [`draw`] clips in silence, so a line that outgrew the board would simply arrive cut,
 /// which is worse than a short one: it looks like the whole sentence (§2.3).
 const _: () = {
-    let room = (LevelConfig::V1.width - help::CONTENT_INDENT - 1) as usize;
-    assert!(
-        EXIT_LINE.len() <= room && NO_INTEL.len() <= room,
-        "an objective line is too long for the level-start splash — shorten it",
-    );
     let heading_room = (LevelConfig::V1.width - help::SECTION_INDENT - 1) as usize;
     assert!(
         HEADING.len() <= heading_room
-            && OBJECTIVE_HEADING.len() <= heading_room
             && BEGIN_KEYS.len() <= heading_room
             && BEGIN_TOUCH.len() <= heading_room,
         "a level-start splash heading is too long for the board — shorten it",
@@ -227,16 +174,17 @@ const _: () = {
 /// is what makes the block one boxed object rather than a horizontal slice out of the
 /// level.
 ///
-/// `intel` is the facility's **whole** console count rather than what is still out: the
-/// card states the objective, not progress against it, and at level start the two are
-/// the same number anyway.
+/// `intel` and `caches` are the facility's **whole** counts rather than what is still
+/// out: the card states the objective, not progress against it, and at level start the
+/// two are the same number anyway.
 pub(super) fn overlay_splash(
     grid: &mut Grid,
     modifiers: LevelModifiers,
     intel: usize,
+    caches: usize,
     modality: InputModality,
 ) {
-    let rows = rows(modifiers, intel, modality);
+    let rows = rows(modifiers, intel, caches, modality);
     let top = overlay_top(grid.height, rows.len());
     for (i, row) in rows.iter().enumerate() {
         let y = top + i as u32;
