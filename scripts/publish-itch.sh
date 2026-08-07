@@ -69,9 +69,21 @@ if [ "$DRY_RUN" -eq 0 ] && ! command -v butler >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! command -v wasm-bindgen >/dev/null 2>&1; then
-    echo "publish-itch: wasm-bindgen CLI not found on PATH." >&2
+# Resolve the wasm-bindgen CLI. `cargo install` drops it in $CARGO_HOME/bin
+# (default ~/.cargo/bin), a directory only rustup's own installer adds to PATH —
+# with a distro-packaged cargo a perfectly successful install still looks missing.
+# So fall back to the install root before declaring it absent.
+CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
+if command -v wasm-bindgen >/dev/null 2>&1; then
+    WASM_BINDGEN=$(command -v wasm-bindgen)
+elif [ -x "$CARGO_BIN/wasm-bindgen" ]; then
+    WASM_BINDGEN="$CARGO_BIN/wasm-bindgen"
+    echo "publish-itch: wasm-bindgen is not on PATH; using $WASM_BINDGEN."
+    echo "  Add it permanently with: . \"\$HOME/.cargo/env\"  (in ~/.bashrc or ~/.zshrc)"
+else
+    echo "publish-itch: wasm-bindgen CLI not found on PATH or in $CARGO_BIN." >&2
     echo "  cargo install wasm-bindgen-cli --version <the pin in crates/web/Cargo.toml> --locked" >&2
+    echo "  (the crate is wasm-bindgen-cli; the binary it installs is called wasm-bindgen)" >&2
     exit 1
 fi
 
@@ -84,7 +96,7 @@ if [ -z "$WASM_BINDGEN_PIN" ]; then
     echo "  The dependency line's shape changed; update this script to match." >&2
     exit 1
 fi
-WASM_BINDGEN_HAVE=$(wasm-bindgen --version | awk '{print $2}')
+WASM_BINDGEN_HAVE=$("$WASM_BINDGEN" --version | awk '{print $2}')
 if [ "$WASM_BINDGEN_HAVE" != "$WASM_BINDGEN_PIN" ]; then
     echo "publish-itch: wasm-bindgen CLI is $WASM_BINDGEN_HAVE but the crate is pinned to $WASM_BINDGEN_PIN." >&2
     echo "  cargo install wasm-bindgen-cli --version $WASM_BINDGEN_PIN --locked" >&2
@@ -112,7 +124,7 @@ cargo build -p intrusion-web --release --target wasm32-unknown-unknown
 
 echo "== publish 2/3: assemble the site into $OUT_DIR =="
 rm -rf "$OUT_DIR" && mkdir -p "$OUT_DIR"
-wasm-bindgen target/wasm32-unknown-unknown/release/intrusion_web.wasm \
+"$WASM_BINDGEN" target/wasm32-unknown-unknown/release/intrusion_web.wasm \
     --out-dir "$OUT_DIR" --target web --no-typescript
 cp web/index.html "$OUT_DIR/"
 # Ship any static assets alongside (font, images) if present.
