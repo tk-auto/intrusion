@@ -692,6 +692,16 @@ impl State {
         // twice costs a frame's work and changes nothing — the same reasoning, and
         // the same call, as [`with_debug`](Self::with_debug).
         self.recompute_sight();
+        // And the §9 sense channel is stale in exactly the same way (#493). That same
+        // startup turn stamped a cue on every guard it felt and on any door its guards
+        // moved, under the *unsuppressed* rule — so without this the opening frame of a
+        // run whose sense is off would carry a turn-zero dot the run can never produce
+        // again. Dropping is the whole of the correction: the modifier can only ever take
+        // marks away, so there is nothing to re-stamp, and every later turn records
+        // through the seams that already read the resolved set.
+        if self.modifiers.sense_suppressed {
+            self.sense_cues.clear();
+        }
         self
     }
 

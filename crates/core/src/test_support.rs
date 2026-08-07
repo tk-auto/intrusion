@@ -19,8 +19,8 @@ use std::collections::HashSet;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
-use crate::region::{DoorKind, RegionGraph, RegionKind};
 use crate::guard::Guard;
+use crate::region::{DoorKind, RegionGraph, RegionKind};
 use crate::state::{Event, Input, State};
 
 /// The default sampled sweep width — small enough to keep the routine gate fast,

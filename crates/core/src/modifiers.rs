@@ -1205,6 +1205,64 @@ pub struct LevelModifiers {
     /// on runs nobody asked. Its one source is [`Composite::Archive`], where it is a stated
     /// property of the one facility a run ends at.
     pub guards_watch_their_sides: bool,
+    /// **Harder.** The §9 **sense is off** (§9/§9.4/#493): no guard is ever felt through
+    /// a wall and no door change lights a cue. What the player knows about the facility
+    /// is what they can *see*. Baseline off: every run perceives §9's two channels as it
+    /// always did.
+    ///
+    /// **It takes away scouting information, never fairness information.** Everything on
+    /// the *sight* side is untouched and that is the whole shape of the modifier: a guard
+    /// in the field of view is [`Seen`](crate::GuardPerception::Seen) with its facing and
+    /// its cone, the §11.5 danger overlay is built from
+    /// [`visible_cone_cells`](crate::State::visible_cone_cells) — a different channel —
+    /// and the standing watcher line of an unseen guard that has you (#465) still draws.
+    /// That line is §11.5's promise that a watched cell reads as watched, which §2.2
+    /// requires; it is *not* the sense channel, and neither rule is to be later "fixed" to
+    /// match the other.
+    ///
+    /// **It suppresses the channel, not the rule input** (#493). The reach of a
+    /// [`Confuse`](crate::Effect::Confuse) blast is `min(CONFUSION_RADIUS,
+    /// sense_range())` — §8.3's **[SETTLED]** clamp, *"the blast can never freeze what you
+    /// cannot sense"* — so zeroing the range would zero the blast and delete an ability
+    /// from the loadout, which is exactly the dead-verb case §13.2's histogram exists to
+    /// catch. So [`sense_range`](crate::State::sense_range) and
+    /// [`door_sense_range`](crate::State::door_sense_range) keep their values, and this
+    /// field is read at the two seams the player *perceives* through
+    /// ([`perceive_guard`](crate::State::perceive_guard) and the door-cue pass).
+    /// Confusion still catches every guard a sensing player would have sensed; you simply
+    /// cannot see it coming, which is the harder reading of the same ability rather than
+    /// the loss of it.
+    ///
+    /// **Wait keeps half of itself.** §8.3 calls Wait *"the only way to see behind you"*
+    /// and §9.1 gives it a widened sense as well; with this on the 360° look remains and
+    /// the widening does nothing. The innate-verb floor (appendix 25) is met by the sight
+    /// half alone — the verb still buys the one thing no other verb does — so the
+    /// narrowing is a real cost taken deliberately rather than a verb quietly hollowed
+    /// out.
+    ///
+    /// **A duct's cost narrows with it** (§10.7). The crawlspace pays in *information*, of
+    /// which the degraded [`DUCT_SENSE_RANGE`](crate::DUCT_SENSE_RANGE) is normally half;
+    /// with the sense off there is nothing left for it to shrink, so what a duct still
+    /// costs is its blinded sight and its one mouth-peek window. Ducts are therefore
+    /// *relatively* safer under this modifier — stated here and in §10.7 so the two rules
+    /// are not later found to disagree.
+    ///
+    /// **In the directed pool** (see [`POOL`]), on the harder side, and the §13.2 bot
+    /// **plays it honestly with no cue of its own** — which is not something most of the
+    /// pool can say. The policy perceives guards through
+    /// [`perceive_guard`](crate::State::perceive_guard) exactly as the player does, and it
+    /// reads *both* arms: a seen guard's cone builds its danger set, and every **perceived**
+    /// guard, sensed ones included, feeds the route's keep-away cost, the flee and
+    /// hide-until-clear radii, which bench it takes cover behind, and the `nearest_guard`
+    /// every ability cue is weighed against (`docs/bot-behaviour.md` §2). With this on
+    /// those all go quiet for guards behind walls, so the bot routes past patrols it can
+    /// no longer feel — the same loss, through the same channel, that the player takes.
+    /// It costs it 14 to 34 points of win rate across the four temperaments, which is a
+    /// larger step than any other harder entry and a number to read carefully: the bot has
+    /// no cue for *"I am blind now, be more careful"* and a player does. Appendix 57 has
+    /// the measurement, the reading, and why the entry ships with it recorded rather than
+    /// softened on the strength of it.
+    pub sense_suppressed: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`] — except at the
@@ -1357,7 +1415,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 26] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 27] = [
     LOCKED_PRIZE_ROOM,
     WATCHES_ITS_SIDES,
     SEARCHES_HIDEOUTS,
@@ -1381,6 +1439,7 @@ pub(crate) const CAPTIONS: [ActiveModifier; 26] = [
     THREE_CACHES,
     SHOWS_SEARCH_AREAS,
     NARROWED_CONES,
+    SENSE_SUPPRESSED,
     SCOUTED,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
@@ -1626,6 +1685,28 @@ const NARROWED_CONES: ActiveModifier = ActiveModifier {
     short: "shorter guard cones",
 };
 
+/// The sense caption (#493). Named for **what the player loses**, which is the one thing
+/// about this rule they can act on — and the one caption family a harder rule here can take:
+/// its neighbours say what the *guards* do, and under this modifier no guard does anything
+/// differently. *"Layout unknown"* is the shape it follows, for the same reason — a rule
+/// about knowledge is named for the knowledge.
+///
+/// It says *felt*, the word §9 uses for the channel, rather than *sensed*: **Sensed** is
+/// also the name of the §11.2 colour category the cue is painted in
+/// (`docs/render-reference.md`), and a caption naming the paint would read as a render
+/// setting rather than as the rule that stops feeding it.
+///
+/// It must be read before turn one. With this on the board goes quiet in a way a player who
+/// has raided one facility will read as the sense having broken, and the card is what tells
+/// them it is the run.
+const SENSE_SUPPRESSED: ActiveModifier = ActiveModifier {
+    name: "Nothing felt through walls",
+    direction: ModifierDirection::Harder,
+    detail: None,
+    source: None,
+    short: "no sense through walls",
+};
+
 /// The scout caption (#215). Named for **what the board shows**, like every other easier
 /// caption here: the player reads that the building's contents are on the map, not that a
 /// flag was set at the hub.
@@ -1733,6 +1814,16 @@ pub(crate) struct PoolEntry {
 /// a `−N` bot batch has long been drawing no-ops. That is an argument for teaching the
 /// bot (#498, #517) and for labelling the batch, never for a thinner game.
 ///
+/// **[`SENSE_SUPPRESSED`] is the reverse case, and worth naming beside them** (#493). It
+/// is the first entry that bends what the **player perceives** rather than what the world
+/// does, so the reading above would predict a bot-blind one — and it is the opposite: the
+/// policy reads the sense through the same [`perceive_guard`](crate::State::perceive_guard)
+/// the renderer does, and every perceived guard feeds its keep-away, flee, hide and cover
+/// decisions. Taking the channel away takes them away too. Appendix 49's rule — *a harder
+/// modifier lands on the bot whether it understands it or not* — holds here for a reason it
+/// did not anticipate: the bot is player-honest by construction, so a modifier aimed at the
+/// player's own channels lands on it hardest of all.
+///
 /// # The three admitted by #518, and what each one costs
 ///
 /// **`automatic_doors`** (#452) is the entry this table had never explained. Its
@@ -1759,7 +1850,7 @@ pub(crate) struct PoolEntry {
 /// settings are the same building down to the cell; nothing about it failed either
 /// question. It was out solely because the bot has no cue for buying a key — which, by
 /// the rule above, was never a reason at all.
-pub(crate) const POOL: [PoolEntry; 13] = [
+pub(crate) const POOL: [PoolEntry; 14] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -1837,6 +1928,14 @@ pub(crate) const POOL: [PoolEntry; 13] = [
     PoolEntry {
         caption: NARROWED_CONES,
         set: |m| m.narrowed_guard_cones = true,
+    },
+    // Slot 30, appended (#493) — the harder side's **ninth** entry, and the first on either
+    // side that bends what the *player perceives* rather than what the world does. It is
+    // read at the perception seam only, so it leaves the grid byte-identical and lands on
+    // the strictest tier of the same-building guarantee below.
+    PoolEntry {
+        caption: SENSE_SUPPRESSED,
+        set: |m| m.sense_suppressed = true,
     },
 ];
 
@@ -1987,6 +2086,7 @@ impl LevelModifiers {
             narrowed_guard_cones,
             scouted,
             guards_watch_their_sides,
+            sense_suppressed,
             intel_to_exit,
             // Not a rule and never a row of its own: what it stands for is already in the
             // fields above (resolution unioned it in), and putting its *name* in front of
@@ -2052,6 +2152,12 @@ impl LevelModifiers {
         // from a patrol's flank as the game cheating rather than as the terminus it is.
         if guards_watch_their_sides {
             active.push(WATCHES_ITS_SIDES);
+        }
+        // Read before turn one as well (#493): with this on the sense channel goes quiet
+        // for the whole run, and a player who was not told would read a board with no
+        // orange on it as the sense having broken rather than as the rule it is.
+        if sense_suppressed {
+            active.push(SENSE_SUPPRESSED);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -2173,6 +2279,10 @@ impl LevelModifiers {
             // sides cannot be talked back into blind flanks.
             guards_watch_their_sides: self.guards_watch_their_sides
                 || other.guards_watch_their_sides,
+            // A plain toggle (#493), composed by the same OR: a source that asked for the
+            // facility to be felt through no wall cannot be talked out of it by one that
+            // stayed quiet — and no source can hand the sense back.
+            sense_suppressed: self.sense_suppressed || other.sense_suppressed,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
             // A composite is a *name* for some of the fields above rather than a rule
             // beside them, so there is no pressure here to add or relieve: a source that
@@ -2259,6 +2369,7 @@ impl LevelModifiers {
             scouted: self.scouted && !given.scouted,
             guards_watch_their_sides: self.guards_watch_their_sides
                 && !given.guards_watch_their_sides,
+            sense_suppressed: self.sense_suppressed && !given.sense_suppressed,
             // Never a composite's to set (see `Composite::expansion`), so it passes
             // through whole rather than being differenced against a value that is always
             // `neutral`'s.
@@ -2569,13 +2680,14 @@ mod tests {
             scouted: true,
             narrowed_guard_cones: true,
             guards_watch_their_sides: true,
+            sense_suppressed: true,
             intel_to_exit: IntelGate::All,
             // A composite is a *name* for some of the fields above, not a sixteenth rule
             // beside them (#565) — it contributes no row of its own, only an owner in
             // front of the rows it set, so a set with none reads exactly as it always did.
             composite: Composite::None,
         };
-        assert_eq!(stacked.active().len(), 16);
+        assert_eq!(stacked.active().len(), 17);
         assert!(
             !stacked
                 .active()
@@ -2609,13 +2721,14 @@ mod tests {
         // **The sides are no longer the same depth, and that is the shape of #518.** The
         // three modifiers admitted there are all `Harder`, so the harder side went from
         // five to **eight** while the easier side stayed at four — and #495 has since
-        // taken the easier side to **five**, the growth that paragraph called for.
+        // taken the easier side to **five**, the growth that paragraph called for. #493
+        // then took the harder side to **nine**, so the gap is what it was.
         // Nothing lies about the gap either way —
         // [`Difficulty::blurb`](crate::Difficulty::blurb) counts *picks*, not pool
         // depth, so both ±2 stops still promise exactly the two rules they will bend —
         // but a `+N` run still has more variety than a `−N` one.
-        assert_eq!(POOL.len(), 13);
-        assert_eq!(pool_size(ModifierDirection::Harder), 8);
+        assert_eq!(POOL.len(), 14);
+        assert_eq!(pool_size(ModifierDirection::Harder), 9);
         assert_eq!(pool_size(ModifierDirection::Easier), 5);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
@@ -2649,6 +2762,7 @@ mod tests {
             narrowed_guard_cones: false,
             scouted: true,
             guards_watch_their_sides: true,
+            sense_suppressed: false,
             intel_to_exit: IntelGate::All,
             composite: Composite::Vault,
         };
@@ -2669,6 +2783,7 @@ mod tests {
             narrowed_guard_cones: true,
             scouted: false,
             guards_watch_their_sides: false,
+            sense_suppressed: true,
             intel_to_exit: IntelGate::None,
             composite: Composite::None,
         };

@@ -4341,3 +4341,118 @@ Giving a composite the power to recolour its parts would be the label-over-rules
 #565 refused, and the row beneath it — *Intel to exit: all of it*, in the Warning colour —
 is the fact that makes five consoles hard, stated where a player reads it. So the wrinkle
 is documented rather than special-cased.
+
+---
+
+## Appendix 57 — Switching the sense off: suppress the channel, never the range
+
+*(§9 the sense and §9.4 its door half, §9.5 the one fade, §8.3 Confusion's clamp,
+§10.7 the crawlspace's cost, §11.5/§2.2 the fairness floor, §12.6 the directed pool.
+The ticket is #493.)*
+
+The *"nothing felt through walls"* modifier takes away the §9 sense whole: no guard felt
+through a wall, no door-change cue, for the whole run. It is the first level modifier
+that bends what the **player perceives** rather than what the world does, and that
+difference is what the three findings below are all about.
+
+### 1. The clamp is why the range had to survive
+
+Confusion's reach is `min(CONFUSION_RADIUS, sense_range())` — a **[SETTLED]** clamp
+whose wording is *"the blast can never freeze what you cannot sense"*. A modifier that
+implemented "the sense is off" as `sense_range() == 0` would have zeroed the blast with
+it: a level modifier silently deleting a verb from the loadout, which is precisely the
+dead-ability case §13.2's histogram exists to catch. The Dart reads the same clamp, and
+Lockdown's radius is bounded against the same constant.
+
+So the modifier suppresses the **channel the player perceives** and leaves the **rule
+input** alone. `sense_range()` and `door_sense_range()` keep their values; the two seams
+that read them for the player — `perceive_guard`'s `Sensed` arm and the door-cue pass —
+are what the flag is read at. Confusion therefore still fires at full reach and still
+freezes every guard a sensing player would have sensed; what the player loses is the
+sight of it landing. The clamp's [SETTLED] wording stays literally true, which is the
+point: a rule stated over a range survives a modifier aimed at a channel, and one stated
+over "what the player can perceive" would not have.
+
+The general lesson is worth keeping: **a suppressed channel is not a shortened one.**
+Zero is a value on the ladder and rules read the ladder; absence is a fact about the
+view. Conflating them makes every clamp in the game a hostage to a display decision.
+
+### 2. What it must not touch, and why the list is short
+
+The bound on this modifier is §2.2 — *you may not be captured by something you could not
+perceive*. So it removes **scouting** information and never **fairness** information: a
+seen guard, its facing, its cone and the §11.5 danger overlay are identical to baseline
+cell for cell, and so is the standing watcher line of an unseen guard that has you
+(#465). That line looks like the sense — an unseen guard's position, through walls, for
+free — and is deliberately not it: it is §11.5's promise that a watched cell reads as
+watched, and it becomes *more* load-bearing here, not less, because it is the last cue
+left that says *something has you*. Neither rule is to be later "fixed" to match the
+other.
+
+The **duct** loses half its price, and that is accepted rather than patched. §10.7
+charges a crawler in information — blinded sight plus a sense shrunk to
+`DUCT_SENSE_RANGE` — and with the sense already off there is nothing left to shrink, so
+ducts are relatively *safer* under this modifier. Special-casing the crawlspace to
+restore the gap would invent a second knowledge rule to paper over the first one's
+consequences, which is the move §11.5a's fog note already refuses for this same channel.
+
+**Wait keeps its sight half.** §8.3 calls it *"the only way to see behind you"* and §9.1
+gives it a widened sense as well; here the 360° look stays and the widening does nothing.
+Measured against the innate-verb floor (appendix 25) that is a verb narrowed, not
+hollowed: it still buys the one thing no other verb does.
+
+### 3. The bot feels it — hard — and that is a number to read carefully
+
+Appendix 49 explained why bot-blindness clusters on the pool's easier side with a rule:
+*a harder modifier lands on the bot whether it understands it or not; an easier one has
+to be used.* A modifier aimed at the player's own perception looks like the counterexample
+— and it is the opposite. The §13.2 policy is player-honest by construction: it perceives
+guards through `State::perceive_guard`, and the **sensed** arm feeds five separate
+decisions — the route's keep-away cost, the flee radius, the hide-until-clear hysteresis,
+which bench it takes cover behind, and the `nearest_guard` every ability cue is weighed
+against. Take the channel away and all five go quiet.
+
+100 seeds per profile, against the committed baseline (the default batch is unmoved —
+this modifier is off in every run the baseline pins):
+
+| Profile | Win rate | Captures | Detections | Diversity | Turns to win (mean) |
+|---|---|---|---|---|---|
+| balanced | 0.35 → **0.21** | 62 → 79 | 848 → 459 | 0.60 → 0.56 | 157 → 108 |
+| cautious | 0.53 → **0.19** | 44 → 80 | 722 → 820 | 0.34 → 0.55 | 272 → 106 |
+| aggressive | 0.40 → **0.14** | 60 → 84 | 728 → 1337 | 0.57 → 0.45 | 149 → 89 |
+| careless | 0.43 → **0.14** | 56 → 84 | 1211 → 1293 | 0.50 → 0.40 | 150 → 91 |
+
+Every profile loses, and the direction is unambiguous — which is the §2.3 assertion this
+entry owes, held in the strongest frame available (the same seed builds the same board,
+so the two arms differ in the rule and in nothing else). The **magnitude** is the part to
+distrust. Three readings, in order of confidence:
+
+- **It is a large step, larger than any other harder entry.** §10.2 puts one guard at
+  8–10 points of win rate; this is 14 to 34. Appendix 51 rejected the narrower-arc rung
+  at ~25 points on the grounds that it *"reads as a different guard rather than an easier
+  one"*, and the same question is open here in the harder direction.
+- **The cautious profile falls furthest, and that is the tell.** It is the temperament
+  whose whole game is waiting for a gap it can *see coming* — 53% to 19%, and its winning
+  runs go from 272 turns to 106, because the patient runs are now the ones that get
+  caught. Its diversity *rises*, which is not a health signal: with the channel it
+  planned around gone, its runs stop resembling each other because it is improvising.
+- **The bot has no counterplay and a player does.** A blinded human slows down, spends
+  Wait for the 360°, hugs walls, peeks corners, and treats every unseen doorway as
+  occupied. The policy has no cue for *"I am blind now, be more careful"* — it plays its
+  ordinary game with five inputs reading empty. So the table is best read as an **upper
+  bound on the harshness**, not an estimate of it, and the verdict on whether this is
+  hard or merely unfair is a human one (§13.1/§13.4).
+
+That last point is why the entry ships in the pool with the measurement recorded rather
+than being softened on the strength of it. If play shows capture becoming *unreadable*
+with this on, the finding is about the §11.5 overlay's coverage (§7.6/§2.2) — the floor
+that keeps it fair — and not about giving the sense back a little.
+
+### 4. One bug the ticket found on the way
+
+`State::new` runs the level-start world turn (§4.2) *before* a builder can thread the
+resolved modifiers in, and that turn stamps a sense cue on every guard it feels. So the
+opening frame of a run whose sense is off carried a turn-zero dot the run could never
+produce again — the same staleness `with_modifiers` already re-ran the sight phase to
+fix, one channel over. The correction is to drop the cues there: this modifier can only
+ever take marks away, so there is nothing to re-stamp.

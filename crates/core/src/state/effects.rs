@@ -354,6 +354,16 @@ impl State {
     /// re-derivation, so whatever changes the sense later is picked up here for free
     /// and there is no second place to keep in step.
     ///
+    /// **The `sense_suppressed` modifier is the one thing it deliberately does not pick
+    /// up** (§12.6/#493), because that modifier does not move the ladder: it suppresses the
+    /// **channel the player perceives** and leaves [`sense_range`](Self::sense_range) — the
+    /// rule input — exactly where it was. Had it zeroed the range instead, this clamp would
+    /// have zeroed the blast with it and a level modifier would have silently deleted an
+    /// ability from the loadout, which is the dead-verb case §13.2's histogram exists to
+    /// catch. So with the sense off Confusion still reaches its full radius and still
+    /// freezes every guard a sensing player would have sensed — the clamp's **[SETTLED]**
+    /// wording holds, and what the player loses is the sight of it landing, not the blast.
+    ///
     /// **The read moment is pinned in the reading** (#325/#345): the clamp is
     /// [`acting_sense_range`](Self::acting_sense_range), the sense as an action taken
     /// now sees it, so §9.1's widened Wait can never reach into a blast fired the turn

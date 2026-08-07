@@ -8,6 +8,13 @@ keeps its lead. The clamp is **[SETTLED]**: the reach fired is
 `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you could
 not sense.
 
+The clamp is stated over the **range**, which is what lets it survive a run whose sense
+is switched off (§12.6/#493): that modifier suppresses the channel the player *perceives*
+and leaves the range where it is, so Confusion keeps its full reach and still catches
+every guard a sensing player would have sensed — what is lost is the sight of it landing.
+A modifier that had zeroed the range would have zeroed this ability, which is the
+dead-verb case the §13.2 histogram exists to catch.
+
 ## What the cue says
 
 `crates/sim/src/cue.rs`:
