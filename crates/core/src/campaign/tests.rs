@@ -400,7 +400,10 @@ fn every_flavour_carves_the_facility_it_promises() {
     for flavour in Flavour::OFFERED.into_iter().chain([Flavour::Archive]) {
         let modifiers = ModifierSources {
             chosen: LevelModifiers {
-                intel_to_exit: IntelGate::None,
+                // The campaign's own gate (#574). It reaches no generation seam — this is
+                // about what the carve seats — but the config is built the way the
+                // campaign builds it so a reader is not shown a facility no run boots.
+                intel_to_exit: IntelGate::AtLeastOne,
                 ..LevelModifiers::default()
             },
             alert: None,
