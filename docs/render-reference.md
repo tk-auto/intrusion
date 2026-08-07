@@ -776,6 +776,13 @@ Two consequences that follow, and must not regress:
 Cones of guards you **cannot** see paint nothing — that is information you have not
 earned, and painting it would leak what you have not scouted.
 
+**One thing can make the red mean something else, and it is not reachable from play.**
+Under §12.6's **ghost** debug switch (#507) nothing detects the player, so the literal
+detection set is empty and the overlay would go blank — deleting it exactly when someone
+is debugging vision. It keeps painting the set that *would* detect a detectable player
+instead: red reads as *this cell is watched*. A red cell under a ghost is the instrument
+working, not the overlay broken. No link, token or sim run can turn that switch on.
+
 ### The watcher line (#222/#465)
 
 That last rule leaves one hole, and the red channel closes it. A guard watching from

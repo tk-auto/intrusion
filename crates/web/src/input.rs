@@ -451,7 +451,22 @@ impl Game {
     /// the options screen, in a debug session, and only when the run has a token for
     /// the link to carry. Anywhere else the row is not drawn and this is a no-op, so
     /// `Enter` does exactly what the screen shows.
+    ///
+    /// **A ghosted run is refused outright** (§12.6/#507), and refused *audibly*: the
+    /// row draws as unavailable and the press answers on the acknowledgement line with
+    /// the switch that did it. A dead button with no reply is a bug as far as anyone
+    /// pressing it can tell.
     pub(crate) fn copy_replay(&mut self) {
+        // The refusal is answered only where the row is *drawn*, on the same two gates
+        // the offer itself is behind — otherwise a stale press from elsewhere would
+        // print an acknowledgement on a screen that never offered anything.
+        if !self.ui.debug_mode || !self.settings_open() {
+            return;
+        }
+        if self.state.ghosted() {
+            self.ui.seed_copy = SeedCopy::Refused;
+            return;
+        }
         let Some(url) = self.replay_to_copy() else {
             return;
         };
@@ -503,9 +518,12 @@ impl Game {
     ///
     /// **The link carries no debug state** (§12.6/#459): it is the level's token plus
     /// the input script, exactly as before the switches had a surface, so replaying it
-    /// hands over the run and never the session it was exported from.
+    /// hands over the run and never the session it was exported from. That is also why
+    /// a **ghosted** run has no link to offer at all (#507) — teaching this one to carry
+    /// the switch is precisely the rule-bend-in-a-shareable-URL §12.6 keeps out of the
+    /// token, so the export is refused instead.
     fn replay_to_copy(&self) -> Option<String> {
-        if !self.ui.debug_mode || !self.settings_open() {
+        if !self.ui.debug_mode || !self.settings_open() || self.state.ghosted() {
             return None;
         }
         let token = self.state.level()?.encode()?;

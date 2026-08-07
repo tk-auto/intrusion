@@ -492,6 +492,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 alert: &state.alert_readout(),
                 bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
+                ghosted: state.ghosted(),
             },
         );
     }

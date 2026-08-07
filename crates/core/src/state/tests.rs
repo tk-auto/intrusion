@@ -17,9 +17,10 @@
 //! (#273),
 //! [`exchange`] for the §8.3 crate trade a full run is offered (#266),
 //! [`saver`] for §4.5's one declared exception (#243),
-//! [`watched_consoles`] for the §12.6 modifier that patrols the objectives, and
+//! [`watched_consoles`] for the §12.6 modifier that patrols the objectives,
 //! [`narrowed_cones`] for the §12.6 modifier that shortens and thins every guard's
-//! cone (#495). They share [`crate::test_support`]'s builders rather than a common
+//! cone (#495), and [`ghost`] for §12.6's one rule-bending *debug* switch (#507).
+//! They share [`crate::test_support`]'s builders rather than a common
 //! harness here, so each file stands alone.
 
 mod abilities;
@@ -35,6 +36,7 @@ mod ducts;
 mod effects;
 mod exchange;
 mod false_call;
+mod ghost;
 mod guards;
 mod guide;
 mod keys;

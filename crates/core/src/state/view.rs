@@ -170,11 +170,38 @@ impl State {
     ///   throughout ([`cover::run_conceals`]), so it is exactly deterministic
     ///   (§12.4).
     ///
+    /// …and a fourth that is not the facility's: the **ghost** debug switch
+    /// (§12.6/#507), which conceals omnidirectionally and never lapses — Camouflage
+    /// with no still-turn condition on it. It is applied *here*, at the one seam every
+    /// detection already goes through, which is what keeps it from becoming a bend
+    /// sprinkled through guard AI. It is the one debug switch that touches the facility,
+    /// and [`DebugModifiers::ghost`](crate::DebugModifiers::ghost) is where what that
+    /// costs is written down.
+    ///
     /// Concealment is not cover from *contact*: a guard can still walk into a
-    /// crouched player and capture (§4.5). And it composes with sight, not
-    /// replaces it — a viewer that cannot see the player's cell at all needs no
-    /// concealing.
+    /// crouched player and capture (§4.5) — and that is as true of a ghost as of
+    /// anybody, which is the one behaviour the switch must not change. And it composes
+    /// with sight, not replaces it — a viewer that cannot see the player's cell at all
+    /// needs no concealing.
     pub fn concealed_from(&self, viewer: Cell) -> bool {
+        self.debug.ghost || self.concealed_by_the_facility_from(viewer)
+    }
+
+    /// Concealment by the **facility's own rules** alone — everything
+    /// [`concealed_from`](Self::concealed_from) does except the ghost switch.
+    ///
+    /// The §11.5 danger overlay reads this rather than the full query, and that is the
+    /// one deliberate divergence between the picture and the rule in the game. Under
+    /// the ghost the real detection set is **empty**, so an overlay drawn from it would
+    /// blank the board exactly when someone is debugging vision — the likeliest reason
+    /// to have flipped the switch. So the overlay carries on painting the set that
+    /// *would* detect a detectable player, and red goes back to meaning *this cell is
+    /// watched* rather than *you are detected* (#507). Nobody should read a red cell
+    /// under a ghost and conclude the overlay is broken.
+    ///
+    /// With ghost off — every real run, and every run the sim ever measures — the two
+    /// are the same function.
+    fn concealed_by_the_facility_from(&self, viewer: Cell) -> bool {
         if self.hidden() || self.in_duct() {
             // A cupboard and a duct both conceal omnidirectionally — no viewer
             // anywhere detects the player through solid wall (§10.3/§10.7).
@@ -214,8 +241,26 @@ impl State {
     /// Public so the §13.2 sim bot can plan against the *same* gate: an unaware
     /// guard is a takedown target only while this is `false`, so the bot avoids
     /// walking into a guard the gate would refuse (#183) and can pick a safe strike.
+    ///
+    /// **Under the ghost** (§12.6/#507) it is `false` for every guard, which is the
+    /// switch's whole promise — and it takes the takedown gate with it, so a ghost may
+    /// strike from the front exactly as a camouflaged player already may. That is the
+    /// price of one seam rather than a second rule to keep in step, and it is stated
+    /// rather than discovered.
     pub fn guard_detects_now(&self, guard: &Guard) -> bool {
-        guard.fov().contains(self.player) && !self.concealed_from(guard.pos())
+        !self.debug.ghost && self.would_detect(guard)
+    }
+
+    /// Whether `guard` would detect the player **if the player were detectable** — the
+    /// §11.5 overlay's reading of [`guard_detects_now`](Self::guard_detects_now), with
+    /// the ghost switch left out (#507).
+    ///
+    /// The overlay's cones and its watcher lines are both drawn from this, so the two
+    /// halves of the red layer stay one claim: *these cells are watched*. See
+    /// [`concealed_by_the_facility_from`](Self::concealed_by_the_facility_from) for why
+    /// the picture is allowed to diverge from the rule here and nowhere else.
+    fn would_detect(&self, guard: &Guard) -> bool {
+        guard.fov().contains(self.player) && !self.concealed_by_the_facility_from(guard.pos())
     }
 
     /// The cells of the partial-cover run the player is crouched behind (§10.3)
@@ -422,8 +467,9 @@ impl State {
     ///
     /// The set is derived, never recorded, and each guard is judged by three questions:
     ///
-    /// - It detects the player, read **live** through
-    ///   [`guard_detects_now`](Self::guard_detects_now) rather than the per-turn
+    /// - It detects the player, read **live** through [`would_detect`](Self::would_detect)
+    ///   — the overlay's reading, so a **ghost** (§12.6/#507) still gets the line the
+    ///   run's own rules would have drawn — rather than the per-turn
     ///   [`detected_player`](Guard::detected_player) latch. The two agree except for a
     ///   guard that moved during phase 3, whose latch is a turn stale; the live read is
     ///   the one that matches what the line claims, and it is the same predicate the
@@ -448,7 +494,7 @@ impl State {
         let player = self.player;
         self.guards
             .iter()
-            .filter(move |guard| self.guard_detects_now(guard))
+            .filter(move |guard| self.would_detect(guard))
             .filter(move |guard| !self.guard_confused(guard))
             .filter(move |guard| self.perceive_guard(guard) != Some(GuardPerception::Seen))
             .flat_map(move |guard| guard.pos().line_to(player))
@@ -483,7 +529,7 @@ impl State {
             .filter(move |guard| !self.guard_confused(guard))
             .filter(move |guard| show_all || self.player_fov.contains(guard.pos()))
             .flat_map(move |guard| {
-                let spare_player = self.concealed_from(guard.pos());
+                let spare_player = self.concealed_by_the_facility_from(guard.pos());
                 guard.fov().cells().filter(move |&cell| {
                     !(spare_player && cell == player)
                         && !(in_duct && !self.player_fov.contains(cell))

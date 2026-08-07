@@ -80,16 +80,18 @@ impl Game {
         self.fire_setting(self.ui.settings.selection(debug, replay));
     }
 
-    /// **Fire a row.** Two of them are preferences and flip-and-persist; two are the
-    /// debug session's and are neither persisted nor allowed near the facility (§12.6).
+    /// **Fire a row.** Two of them are preferences and flip-and-persist; three are the
+    /// debug session's and none of those is persisted (§12.6).
     ///
     /// Each mirrors the drawn row exactly — a row this session does not have cannot be
     /// selected ([`shown_rows`](intrusion_core::shown_rows)), and the handlers refuse
     /// again anyway, so a stale marker can do nothing a player could not see.
     ///
-    /// Every arm is a view action: no [`State`](intrusion_core::State) is stepped and no
-    /// turn is spent (§4.4), the omni-vision switch included — it is a sight recompute
-    /// (§12.6), which is the whole of what makes a control behind a guessable gate safe.
+    /// Every arm is a **view** action: no [`State`](intrusion_core::State) is stepped
+    /// and no turn is spent (§4.4). That is true of the ghost switch too, and worth
+    /// saying because it is the one row that bends a rule (#507): flipping it changes
+    /// what the *next* guard phase concludes, never the turn count, and the world does
+    /// not move under the press.
     pub(crate) fn fire_setting(&mut self, row: SettingsRow) {
         // A tapped row leaves the marker on it too, so the panel agrees with what the
         // finger just did — the level-options dialog's rule (#298).
@@ -98,6 +100,7 @@ impl Game {
             SettingsRow::Theme => self.toggle_theme(),
             SettingsRow::Renderer => self.toggle_renderer(),
             SettingsRow::Reveal => self.toggle_reveal(),
+            SettingsRow::Ghost => self.toggle_ghost(),
             SettingsRow::Replay => self.copy_replay(),
         }
     }
@@ -137,6 +140,26 @@ impl Game {
             return;
         }
         self.state.toggle_reveal();
+    }
+
+    /// Flip the debug session's **ghost** switch (§12.6/#507) — no guard detects the
+    /// player while it is on.
+    ///
+    /// **Never stored**, for the same reason omni-vision is not, and then some: a record
+    /// that re-armed a *rule-bend* on the next visit would outlive the session gate the
+    /// whole channel rests on, and would do it to the facility rather than to the
+    /// picture.
+    ///
+    /// Switching it on latches the run against export ([`State::ghosted`]) — see the
+    /// core's own note. Nothing is done about the switch here beyond passing the press
+    /// on: the latch is the run's, so a shell that forgot it could not weaken it.
+    ///
+    /// [`State::ghosted`]: intrusion_core::State::ghosted
+    fn toggle_ghost(&mut self) {
+        if !self.ui.debug_mode {
+            return;
+        }
+        self.state.toggle_ghost();
     }
 
     /// The two facts the tab's row list is gated on (§12.6/#459, #333): whether this is a

@@ -226,6 +226,15 @@ pub enum SeedCopy {
     /// claim**: the token is still printed one row above, ready to be read off by
     /// eye as it was before this control existed.
     Unavailable,
+    /// **The game refused, not the browser** (§12.6/#507): the run has had the ghost
+    /// switch on, so it cannot be exported as a replay at all — the inputs were played
+    /// under bent rules and would replay into a desync.
+    ///
+    /// The one acknowledgement that is not about a clipboard, and it earns its place on
+    /// this line rather than a line of its own: the question the row answers is *did
+    /// that work?*, and the honest answer here is *no, and here is which switch did it*.
+    /// Without the naming, the first person to meet a dead export reads a bug.
+    Refused,
 }
 
 impl SeedCopy {
@@ -239,15 +248,18 @@ impl SeedCopy {
             SeedCopy::Idle => None,
             SeedCopy::Copied => Some((COPIED_ACK, Category::System)),
             SeedCopy::Unavailable => Some((UNAVAILABLE_ACK, Category::Warning)),
+            SeedCopy::Refused => Some((REFUSED_ACK, Category::Warning)),
         }
     }
 }
 
-/// The two acknowledgements, worded so neither can be misread as the other: the
-/// failure says what did *not* happen and never names the clipboard as holding
-/// anything.
+/// The three acknowledgements, worded so no two can be misread for each other: the
+/// clipboard failure says what did *not* happen and never names the clipboard as
+/// holding anything, and the refusal (#507) names the **switch** rather than the
+/// clipboard, because the clipboard was never asked.
 const COPIED_ACK: &str = "copied to clipboard";
 const UNAVAILABLE_ACK: &str = "clipboard unavailable";
+const REFUSED_ACK: &str = "no replay: ghost was used";
 
 // They share the Level info tab's content column, and [`draw`] clips in silence — so
 // they are bounded at **compile time** like every other fixed column of the panel
@@ -255,7 +267,8 @@ const UNAVAILABLE_ACK: &str = "clipboard unavailable";
 const _: () = {
     assert!(
         COPIED_ACK.len() <= column_width(CONTENT_INDENT)
-            && UNAVAILABLE_ACK.len() <= column_width(CONTENT_INDENT),
+            && UNAVAILABLE_ACK.len() <= column_width(CONTENT_INDENT)
+            && REFUSED_ACK.len() <= column_width(CONTENT_INDENT),
         "a seed-copy acknowledgement is too long for the Level info tab — shorten it \
          (see column_width in render::help)",
     );
@@ -541,7 +554,9 @@ pub(super) fn render_help(width: u32, height: u32, ui: ScreenUi, run: PanelRun<'
     match ui.help_tab {
         HelpTab::LevelInfo => draw_level_info(&mut grid, CONTENT_TOP, &run, ui.seed_copy),
         HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, &run.bar),
-        HelpTab::Options => settings::draw_settings(&mut grid, ui, run.debug, run.level),
+        HelpTab::Options => {
+            settings::draw_settings(&mut grid, ui, run.debug, run.level, run.ghosted)
+        }
         HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
     }
     draw_footer(&mut grid, ui.help_tab);
@@ -575,8 +590,12 @@ pub(super) struct PanelRun<'a> {
     /// needs to read about, the one they are being offered.
     pub(super) bar: Vec<AbilityId>,
     /// The **live** debug switches (§12.6/#459) — read, never held, so the Options tab's
-    /// omni-vision row says what the sight phase is actually doing.
+    /// omni-vision and ghost rows say what the run is actually doing.
     pub(super) debug: DebugModifiers,
+    /// Whether the run has ever been played under the ghost (§12.6/#507) — the
+    /// **latch**, not the switch beside it, which is why it is a field of its own: the
+    /// replay row answers to the run's history and not to what is currently flipped.
+    pub(super) ghosted: bool,
 }
 
 /// Draw the tab bar on row 0: each tab as `[Label]` — the active one in Interest

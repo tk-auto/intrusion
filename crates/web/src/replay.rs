@@ -81,11 +81,29 @@ impl ReplayView {
     /// byte-identical by construction. `pub(crate)` so the boot can paint the
     /// opening frame (`K = 0`) before the input pumps are wired.
     ///
-    /// `debug` is the session's perception switches (§12.6/#459), carried through every
+    /// `debug` is the watching session's switches (§12.6/#459), carried through every
     /// re-simulation so a scrub does not silently drop the reveal a watcher is watching
-    /// under. They change sight alone, so the state at `K` is the same run either way.
+    /// under — but only its **perception** half
+    /// ([`DebugModifiers::perception_only`]), and that qualification is the whole of
+    /// what keeps this sound.
+    ///
+    /// It used to need no qualification, because every debug switch was perception-only:
+    /// omni changes what you *saw*, never what happened, so a replay watched with it on
+    /// and one watched with it off are the same run. #507's ghost ended that — a run
+    /// re-simulated under it desyncs on the first turn a guard would have seen the
+    /// player — so what guarantees a replayed run matches what was recorded is now two
+    /// things rather than an inherent property of the switches:
+    ///
+    /// - **A rule-bending session cannot produce a replay.** The export is refused for
+    ///   any run that has had the ghost on ([`State::ghosted`]), latched for the rest of
+    ///   the run.
+    /// - **A rule-bending session cannot alter one it watches.** The re-simulation drops
+    ///   the ghost here, so the run a viewer sees is the run as recorded whatever they
+    ///   have switched on for their own play.
+    ///
+    /// [`State::ghosted`]: intrusion_core::State::ghosted
     pub(crate) fn state_at(&self, debug: DebugModifiers) -> Result<State, JsValue> {
-        let mut state = new_run(&self.level, debug)?;
+        let mut state = new_run(&self.level, debug.perception_only())?;
         for &input in &self.inputs[..self.cursor] {
             state.step(input);
         }

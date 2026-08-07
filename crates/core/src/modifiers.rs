@@ -37,9 +37,11 @@
 //! # Debug modifiers are a different thing
 //!
 //! [`DebugModifiers`] lives here as the *contrast*, not as a fourth source: a
-//! playtest-only view switch that no rule and no generation seam may read, and that
-//! never travels in a level-seed token. See its own documentation for why the two
-//! are deliberately kept apart.
+//! playtest-only instrument that no generation seam may read and that never travels in
+//! a level-seed token. One of them ([`DebugModifiers::ghost`], #507) does now bend a
+//! rule, which is the exception §12.6 is stated with rather than a fourth source
+//! arriving by the back door — see its own documentation for what that costs and what
+//! contains it.
 
 use serde::{Deserialize, Serialize};
 
@@ -1259,7 +1261,7 @@ pub struct LevelModifiers {
     /// no longer feel — the same loss, through the same channel, that the player takes.
     /// It costs it 14 to 34 points of win rate across the four temperaments, which is a
     /// larger step than any other harder entry and a number to read carefully: the bot has
-    /// no cue for *"I am blind now, be more careful"* and a player does. Appendix 57 has
+    /// no cue for *"I am blind now, be more careful"* and a player does. Appendix 58 has
     /// the measurement, the reading, and why the entry ships with it recorded rather than
     /// softened on the strength of it.
     pub sense_suppressed: bool,
@@ -2452,27 +2454,40 @@ impl ModifierSources {
     }
 }
 
-/// **Debug modifiers** — playtest-only switches over what is *drawn*, deliberately
-/// kept apart from [`LevelModifiers`].
+/// **Debug modifiers** — playtest-only **instruments**, deliberately kept apart from
+/// [`LevelModifiers`].
 ///
 /// A level modifier bends the **rules** and is part of a level's identity: it is
 /// resolved from sources at facility start, some are read at the generation seam
 /// (§12.6), and every one of them travels in the shareable level-seed token
-/// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It bends
-/// only what the **player perceives** — never the facility, the guards, or the seed's
-/// stream — so a run under one plays exactly the run it plays without one, and the
-/// only thing that differs is how much of it you get to watch. It is never encoded
-/// into a [`LevelSeed`](crate::LevelSeed), so no shared level, typed token or `?seed=`
-/// link can turn it on: the only way to get one is to bake it into a build (the
-/// artifact-build skill's `assemble.py --debug reveal`), which is what makes it safe
-/// to be as blunt as it is.
+/// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It is
+/// never encoded into a [`LevelSeed`](crate::LevelSeed), so no shared level, typed
+/// token or `?seed=` link can turn it on: the only way to get one is a debug session
+/// (§12.6/#459) — a build that baked it in, or the shibboleth in the URL — which is
+/// what makes it safe to be as blunt as it is.
 ///
-/// The separation is the whole point. As a `LevelModifiers` field the reveal would
-/// need a bit in the token, so "try this level" could quietly hand someone a game
-/// with the fog lifted; it would join the set the generation seam reads; and the
-/// compile-time enumeration of modifier read sites (§12.2) would start listing a
-/// switch that no rule may ever consult. Two types, two rules: **a level modifier
-/// changes the game, a debug modifier changes only what you get to see of it.**
+/// # Two kinds, and the distinction is worth more than the old absolute
+///
+/// This type used to say, without exception, that a debug modifier bends *only what
+/// the player perceives*. [`reveal_whole_level`](Self::reveal_whole_level) is still
+/// exactly that: a run under it plays the run it plays without it, and the only thing
+/// that differs is how much of it you get to watch. [`ghost`](Self::ghost) (#507) is
+/// not — it stops guards detecting the player, so the facility genuinely behaves
+/// differently and the run's outcome changes.
+///
+/// The line is kept rather than deleted, because which kind a switch is decides what
+/// it costs:
+///
+/// - **A perception switch** costs nothing. It can be flipped mid-run, watched under,
+///   and exported from, because the run underneath it is unchanged.
+/// - **A rule-bending switch** costs the run's **reproducibility**. The token stays
+///   honest about the *facility* — ghost is not in it and never will be — so what it
+///   stops being is a full account of what happened, and a ghost run cannot be handed
+///   on as a replay at all ([`State::ghosted`](crate::State::ghosted)).
+///
+/// What has not moved an inch: **anything that bends a rule and is meant to be
+/// *played* is a level modifier and belongs in the token.** Ghost is an instrument,
+/// not a way to play, and the containment above is what keeps the two apart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DebugModifiers {
     /// See the **whole level**: the player's field of view (§6) becomes every cell of
@@ -2492,6 +2507,92 @@ pub struct DebugModifiers {
     /// identically — which is the whole reason watching one is worth anything. Seeing
     /// everything is not being everywhere.
     pub reveal_whole_level: bool,
+    /// **No guard ever detects the player** (§12.6/#507) — cones pass through you,
+    /// sightings never fire, chases never start.
+    ///
+    /// The instrument that lets a misbehaving run be *stood in* rather than only
+    /// watched: walk to the corner where generation went wrong, park in a guard's face
+    /// to read its cone maths, follow a patrol for twenty turns — without the facility
+    /// ending the run before you get there.
+    ///
+    /// # What it is, mechanically
+    ///
+    /// **Camouflage that never lapses.** It is one clause on the §10.3 concealment path
+    /// ([`State::concealed_from`](crate::State::concealed_from)) that Camouflage already
+    /// goes through, not a special case sprinkled through guard AI — so everything
+    /// downstream follows on its own: the guard sense pass reads the player as concealed,
+    /// nothing is sighted, no rung-1 trigger fires (§7.3), and a chase flipped on
+    /// mid-stride ends through the ordinary §7.6 lose-sight path, with the guard
+    /// searching where it last had you.
+    ///
+    /// It shares Camouflage's consequences too, deliberately rather than by oversight.
+    /// The §7.2 takedown gate is the same query, so a ghost may strike a guard from the
+    /// front exactly as a camouflaged player already may. One seam, one set of
+    /// consequences, no second rule to keep in step.
+    ///
+    /// # What it does **not** do
+    ///
+    /// **Contact still captures** (§4.5) — a guard that walks into your cell ends the
+    /// run whether or not it ever saw you coming. That is not a caveat bolted on; it is
+    /// §8.3's existing sentence about this exact state: *invisible is not safe*. Walking
+    /// a ghost through a patrol route is still a way to lose.
+    ///
+    /// It also hides more than it shows, and the row's prose should not oversell it: a
+    /// ghost session cannot reproduce any bug whose trigger is *being detected* —
+    /// chases, searches, the §7.7 call-ins, rung escalation. It is an instrument for
+    /// looking at the world, not at the threat model.
+    ///
+    /// # The containment, which is not optional polish
+    ///
+    /// This is the one switch that touches the facility, so the whole mitigation is
+    /// keeping a bent run from ever passing for a real one:
+    ///
+    /// - **Never in the token.** A level-seed token copied from a ghost run boots an
+    ///   ordinary run. The cost, stated plainly: **a ghost run is not reproducible from
+    ///   its token**, and that is the accepted price of not putting it in there.
+    /// - **Never in a replay.** Once it has been on, the run cannot be exported at all
+    ///   ([`State::ghosted`](crate::State::ghosted)) — latched on the run, not on the
+    ///   switch.
+    /// - **Never in the sim.** `crates/sim` cannot set it, so no §13.2 measurement can
+    ///   be taken through it.
+    /// - **Visibly on**, on the Options tab's own row, read live off the run.
+    ///
+    /// # The danger overlay keeps painting, on purpose
+    ///
+    /// §11.5 is **[SETTLED]** that the overlay is the *literal* detection set. Under
+    /// ghost that set is **empty**, and a literal reading would blank the board exactly
+    /// when someone is debugging vision — the likeliest reason to have reached for the
+    /// switch. So the overlay carries on painting the set that *would* detect a
+    /// detectable player: red stops meaning *you are detected* and goes back to meaning
+    /// *this cell is watched*. That is a lie by §11.5's standard and it is the right one
+    /// here; the alternative is an instrument that goes blank when you use it.
+    pub ghost: bool,
+}
+
+impl DebugModifiers {
+    /// This set with every **rule-bending** switch cleared — the perception-only half,
+    /// which is what a run may be **re-simulated** under (§12.4/#507).
+    ///
+    /// The replay viewer rebuilds a run from `(level, inputs)` and applies the watching
+    /// session's switches. That is sound for a perception switch by construction — omni
+    /// changes what you saw, never what happened — and it is exactly what
+    /// [`ghost`](Self::ghost) breaks: a run re-simulated under it desyncs on the first
+    /// turn a guard would have seen you. So the re-simulation takes this rather than the
+    /// session's raw set, and a replay is the run as recorded whoever is watching it and
+    /// with whatever they have switched on.
+    ///
+    /// The other half of the guarantee is on the export side: a session that *has* used
+    /// ghost cannot produce a replay in the first place
+    /// ([`State::ghosted`](crate::State::ghosted)). Together they are what make
+    /// "a replay is `(seed, inputs)` and nothing else" (§12.4 **[SETTLED]**) still true
+    /// now that a switch can bend a rule.
+    #[must_use]
+    pub fn perception_only(self) -> Self {
+        Self {
+            ghost: false,
+            ..self
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2506,8 +2607,10 @@ mod tests {
         assert!(!baseline.guards_always_search_hideouts);
         assert!(!baseline.always_show_vision_cones);
         // A debug modifier is off by default too — the fog is on unless a build
-        // deliberately baked the reveal in.
+        // deliberately baked the reveal in, and the guards look for you unless one
+        // baked the ghost in (#507).
         assert!(!DebugModifiers::default().reveal_whole_level);
+        assert!(!DebugModifiers::default().ghost);
         // The intel gate's baseline is the §4.5 [START] "at least one" — the game
         // exactly as it plays without the modifier system.
         assert_eq!(baseline.intel_to_exit, IntelGate::AtLeastOne);

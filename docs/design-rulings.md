@@ -4342,9 +4342,145 @@ Giving a composite the power to recolour its parts would be the label-over-rules
 is the fact that makes five consoles hard, stated where a player reads it. So the wrinkle
 is documented rather than special-cased.
 
+## Appendix 57 — The ghost: the first debug switch that touches the facility, and the four walls round it
+
+*(§4.5/§7.6/§10.3/§11.5/§12.4/§12.6/§13.2; #507, over #459's debug session and #513's
+Options tab. `crates/core/src/modifiers.rs`, `crates/core/src/state/view.rs`,
+`crates/core/src/render/settings.rs`, `crates/web/src/input.rs`,
+`crates/web/src/replay.rs`.)*
+
+§12.6 said it three times and meant it: **nothing behind the debug gate may ever touch
+the facility, only the picture.** The ghost switch — while it is on, no guard detects the
+player — breaks that, on purpose. This appendix records why the exception was taken, what
+was tried instead, and the containment that replaces an absolute rule with a priced one.
+
+### Why an exception at all
+
+#459's argument was that *a deployed build you cannot inspect is a build you cannot
+debug*. Omni-vision paid that off halfway: you can now **watch** a run that misbehaved.
+What you still could not do is **stand in one**. Walking to the corner where generation
+went wrong, parking in a guard's face to read its cone maths, following a patrol for
+twenty turns — every one of those is a run the facility ends before you arrive, and every
+one of them is a thing someone actually needs to do to a bug report. An instrument that
+only works on runs the guards happen not to notice is an instrument with a hole in it
+exactly where the interesting bugs are.
+
+The counter-argument is the one §12.6 spends its length on: a bent run masquerading as a
+real one. That is a real risk and it is not answered by being careful. It is answered by
+the four walls below, and if any of them had turned out to be unbuildable the switch
+should not have shipped.
+
+### The seam: camouflage that never lapses
+
+The first thing tried on paper was a `ghost` check inside the guard AI — skip the sight
+pass, skip the sighting count, skip the chase transition. That is three checks that must
+each be remembered by the next person to add a way of noticing the player, and §12.6's
+whole complaint about scattered rules applies with more force to a rule nobody plays
+under.
+
+What shipped is one clause on `State::concealed_from`, the §10.3 path Camouflage already
+goes through. Ghost is exactly *Camouflage with the still-turn condition removed*, and
+everything follows without a second thought: the guard sense pass reads the player as
+concealed, no `Event::Detected` fires, the §7.3 sighting window never counts a contact,
+and a chase flipped on mid-stride ends through the ordinary §7.6 lose-sight path with the
+guard searching where it last had you.
+
+**It drags Camouflage's consequences with it, and that is accepted rather than patched.**
+`guard_detects_now` is also the §7.2 takedown gate, so a ghost may strike a guard from
+the front — which a camouflaged player already may. Carving that out would mean a second
+rule that has to be kept in step with the first, to protect a property nobody relies on
+in an instrument. One seam, one set of consequences.
+
+### Contact still captures, and it is not a caveat
+
+The design already had the sentence, on Camouflage: *"Camouflage does not stop capture.
+**Invisible is not safe** (§4.5)."* Ghost changes nothing about it. A guard that walks
+into your cell ends the run whether or not it ever saw you coming, so walking a ghost
+through a patrol route is still a way to lose. This falls out of the seam for free —
+capture is contact, and contact never consults concealment — which is a small piece of
+evidence that the seam is the right one.
+
+### The four walls
+
+- **Never in the token.** The cost is stated rather than buried: **a ghost run is not
+  reproducible from its token.** The token stays honest about the *facility*; what it
+  stops being is a full account of what happened. Putting the switch in the token would
+  make it reproducible and would also make it a level modifier — see the last section.
+- **Never in a replay.** Considered and rejected: teach the replay link to carry the debug
+  flags. That is a rule-bend inside a shareable URL, which is the exact thing §12.6 keeps
+  out of the token, so the export is **refused** for any run that has had the switch on.
+- **Never in the sim.** Structural — a `RunConfig` carries a `LevelSeed`, and the switches
+  are not on it, so there is no flag to add. Asserted at the boot path anyway, because
+  what matters is the state the sim actually gets.
+- **Visibly on**, on the Options tab's own row, read live off the run.
+
+### The latch, and why it is on the run
+
+The refusal latches on the **run**, not on the switch: turning ghost back off does not
+restore the export. The inputs already recorded were played under bent rules and no later
+toggle un-bends them. This mirrors what omni-vision's own row already says about tile
+memory — *turning it back off does not restore what was already seen, which is honest
+rather than surprising: you did see it.*
+
+The flag therefore lives on `State` and rides the autosave, rather than on the shell: it
+is a fact about the run, and a shell that forgot it could not weaken the guarantee.
+
+**The cost is real and worth taking knowingly.** The session most likely to want an export
+— someone poking at a run that misbehaved — is now the one that cannot produce one if they
+reached for ghost first. Reach for omni while a run is still worth handing over; ghost is
+the switch you use once you have given up on that.
+
+### The half the ticket did not name: watching a replay
+
+The export refusal closes the *production* side. It does not close the viewing side:
+`state_at` rebuilds a replay from `(level, inputs)` and applies **the watching session's**
+switches, so a ghost session watching somebody else's replay would desync just as badly,
+with nothing to catch it. So the re-simulation takes `DebugModifiers::perception_only()`
+— the ghost dropped, the reveal kept.
+
+Together the two are what keep §12.4's **[SETTLED]** *"a replay is `(seed, inputs)` and
+nothing else"* true now that a switch can bend a rule: a rule-bending session can neither
+produce a replay nor alter one it watches.
+
+### The overlay lie, taken deliberately
+
+§11.5 is **[SETTLED]** that the danger overlay is the *literal* detection set. Under ghost
+that set is empty, and a literal reading blanks the board — which deletes the overlay
+exactly when someone is debugging vision, the likeliest reason to have flipped the switch
+at all. The alternative to a lie here is an instrument that goes blank when you use it.
+
+So the overlay carries on painting the set that *would* detect a detectable player, and
+red goes back to meaning *this cell is watched* rather than *you are detected*. It is
+implemented as a second, ghost-free reading of the same concealment query, so with the
+switch off the two are the same function and no ordinary run can tell the difference.
+Both `visible_cone_cells` and `watcher_lines` read it, so the two halves of the red layer
+stay one claim.
+
+### What the switch is not, and must not become
+
+**Do not let ghost creep into being a level modifier.** If it ever wants to be *playable*
+— an easier-direction "unseen" modifier — that is a different thing with a permanent token
+slot, a Level info caption, a §2.3 directional assertion and a place in the difficulty
+pool. The two must not be the same field wearing two hats: one is priced by the difficulty
+draw, the other by giving up the run's reproducibility, and those are different currencies.
+
+**And it should not be oversold on its own row.** A ghost session cannot reproduce any bug
+whose trigger is *being detected* — chases, searches, the §7.7 call-ins, rung escalation.
+It is an instrument for looking at the world, not at the threat model.
+
+### One surface note
+
+The ticket was written against #459's fourth **Debug** tab and asked for a key that did
+not collide with `help_nav_for_key`. #513 had already retired that tab into the Options
+one, where the switches are rows walked with `↑`/`↓` and fired with `Enter`, so there is
+no key to pick and the collision question is moot. The row it disables — the replay export
+— stays **drawn** and reads `unavailable` rather than vanishing: a row that disappeared
+would look like a run with no token, which is the other reason that row is absent, and
+would leave nothing to press and no way to be told why.
+
 ---
 
-## Appendix 57 — Switching the sense off: suppress the channel, never the range
+## Appendix 58 — Switching the sense off: suppress the channel, never the range
 
 *(§9 the sense and §9.4 its door half, §9.5 the one fade, §8.3 Confusion's clamp,
 §10.7 the crawlspace's cost, §11.5/§2.2 the fairness floor, §12.6 the directed pool.

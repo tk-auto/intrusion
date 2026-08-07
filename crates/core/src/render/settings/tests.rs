@@ -33,6 +33,18 @@ fn render_settings(
     debug: DebugModifiers,
     level: Option<LevelSeed>,
 ) -> Grid {
+    render_settings_for(ui, debug, level, false)
+}
+
+/// The same, for a run whose ghost **latch** is set (§12.6/#507) — the only fact the
+/// tab reads that is not on [`DebugModifiers`], so it is the one the fixture takes
+/// separately.
+fn render_settings_for(
+    ui: ScreenUi,
+    debug: DebugModifiers,
+    level: Option<LevelSeed>,
+    ghosted: bool,
+) -> Grid {
     let alert = AlertReadout {
         rung: 0,
         effects: Vec::new(),
@@ -47,6 +59,7 @@ fn render_settings(
             alert: &alert,
             bar: Vec::new(),
             debug,
+            ghosted,
         },
     )
 }
@@ -151,6 +164,7 @@ fn every_row_says_what_the_live_value_is() {
         light,
         DebugModifiers {
             reveal_whole_level: true,
+            ..DebugModifiers::default()
         },
         level(),
     ));
@@ -267,6 +281,104 @@ fn the_copy_acknowledgement_answers_the_replay_row() {
         level(),
     ));
     assert!(!text.contains("copied"), "\n{text}");
+}
+
+/// **The ghost row reads its real state off the run** (§12.6/#507), like the switch
+/// beside it — and it is drawn only behind the same gate, so an ordinary session has no
+/// way to reach the one debug control that bends a rule.
+#[test]
+fn the_ghost_row_says_whether_the_guards_can_see_you() {
+    let on = text_of(&render_settings(
+        W,
+        H,
+        debug_ui(SettingsRow::Theme),
+        DebugModifiers {
+            ghost: true,
+            ..DebugModifiers::default()
+        },
+        level(),
+    ));
+    assert!(on.contains("ghost        on"), "\n{on}");
+
+    let off = text_of(&render_settings(
+        W,
+        H,
+        debug_ui(SettingsRow::Theme),
+        DebugModifiers::default(),
+        level(),
+    ));
+    assert!(off.contains("ghost        off"), "\n{off}");
+
+    // The gate, same as its neighbour's: no session, no row and no tap target.
+    let plain = text_of(&render_settings(
+        W,
+        H,
+        ui(SettingsRow::Theme),
+        DebugModifiers {
+            ghost: true,
+            ..DebugModifiers::default()
+        },
+        level(),
+    ));
+    assert!(
+        !plain.contains(SettingsRow::Ghost.label()),
+        "the switch is not drawn without a debug session:\n{plain}",
+    );
+    assert_eq!(settings_hit(false, true, row_y(SettingsRow::Ghost)), None);
+}
+
+/// **The replay export is refused for a ghosted run** (§12.6/#507), and refused
+/// *legibly*: the row is still drawn — a row that vanished would look like a run with
+/// no token — but reads as unavailable, and the acknowledgement under it names the
+/// switch that did it rather than leaving a dead control to be read as a bug.
+///
+/// The refusal answers to the run's **latch**, not to the live switch: a run that has
+/// had the ghost on and switched it off again is still refused, which is what
+/// `ghosted` being a separate argument to the drawing is for.
+#[test]
+fn a_ghosted_run_is_refused_its_replay_and_told_why() {
+    let offered = text_of(&render_settings_for(
+        debug_ui(SettingsRow::Replay),
+        DebugModifiers::default(),
+        level(),
+        false,
+    ));
+    assert!(offered.contains("replay       copy as link"), "\n{offered}");
+
+    // Latched — and the switch itself is *off*, so what the row answers to is the run.
+    let refused = render_settings_for(
+        debug_ui(SettingsRow::Replay),
+        DebugModifiers::default(),
+        level(),
+        true,
+    );
+    let text = text_of(&refused);
+    assert!(text.contains("replay       unavailable"), "\n{text}");
+    assert!(
+        !text.contains(REPLAY_VALUE),
+        "and it stops offering what it cannot do:\n{text}",
+    );
+    assert!(
+        text.contains(SettingsRow::Replay.label()),
+        "…while staying on screen to be pressed:\n{text}",
+    );
+
+    // The press's answer names the switch.
+    let acked = render_settings_for(
+        ScreenUi {
+            seed_copy: SeedCopy::Refused,
+            ..debug_ui(SettingsRow::Replay)
+        },
+        DebugModifiers::default(),
+        level(),
+        true,
+    )
+    .to_text();
+    let line = &acked[REPLAY_ACK_ROW as usize];
+    assert!(
+        line.contains("ghost"),
+        "the refusal names the switch that caused it: {line:?}",
+    );
 }
 
 /// **The whole row is the target** (§11.6), at any column — which is why the tab's hit
@@ -422,6 +534,7 @@ fn a_tiny_board_clips_rather_than_panicking() {
                 alert: &alert,
                 bar: Vec::new(),
                 debug: DebugModifiers::default(),
+                ghosted: false,
             },
         );
         assert_eq!((grid.width(), grid.height), (w, h));
