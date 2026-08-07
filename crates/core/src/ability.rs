@@ -377,7 +377,7 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#505), **passive**: a compass to the nearest unclaimed
     /// objective, painted as one of the eight cells around you.
     Guide,
-    /// Salvaged tech (§8.3/#239), **the experiment**: a dart fired along the cardinal
+    /// Salvaged tech (§8.3/#239), **on trial**: a dart fired along the cardinal
     /// you face, taking down the first unaware guard on the line.
     Dart,
 }
@@ -412,7 +412,12 @@ impl AbilityId {
     ///
     /// This is also the eligible pool a `starting_abilities` grant (#244) draws from
     /// and an equipment cache is stocked out of (#209) — the roster and the pool are
-    /// one list. Quick play grants the whole pool while its size meets the grant count;
+    /// one list, **with nothing held out of it**. There is no experimental tier (§0/#564):
+    /// an ability either ships, in which case it is here and gets drawn, played and
+    /// measured like every other, or it does not exist — a shipped ability nobody can
+    /// draw is inert (§2.3). Scepticism about one lives in its prose and in the sim's
+    /// numbers, never in an exclusion from this list.
+    /// Quick play grants the whole pool while its size meets the grant count;
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
@@ -1212,7 +1217,7 @@ const LOCKDOWN: Ability = Ability {
     behaviour: Behaviour::Effects(&[Effect::SealDoors]),
 };
 
-// Saver [START] (§4.5/§8.2/§8.3, #243): the **experiment** — a costed exception to
+// Saver [START] (§4.5/§8.2/§8.3, #243): **on trial** — a costed exception to
 // §4.5's [SETTLED] "a guard touches you … that is the only loss condition". The guard
 // that lays hands on you is taken down instead, once, and the run continues.
 //
@@ -1352,7 +1357,7 @@ const GUIDE: Ability = Ability {
     behaviour: Behaviour::Effects(&[Effect::ObjectiveBearing]),
 };
 
-// Dart [START] (§7.2/§8.3/§8.4, #239): **the experiment** — a takedown at *range*, and
+// Dart [START] (§7.2/§8.3/§8.4, #239): **on trial** — a takedown at *range*, and
 // therefore a deliberate reopening of the ability that broke the old game (§2.3: *"the
 // neutralise ability … unlimited range, no cooldown, and it did not consume a turn"*).
 // It exists on trial, with every safeguard §2.3 asks for stacked on it at once, and the
@@ -1422,7 +1427,7 @@ const DART: Ability = Ability {
 
 /// How many darts one facility gives you — **[START]** (§7.2/§8.2/§8.3/#239).
 ///
-/// **One**, which is §8.2's floor and the whole reason the experiment is filable at all.
+/// **One**, which is §8.2's floor and the whole reason the ability is filable at all.
 /// A ranged takedown is the ability §2.3 records as having *been* the old game, so the
 /// bound is not a dial that happens to be low: it is the statement that a facility allows
 /// exactly one guard to be removed at a distance, ever, and the rest of the building has

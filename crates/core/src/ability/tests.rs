@@ -200,6 +200,27 @@ fn the_held_cap_is_the_innate_set_plus_the_tech_grant() {
     );
 }
 
+/// **There is no experimental tier** (§0/§8.3/#564): every shipped ability that is
+/// not innate is in [`AbilityId::TECH`], which is the one list a `starting_abilities`
+/// draw (#244) and an equipment cache (#209) both come out of. So a verb cannot ship
+/// held back from the pool — the state §2.3 calls inert, and the one a status marker
+/// implying a second tier would have tempted someone into building.
+#[test]
+fn every_shipped_ability_is_innate_or_in_the_draw_pool() {
+    for id in AbilityId::ALL {
+        assert_eq!(
+            id.is_innate(),
+            !AbilityId::TECH.contains(&id),
+            "{id:?} must be either innate or drawable, and exactly one of the two",
+        );
+    }
+    assert_eq!(
+        AbilityId::ALL.len(),
+        AbilityId::INNATE.len() + AbilityId::TECH.len(),
+        "the two lists partition the catalogue — nothing shipped sits outside both",
+    );
+}
+
 /// An entry's name is its [`AbilityId`]'s, taken by identity — the bar draws what
 /// the ability *is*, and only the key it answers to comes from its position
 /// (§11.6/#359).
