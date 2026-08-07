@@ -130,10 +130,16 @@ cp web/index.html "$OUT_DIR/"
 # Ship any static assets alongside (font, images) if present.
 if [ -d web/assets ]; then cp -r web/assets "$OUT_DIR/assets"; fi
 
+# Hand butler an absolute path. A relative `dist` resolves against whatever
+# directory the command runs in, and the default one is relative to the repo
+# root this script cd'd to — so the printed command below is copy-pasteable from
+# anywhere, and butler can never be pointed at some other directory's `dist`.
+OUT_ABS=$(cd "$OUT_DIR" && pwd)
+
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "== publish 3/3: --dry-run, not pushing =="
-    echo "   Would run: butler push $OUT_DIR $ITCH_TARGET --userversion $USERVERSION"
-    echo "   Serve it locally with: python3 -m http.server -d $OUT_DIR 8099"
+    echo "   Would run: butler push $OUT_ABS $ITCH_TARGET --userversion $USERVERSION"
+    echo "   Serve it locally with: python3 -m http.server -d $OUT_ABS 8099"
     exit 0
 fi
 
@@ -141,8 +147,8 @@ fi
 # Publish.
 # ---------------------------------------------------------------------------
 
-echo "== publish 3/3: butler push $OUT_DIR $ITCH_TARGET =="
-butler push "$OUT_DIR" "$ITCH_TARGET" --userversion "$USERVERSION"
+echo "== publish 3/3: butler push $OUT_ABS $ITCH_TARGET =="
+butler push "$OUT_ABS" "$ITCH_TARGET" --userversion "$USERVERSION"
 
 echo "== publish: pushed $USERVERSION to $ITCH_TARGET =="
 echo "   itch.io needs the project's 'This file will be played in the browser'"
