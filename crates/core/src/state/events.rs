@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::modifiers::IntelGate;
 
 /// What the player asks to do on their phase. Input mapping (which key is which,
 /// §11.6) lives in the web shell; the loop knows only the actions.
@@ -119,11 +120,23 @@ pub enum Event {
         still_needed: usize,
     },
     /// The player bumped the exit before the intel gate was met — refused (§4.5).
-    /// `still_needed` is how many more consoles the gate wants
+    /// `still_needed` is how much more the gate wants
     /// ([`intel_needed_to_exit`](State::intel_needed_to_exit)), so the refusal can
     /// name the real requirement rather than assume one fixed rule (#310). Always at
     /// least 1: a refusal *is* an unmet gate.
-    ExitRefused { still_needed: usize },
+    ///
+    /// **`gate` rides along because the number alone is ambiguous** (#574). Since the
+    /// minimum haul widened [`AtLeastOne`](crate::IntelGate::AtLeastOne) to *one
+    /// objective of any kind*, a `still_needed` of 1 means "one more console" under
+    /// [`All`](crate::IntelGate::All) and "one thing, either kind" under `AtLeastOne` —
+    /// two different sentences, and the console one would be false. As with
+    /// [`IntelTaken`](Event::IntelTaken)'s counts, it is carried on the event because
+    /// [`message_for`](crate::status::message_for) is pure over the event and cannot
+    /// ask the gate itself.
+    ExitRefused {
+        still_needed: usize,
+        gate: IntelGate,
+    },
     /// The intel gate was satisfied (§10.2) and the player reached the exit: won.
     Won,
     /// A guard moved into the player's cell: captured (§4.5) — the only ordinary loss.

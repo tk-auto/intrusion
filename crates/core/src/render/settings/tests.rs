@@ -56,6 +56,8 @@ fn render_settings_for(
         PanelRun {
             level,
             modifiers: crate::modifiers::LevelModifiers::default(),
+            intel: 3,
+            caches: 0,
             alert: &alert,
             bar: Vec::new(),
             debug,
@@ -531,6 +533,8 @@ fn a_tiny_board_clips_rather_than_panicking() {
             PanelRun {
                 level: level(),
                 modifiers: crate::modifiers::LevelModifiers::default(),
+                intel: 3,
+                caches: 0,
                 alert: &alert,
                 bar: Vec::new(),
                 debug: DebugModifiers::default(),

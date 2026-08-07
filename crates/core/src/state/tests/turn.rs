@@ -11,7 +11,7 @@ use crate::state::*;
 use crate::targeting::Target;
 use crate::test_support::{captured_at, leave_by_the_tunnel, open_room, room_with_tunnel, solo};
 use crate::vision::field_of_view;
-use crate::{LevelModifiers, Rng};
+use crate::{IntelGate, LevelModifiers, Rng};
 
 #[test]
 fn a_move_into_open_floor_spends_the_turn_and_turns_the_player() {
@@ -310,7 +310,13 @@ fn win_requires_all_intel_then_the_exit() {
     // Leaving early: the crawl in is free to make, but the step off the board at the
     // far end refuses, changes nothing and costs nothing (§4.5).
     let events = leave_by_the_tunnel(&mut s);
-    assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
+    assert_eq!(
+        events,
+        vec![Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }],
+    );
     assert_eq!(s.outcome(), Outcome::Playing);
     let refused_on = s.turn();
 
@@ -567,8 +573,11 @@ fn one_intel_opens_the_exit() {
     // Leaving with no intel refuses at the way out (free, §4.5).
     let events = leave_by_the_tunnel(&mut s);
     assert!(
-        events.contains(&Event::ExitRefused { still_needed: 1 }),
-        "refused empty-handed, wanting the one intel the gate asks for",
+        events.contains(&Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }),
+        "refused empty-handed, wanting the one thing the gate asks for",
     );
     assert_eq!(s.outcome(), Outcome::Playing);
 
@@ -615,7 +624,10 @@ fn the_all_intel_gate_requires_the_full_set() {
     );
     let events = leave_by_the_tunnel(&mut s);
     assert!(
-        events.contains(&Event::ExitRefused { still_needed: 1 }),
+        events.contains(&Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::All,
+        }),
         "the exit refuses a partial set under the all-intel gate, wanting the rest",
     );
     assert_eq!(s.outcome(), Outcome::Playing);

@@ -1029,7 +1029,13 @@ fn the_none_gate_never_asks_for_intel() {
 fn a_refusal_names_what_the_gate_still_wants() {
     let mut s = gated(IntelGate::All);
     let refused = answer_the_exit(&mut s);
-    assert_eq!(refused, vec![Event::ExitRefused { still_needed: 3 }]);
+    assert_eq!(
+        refused,
+        vec![Event::ExitRefused {
+            still_needed: 3,
+            gate: IntelGate::All,
+        }],
+    );
     assert_eq!(near_line(&s).text, "the exit needs 3 more intel");
 
     // A fresh run, one intel in hand and two still owed: the same refusal counts down.
@@ -1037,21 +1043,32 @@ fn a_refusal_names_what_the_gate_still_wants() {
     s.step(Input::Step(Direction::North));
     let take = near_line(&s).text;
     let refused = answer_the_exit(&mut s);
-    assert_eq!(refused, vec![Event::ExitRefused { still_needed: 2 }]);
+    assert_eq!(
+        refused,
+        vec![Event::ExitRefused {
+            still_needed: 2,
+            gate: IntelGate::All,
+        }],
+    );
     assert_eq!(near_line(&s).text, "the exit needs 2 more intel");
     assert!(
         !take.contains("the exit is open"),
         "the take and the refusal cannot disagree about the same gate: {take:?}",
     );
 
-    // The baseline gate asks for the one console it needs, not the three that are
-    // out — the tally is not the requirement.
+    // The baseline gate asks for the one thing it needs, not the three consoles that
+    // are out — the tally is not the requirement. And it does not say *intel*: the
+    // minimum haul counts a crate too (#574), so a counted line would name half the
+    // rule and walk a player past the crate that would have satisfied it.
     let mut s = gated(IntelGate::AtLeastOne);
     assert_eq!(
         answer_the_exit(&mut s),
-        vec![Event::ExitRefused { still_needed: 1 }],
+        vec![Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }],
     );
-    assert_eq!(near_line(&s).text, "the exit needs 1 more intel");
+    assert_eq!(near_line(&s).text, "the exit needs one thing taken");
 }
 
 /// §8.2/§4.4-adjacent bookkeeping this ticket must not disturb: a refusal is free
@@ -1065,7 +1082,13 @@ fn a_refusal_still_costs_nothing() {
     // Empty-handed the mouth itself refuses (§4.5/#466) — the crawl is never begun, so
     // this is the whole of what the press costs.
     let refused = answer_the_exit(&mut s);
-    assert_eq!(refused, vec![Event::ExitRefused { still_needed: 3 }]);
+    assert_eq!(
+        refused,
+        vec![Event::ExitRefused {
+            still_needed: 3,
+            gate: IntelGate::All,
+        }],
+    );
     assert_eq!(s.turn(), turn, "a refused exit is free (§4.5)");
     assert_eq!(s.player(), at, "and moves nobody");
     assert!(!s.in_duct(), "and never got as far as the tunnel");

@@ -138,8 +138,9 @@ const JITTER_Y: i32 = 1;
 /// a decision rather than a coin flip.
 ///
 /// **Two axes, and both of them are real** (§2.3). Guards are the risk and consoles are
-/// the reward — under the campaign's [`IntelGate::None`](crate::IntelGate) intel is
-/// currency (§2.2), so a console is loot rather than a lock — and each flavour is a
+/// the reward — intel is currency in a campaign (§2.2) and the exit takes none of it, so
+/// a console is loot rather than a lock (the minimum haul asks for *one* thing of any
+/// kind, #574, which the crates satisfy too) — and each flavour is a
 /// stated position on both, resolved through the [`ModifierSources::flavour`] seam
 /// (§12.6). A flavour that carried no modifier set would be a differently-worded label
 /// on the same facility, which is the old flat list wearing a costume.

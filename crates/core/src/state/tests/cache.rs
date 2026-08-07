@@ -201,17 +201,39 @@ fn the_run_stats_carry_the_find_out_of_the_facility() {
 
 /// **Skipping it is legal, and costs the run nothing but the crate** — the ticket's
 /// "optional exploration reward". A facility left with its cache unopened reports no
-/// find, and the exit is not holding it against you: the gate is intel's, and under the
-/// campaign's `IntelGate::None` there is no gate at all.
+/// find, and the exit is not holding it against you.
+///
+/// The minimum haul (#574) does not change that, and this is the case that says so: the
+/// gate asks for **one** objective of *either* kind, so a run that took the intel and
+/// walked past the crate is out, with the crate still standing there. What the crate is
+/// now is a second way to satisfy the gate — never a second thing the gate asks for.
 #[test]
 fn a_cache_left_alone_is_a_legal_run() {
-    let s = scene(AbilityId::Confusion);
-    assert_eq!(s.run_stats().salvaged, Loadout::empty());
+    // [`scene`]'s room with a console added to the north, so the run has a choice of
+    // objective to satisfy the gate with — which is what the claim is about.
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 6), Terrain::EquipmentCache);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 4)],
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate())
+    .with_caches([AbilityId::Confusion]);
+
+    // The console to the north — the room's other objective, and the one this run takes.
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.intel_in_hand(), 1, "the intel is in hand");
+    assert_eq!(s.run_stats().salvaged, Loadout::empty(), "and no crate was");
     assert_eq!(
         s.intel_needed_to_exit(),
         0,
-        "a crate is never an exit requirement (§4.5)",
+        "a crate is never an exit requirement (§4.5/#574)",
     );
+    assert!(s.exit_ready());
 }
 
 /// **A quiet find** (§7.3): opening a crate is not tampering with a terminal, so it
