@@ -58,6 +58,7 @@ mod seed;
 mod settings;
 mod tap;
 mod tiles;
+mod timer;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
