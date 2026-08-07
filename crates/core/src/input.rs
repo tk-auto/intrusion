@@ -344,6 +344,14 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
         // a free character that collides with no movement key — and the ability keys
         // are digits now (#359), so it cannot collide with one of those either.
         "?" => Some(UiCommand::ToggleHelp),
+        // `Escape` is a plain **second spelling** of it (#551), not a command of its
+        // own: the conventional key for *"show me what is going on"*, and the one a
+        // hand reaches for when it wants this run's Level info (§12.6/#248). It costs
+        // nothing to claim — the board bound it to nothing otherwise — and it makes the
+        // key an honest toggle, since it already closes the panel ([`HelpNav::Close`]).
+        // The one claim that outranks it is an open exchange's decline
+        // ([`declines_exchange`], §8.3/#266), which the shell asks about first.
+        "Escape" => Some(UiCommand::ToggleHelp),
         // `n` for *night* (#189). The obvious mnemonics were all spoken for — `t`
         // for theme is Takedown's, `d` for dark is Decoy's, and `l` for light is the
         // vim-east step, which a binding may never shadow (§11.6) — so the key goes
@@ -404,8 +412,14 @@ pub fn gesture_dismisses_splash(gesture: Gesture) -> bool {
 /// resolves it to the very same [`Input::Discard`](crate::Input) rather than to a cancel
 /// verb of its own.
 ///
-/// `Escape` binds to nothing on the board otherwise (§11.6), so this claims no key from
-/// anything and gives it back the moment the offer is answered. There is deliberately no
+/// **This claim is the prior one and outranks the board's** (§11.6/#551). `Escape` bound
+/// to nothing here when the decline took it; it opens the help panel now
+/// ([`ui_command_for_key`]), so what was an absence of competition is stated as a
+/// precedence instead: an offer open makes the key the decline, and with no offer it is
+/// the panel. The rule is the shell's to apply — it asks this before the UI table — and
+/// the key goes back to the panel the moment the offer is answered.
+///
+/// There is deliberately no
 /// gesture counterpart: a finger declines by pressing the entry the bar marks `(+)`,
 /// which is a control that is *on screen*, and no swipe dismisses a decision (#336).
 pub fn declines_exchange(key: &str) -> bool {
@@ -686,13 +700,41 @@ mod tests {
         for key in ["m", "?", "n"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
         }
-        for key in ["w", "5", "r", "ArrowUp", "Escape", "Tab"] {
+        for key in ["w", "5", "r", "ArrowUp", "Tab"] {
             assert_eq!(
                 ui_command_for_key(key),
                 None,
                 "key {key:?} owns no UI command"
             );
         }
+    }
+
+    /// #551: `Escape` opens the help panel too — the **same** `UiCommand` as `?`, so
+    /// there is one code path and the panel comes up on whichever tab it was last left
+    /// on for either key. It stays a UI command and never an [`Input`], so no turn is
+    /// spent and no guard moves while the panel is up (§4.4).
+    #[test]
+    fn escape_is_a_second_spelling_of_the_help_key() {
+        assert_eq!(ui_command_for_key("Escape"), Some(UiCommand::ToggleHelp));
+        assert_eq!(
+            ui_command_for_key("Escape"),
+            ui_command_for_key("?"),
+            "one command, not two — nothing to keep in step",
+        );
+        assert_eq!(input_for_key("Escape"), None, "and never a game action");
+        // The toggle is honest in both directions: the key that opens the panel is the
+        // key that closes it, from any tab (§11.6's never-inescapable rule).
+        assert_eq!(help_nav_for_key("Escape"), Some(HelpNav::Close));
+        // The surfaces that deliberately refuse the key still do. The map answers it
+        // with `Back`, which the shell drops on the map's own list, and the end screen
+        // has no `Back` at all — neither reaches this new binding, because each is
+        // consulted before the board's tables.
+        assert_eq!(map_nav_for_key("Escape"), Some(MapNav::Back));
+        assert_eq!(
+            end_nav_for_key("Escape"),
+            None,
+            "no way back from a verdict"
+        );
     }
 
     /// #248: while the help panel is open it is **modal** — the shell routes keys
@@ -861,19 +903,23 @@ mod tests {
     ///
     /// The offer needs no table of its own — its four candidates are the bar's four
     /// slots, so the digits and the mnemonics already reach every one of them — and this
-    /// is the conventional second spelling of the one press that declines. It is safe to
-    /// claim because `Escape` is otherwise unbound in play: it is a movement key nowhere,
-    /// a UI toggle nowhere, and the modal screens that *do* answer it are drawn instead
-    /// of the board rather than over it.
+    /// is the conventional second spelling of the one press that declines.
+    ///
+    /// It was safe to claim because `Escape` was unbound in play; since #551 the board
+    /// opens the help panel with it, so the two are stated as a **precedence** instead
+    /// (the shell asks this table first). The decline is the older claim and keeps the
+    /// key while an offer is up — pinned here on the tables, and on the shell's ordering
+    /// by `an_open_offer_outranks_the_help_key` in `intrusion-web`.
     #[test]
     fn escape_declines_an_open_exchange_and_nothing_else_does() {
         assert!(declines_exchange("Escape"));
         for key in ["w", ".", "n", "m", "?", "Enter", " ", "c", "ArrowUp", "5"] {
             assert!(!declines_exchange(key), "{key:?} is not the decline");
         }
-        // The key it claims is free on the board: no step, no UI command.
+        // It is still no step (a decline spends the turn the discard does, never a
+        // move), and the one thing it now competes with is the panel it opens.
         assert_eq!(input_for_key("Escape"), None);
-        assert_eq!(ui_command_for_key("Escape"), None);
+        assert_eq!(ui_command_for_key("Escape"), Some(UiCommand::ToggleHelp));
     }
 
     /// #359's binding, pinned: the top row's four digits are the bar's four slots,
