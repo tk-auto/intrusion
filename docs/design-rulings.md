@@ -4189,3 +4189,155 @@ with a new slot. Two smaller decisions inside that:
   vocabulary in the token's slot list and invert the crate's layering; the pairing is
   pinned by a test instead.
 
+
+## Appendix 56 — The archive: the ending as one composite, and the gate that is the node's
+
+*(§2.2/§2.3/§4.5/§6.2/§10.2/§10.4/§12.6/§12.7/§14 v2/§14 v3; #217, over #207's map,
+#236's lock and #565's composites. `crates/core/src/modifiers.rs`,
+`crates/core/src/campaign.rs`, `crates/core/src/campaign/map.rs`,
+`crates/core/src/vision.rs`, `crates/core/src/place.rs`.)*
+
+§14 v3's first complaint about the old campaign is that it *"had no reachable
+conclusion"*. #207 gave the graph a terminus and left it deliberately thin — *"what the
+archive actually holds, and what reaching it concludes, is #217's"* — with a placeholder
+flavour of one extra guard and the hideout search. This appendix records what the ending
+turned out to be, and the two decisions that were not obvious.
+
+### What the archive is
+
+| | |
+|---|---|
+| **+2 guards** | the count knob's whole reach, from one source — six on the §10.2 recipe |
+| **+2 consoles** | five, and every one of them required to leave |
+| **one locked room** | #236's rule; with no crates it falls on a *console* room |
+| **guards watch their sides** | the §6.2 flank carve withdrawn, in every mood |
+| **no equipment caches** | salvage on the last facility buys nothing |
+
+Read together they are one statement — *the last raid is the hard one, and you cannot
+leave it empty-handed* — and the locked room is the sharpest clause. With every console
+required and one behind a key, **a won run is a run that committed a takedown** (§7.2;
+the protagonist never kills, so the price is a body to hide and a §7.3 radio clock to
+outrun). That is the ending asking, once and at the end, for the thing the game prices
+highest.
+
+### It arrived one merge after the mechanism it needed
+
+The first implementation of this ticket was written against `main` as it stood, and it
+hand-rolled a composite: a single `archive: bool` field expanding at every read site,
+with accessors for the gate and the lock and a bespoke rule for the guard row. It was
+sound, and #565 landed while it was in review with a *general* answer to the same
+problem — composites as a kind, count knobs as signed deltas, expansion at resolution.
+
+The work was rebuilt on it rather than merged beside it, and that is the note worth
+keeping: two mechanisms for *"one word for a combination"* in one codebase is exactly
+the parallel system §12.6 exists to prevent, and the cost of rebuilding (a day's diff)
+was smaller than the cost of the reviewer who would later have to ask which one to use.
+What survived the rebuild was the design — the six clauses, the numbers, the reasoning
+below — and what was thrown away was the machinery, which is the right half to lose.
+
+The dividend is visible in the diff: on #565's seam the archive needs **one new
+primitive** (the ring rule) and one changed `expansion` arm. Everything else — two more
+guards, two more consoles, the lock — was already sayable.
+
+### The gate belongs to the node, not to the composite
+
+The one genuine design question. The archive's mandatory objective could ride in
+`Composite::Archive`'s expansion, which would make the whole terminus travel in one wire
+slot and let a shared token play the ending anywhere.
+
+It does not, and the rule it respects is #565's: **no composite sets the intel gate**. A
+gate is a *mode* knob (§4.5/#244) — it says what the **run** is asked for — while a
+composite says what a **facility** is. The archive is both things at once, and that is
+precisely why the line has to be drawn rather than blurred: what makes the terminus hard
+is a property of the building (guards, locks, sightlines), and what makes it *the end* is
+a property of the **node** — there is nothing past it to spend a surplus in. So
+`Campaign::level_at` sets `IntelGate::All` at the archive and `IntelGate::None`
+everywhere else, and the composite carries the five clauses that are about the building.
+
+Both halves still travel: the composite in its slot, the gate in its own token field. A
+campaign facility's token is the facility as it was actually played, terminus included.
+
+The cost, stated: a quick-play level carrying `Composite::Archive` would get the archive's
+*building* and not its *ending*. Nothing offers one today, and if something ever does, the
+honest answer is that it is playing the archive's facility rather than finishing a run.
+
+### Two numbers moved, and one of them is a claim about the carve
+
+**`INTEL_MAX` 4 → 5.** The intel knob's envelope was one step wide upward, and #565's own
+note said why: *"nothing in play asks this knob for two"*. The archive does. That bound is
+a claim about what a 40×40 carve can seat rather than about balance, so it was measured
+rather than argued: five consoles *and* a locked room place with no rejection over a
+60-seed sweep (`the_archive_recipe_carves`). Nothing below the terminus can reach it —
+the ±1 sources cannot sum past one step upward on any facility the map offers — so the
+widening costs the ordinary game nothing.
+
+**Guards top out at six.** #565 had already widened the envelope to 2–6 for two stacking
+sources; the archive spends the whole reach from one. An alerted terminus therefore does
+not become seven, and an *easier* draw still bites — the ceiling is a clamp, not a floor
+under the arithmetic.
+
+### The ring rule is a new slot, and it stays out of the pool
+
+*Guards watch their sides* is the **harder arm** of the carve #442 settled the other way:
+slot 5 asked for a Calm guard to detect **only** its cone, that became the rule, and the
+slot is a tombstone. Reviving it would re-point every token that ever named it at the
+rule's own inverse — the #286 break in its purest form — so the arm is a new field at slot
+29, exactly as the tombstone's own note said it would have to be.
+
+It is kept **out of the §12.6 directed pool**, and this is the one entry there kept out on
+evidence rather than on mechanics (#518's two questions would both admit it). Appendix 28
+measured the unconditional carve as a real mover — the conditional rule was adopted
+*because* the unconditional one gave avoidance-first play a win-rate rise with no new
+decision attached — so putting the harder arm in the draw would re-open that call by
+lottery, on runs nobody asked for. At the terminus it is a stated property of one
+facility, which is a different thing from a rule a `+2` run can be dealt.
+
+### Appending a primitive past the composites broke an unstated invariant
+
+Worth recording because nothing pointed at it. `SlotSet::push` requires slots in ascending
+order, and `modifier_slots` satisfied that by walking the primitives and then the
+composite — which held only because every composite slot (24–28) was above every primitive
+one. Slot 29 ended that silently: the encoder built a descending set and `ordinal`
+returned `None`, so an archive token simply refused to encode.
+
+The fix is to **sort**, not to renumber, and it changes no token: every set the old order
+could build was already ascending. The lesson is the general one about permanent slots —
+"the newest thing is the highest slot" is a fact about a moment, not an invariant, and any
+code relying on it should say so or stop relying on it.
+
+### What was dropped, and what is deliberately left thin
+
+The placeholder's `guards_always_search_hideouts` is **gone**. It was #207's stand-in for
+"hard", and the five clauses are a stated ending rather than a pile of pressure; keeping a
+rule because the placeholder had it would be keeping a number nobody designed. If the
+terminus plays soft, it is the cheapest thing to add back — after it has been played.
+
+**A depth-zero campaign is no longer the plain game.** It used to be the degenerate country
+§12.7 names — one facility, entered and left, *"the game v1 already ships"*. That one
+facility is the archive, so it is now the shortest possible *campaign*, and the tests that
+used it as a cheap single level had to say which of the two they meant.
+
+**The ending's screen is the ordinary one, on purpose.** A won run draws §14 v2's end
+screen — `ESCAPED`, the ledger, the seed — with the campaign's single exit back to the
+title (appendix 31). #138 already tells a win from a loss, and the run-win is its
+campaign-won case. A bespoke victory screen is a thing to build once there is a run worth
+ending, which is the same reasoning that keeps the archive itself free of set-piece
+geometry (§2.3, *find the fun first*).
+
+**The §13.2 bot cannot play it, and that is reported rather than papered over.** Under an
+all-consoles gate with a locked room the bot's win rate is zero (#236's note; #517 is the
+cue it lacks — no plan of its says *the thing I need is behind that door, so buy the
+key*). So neither the archive nor its ring rule takes a `--modifier` name in the sim, on
+the cache count's precedent (#209): a batch that drew one would measure the bot, not the
+game (§13.3). The terminus will be judged by playing it, which is §13.1's rule and not a
+gap in this work.
+
+### One legibility wrinkle, left as it is
+
+On the Level info tab the archive's *two more consoles* row draws in the **easier**
+colour, because a row keeps the direction of the primitive it came from and a console is
+loot on every other facility (§2.2: intel is currency). At the terminus it is an errand.
+Giving a composite the power to recolour its parts would be the label-over-rules move
+#565 refused, and the row beneath it — *Intel to exit: all of it*, in the Warning colour —
+is the fact that makes five consoles hard, stated where a player reads it. So the wrinkle
+is documented rather than special-cased.

@@ -243,13 +243,20 @@ impl LevelConfig {
     /// decided. If the pool ever admits an intel rule, this is what has to be argued again.
     pub const INTEL_MIN: usize = 2;
 
-    /// The most intel consoles the [`IntelCount`] modifier may add (§10.2/#207).
+    /// The most intel consoles the [`IntelCount`] modifier may add (§10.2/#207/#217).
     ///
-    /// **Four, one over the §10.2 baseline.** The bound is placement, not balance: each
-    /// console wants a room the §10.6 flood can reach and the exit-cone rule allows, and
-    /// asking a 40×40 carve for more of them raises the rejection rate for no design
-    /// gain. One over is what the ±1 knob needs and all it needs.
-    pub const INTEL_MAX: usize = 4;
+    /// **Five, two over the §10.2 baseline**, and it widened from four for exactly the
+    /// reason the old note said it would not need to: *nothing in play asked this knob for
+    /// two*. The **archive** does (§14 v3/#217) — the terminus holds five consoles and
+    /// wants every one of them, which is how long the run has to stay in the hardest
+    /// building in the country.
+    ///
+    /// The bound is placement rather than balance, so widening it is a claim about the
+    /// carve and is measured as one: five consoles and a locked room seat on a 40×40 with
+    /// no rejection over a seed sweep (`the_archive_recipe_carves`). Nothing below the
+    /// terminus reaches it — the ±1 sources cannot sum past one step in this direction on
+    /// any facility the map offers — so the widening costs the ordinary game nothing.
+    pub const INTEL_MAX: usize = 5;
 
     /// This recipe with the §12.6 **guard-count knob** applied (#232) — the effective
     /// config [`generate_level`](crate::generate_level) places from.
@@ -285,10 +292,13 @@ impl LevelConfig {
     /// range — a sim sweep at six consoles must not have "one more" quietly place two
     /// fewer.
     ///
-    /// Its envelope is **one step wide either way** where the guard knob's is two, because
-    /// nothing in play asks this knob for two (see [`INTEL_MIN`](Self::INTEL_MIN)). A
-    /// crafted two-step token therefore stops at the same console the one-step rung
-    /// reaches: what a carve can seat is generation's word, and this is where it is said.
+    /// Its envelope is **two steps up and one down**, and the asymmetry is what each end
+    /// is asked for. Up, the [`Archive`](crate::Composite::Archive) names two (#217) and
+    /// the carve seats them. Down, nothing does: two sources would have to agree to strip
+    /// a facility to a single console, which is not a raid (see
+    /// [`INTEL_MIN`](Self::INTEL_MIN)), so a crafted two-step-fewer token stops where the
+    /// one-step rung does. What a carve can seat is generation's word, and this is where
+    /// it is said.
     #[must_use]
     pub const fn with_intel_count(self, knob: IntelCount) -> Self {
         Self {

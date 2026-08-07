@@ -1,4 +1,5 @@
 use super::*;
+use crate::modifiers::Composite;
 use crate::region::RegionKind;
 use crate::test_support::{open_room, seed_sweep};
 use crate::vision::{field_of_view_with_peek, FULL_SIGHT_ARC, PLAYER_SIGHT_RANGE};
@@ -1969,4 +1970,113 @@ fn a_table_in_a_door_frame_is_the_rare_last_resort() {
          rule has stopped preferring, and the frame is filling up again",
         seeds.len(),
     );
+}
+
+/// The archive's own recipe as generation reads it (§14 v3/#217) — the composite's
+/// expansion, which is what a resolved campaign set hands `generate_level`.
+fn archive() -> LevelModifiers {
+    LevelModifiers {
+        composite: Composite::Archive,
+        ..LevelModifiers::default()
+    }
+    .expand_composite()
+}
+
+/// **The archive carves** (§10.6/#217). The recipe arithmetic is one thing; asking a
+/// 40×40 board for six guards, five consoles *and* a locked room is another, and a
+/// campaign that hit `RetriesExhausted` on the one facility every run ends at would be a
+/// shipped bug — the last raid of a two-hour run, refusing to exist.
+///
+/// This is also the sweep that stands behind widening [`LevelConfig::INTEL_MAX`] to five:
+/// that bound is a claim about what a carve can seat, so moving it is measured rather than
+/// argued.
+#[test]
+fn the_archive_recipe_carves() {
+    for seed in seed_sweep(60) {
+        let (_, placement) = generate_level(&LevelConfig::V1, &archive(), &mut Rng::new(seed))
+            .unwrap_or_else(|e| panic!("seed {seed}: the archive must carve: {e:?}"));
+        assert_eq!(
+            placement.guard_cells().len(),
+            LevelConfig::V1.guards + 2,
+            "seed {seed}: the terminus posts two more guards",
+        );
+        assert_eq!(
+            placement.intel().len(),
+            LevelConfig::V1.intel + 2,
+            "seed {seed}: the terminus holds five consoles",
+        );
+        assert!(
+            placement.caches().is_empty(),
+            "seed {seed}: no salvage on the last facility (§2.2)",
+        );
+    }
+}
+
+/// §2.3's **anti-facade** assertion for the terminus (#217), stated in the frame the count
+/// knobs already earn: from one seed, the archive is the **same building** with more in it
+/// and one room shut.
+///
+/// Both halves are the claim. *More in it*, because a modifier that changed nothing
+/// observable cannot pass for shipped — two more guards, two more consoles, and a door
+/// that will not open. *The same building*, because that is what makes the first half mean
+/// anything: the expansion reaches placement and #236's pass, never the carve, so the
+/// player's own tunnel comes out of the same wall and every cell of terrain outside the
+/// locked doorways is the cell the seed always carved.
+#[test]
+fn the_archive_puts_more_in_the_same_building() {
+    for seed in seed_sweep(40) {
+        let (open_layout, open) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .unwrap_or_else(|e| panic!("seed {seed}: {e:?}"));
+        let (locked_layout, closed) =
+            generate_level(&LevelConfig::V1, &archive(), &mut Rng::new(seed))
+                .unwrap_or_else(|e| panic!("seed {seed}: {e:?}"));
+
+        // More in it.
+        assert_eq!(
+            closed.guard_cells().len(),
+            open.guard_cells().len() + 2,
+            "seed {seed}",
+        );
+        assert_eq!(closed.intel().len(), open.intel().len() + 2, "seed {seed}");
+
+        // The same building: the way in and the way out have not moved…
+        assert_eq!(
+            open.player(),
+            closed.player(),
+            "seed {seed}: the spawn moved"
+        );
+        assert_eq!(open.exit(), closed.exit(), "seed {seed}: the tunnel moved");
+        assert_eq!(
+            open.exit_duct().cells(),
+            closed.exit_duct().cells(),
+            "seed {seed}: the crawlspace moved",
+        );
+        // …and neither has a single cell of terrain, outside the doorways the lock is
+        // allowed to re-role.
+        let keyed: HashSet<Cell> = locked_layout
+            .regions()
+            .doors()
+            .filter(|(_, door)| door.is_keyed())
+            .flat_map(|(_, door)| door.cells().collect::<Vec<_>>())
+            .collect();
+        assert!(!keyed.is_empty(), "seed {seed}: the terminus locks a room");
+        let facility = open_layout.facility();
+        for y in 0..facility.height() {
+            for x in 0..facility.width() {
+                let cell = Cell::new(x, y);
+                if keyed.contains(&cell) {
+                    continue;
+                }
+                assert_eq!(
+                    facility.terrain(cell),
+                    locked_layout.facility().terrain(cell),
+                    "seed {seed}: {cell:?} moved, and only a locked doorway may",
+                );
+            }
+        }
+    }
 }

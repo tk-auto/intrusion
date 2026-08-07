@@ -639,13 +639,38 @@ impl Composite {
                 intel_count: IntelCount::Fewer,
                 ..LevelModifiers::neutral()
             },
-            // The terminus is the hard raid, and it is hard through **pressure** rather
-            // than through scarcity: the consoles stay at the recipe's count because what
-            // the archive holds is #217's to say, and no crates on the terminus because a
-            // power curve rising after the last thing it could be spent on is no curve.
+            // **The terminus, and the run's ending** (§14 v3/#217). It is the hardest
+            // facility in the country and the only one with something the run must take,
+            // and every clause of that is here:
+            //
+            // - **two more guards** — the knob's whole reach in one source, which is what
+            //   #565's arithmetic made sayable and the §10.2 envelope widened to 2…6 to
+            //   hold. The last raid should be the hard one, and guards are what §10.2
+            //   tunes difficulty in;
+            // - **two more consoles** — five, on a recipe of three. It is an *exposure*
+            //   setting rather than a reward one, because all five are required to leave:
+            //   the number is how long the run has to stay in the worst building it will
+            //   see. `INTEL_MAX` widened to five for it, and the archive is what that doc
+            //   meant by "nothing in play asks this knob for two";
+            // - **a locked room** (#236) — no crates here, so it falls on a *console*
+            //   room, which under the terminus's gate makes it a hard gate on the win: a
+            //   won run is one that bought a key with a takedown (§7.2). That is the
+            //   ending asking once, at the end, for the thing the game prices highest;
+            // - **guards that watch their sides** — the §6.2 flank carve withdrawn, so the
+            //   tail-through-a-corner and the flank takedown the rest of the campaign
+            //   teaches are both off. The archive is where a run learns those were a gift;
+            // - **no crates** — salvage on the last facility is a power curve rising after
+            //   the last thing it could be spent on.
+            //
+            // **What is deliberately not here is the gate.** No composite sets one (see
+            // this method's own note): it says what the *run* is asked for, not what the
+            // facility is, and the terminus's mandatory objective is a property of the
+            // **node** — of where the map ends. `Campaign::level_at` is where it lives.
             Composite::Archive => LevelModifiers {
-                guard_count: GuardCount::More,
-                guards_always_search_hideouts: true,
+                guard_count: GuardCount::TwoMore,
+                intel_count: IntelCount::TwoMore,
+                prize_room_locked: true,
+                guards_watch_their_sides: true,
                 caches: CacheCount::None,
                 ..LevelModifiers::neutral()
             },
@@ -1151,10 +1176,45 @@ pub struct LevelModifiers {
     /// earned inside the facility exactly as they were. See [`scout`](crate::scout) for
     /// what may be sold and what may not.
     pub scouted: bool,
+    /// **Harder.** Every guard watches its **sides** in every mood, Calm included
+    /// (§6.1/§6.2/§14 v3/#217): the ring carve falls back to
+    /// [`BlindTier::REAR`](crate::vision::BlindTier::REAR) — the three cells at a guard's
+    /// back — whatever the guard is doing. Baseline, §6.2's own rule stands: a **Calm**
+    /// patrol detects exactly its ~90° cone and its two flank cells are free.
+    ///
+    /// **It takes back the two things a campaign teaches.** The flank carve (#442) is what
+    /// makes a **flank takedown** on a patrol possible, and what lets a **tail** survive a
+    /// corner — walk in a Calm guard's blind spot and its 90° turn does not catch you. With
+    /// this on, both are gone: the sides are live, so a flank is a place to work from and
+    /// never a place to stand. The three cells at the back stay blind, so the §7.2 takedown
+    /// from directly behind is untouched — which is what keeps a locked room's key
+    /// obtainable at all.
+    ///
+    /// **It is not the retired slot 5 coming back.** That slot asked for the *opposite* —
+    /// a Calm guard detecting **only** its cone — and #442 made that the rule, leaving a
+    /// tombstone that may never be revived
+    /// ([`calm_guards_detect_only_their_cone`](Self::calm_guards_detect_only_their_cone)).
+    /// This is the harder arm, appended as a **new** field with a new slot, exactly as that
+    /// tombstone's own note says it would have to be.
+    ///
+    /// **Out of the §12.6 directed pool** (see [`POOL`]), and it is the one entry kept out
+    /// on evidence rather than on mechanics. Appendix 28 measured the *unconditional* carve
+    /// as a real mover — the conditional rule was adopted precisely because the
+    /// unconditional one gave avoidance-first play a win-rate rise with no new decision
+    /// attached — so putting the harder arm in the draw would re-open that call by lottery,
+    /// on runs nobody asked. Its one source is [`Composite::Archive`], where it is a stated
+    /// property of the one facility a run ends at.
+    pub guards_watch_their_sides: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
-    /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
-    /// by [`State::exit_ready`](crate::State::exit_ready).
+    /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`] — except at the
+    /// **archive**, where the campaign's own node sets [`IntelGate::All`] and the run's one
+    /// mandatory objective is the terminus's haul (§14 v3/#217).
+    ///
+    /// **A gate is never a composite's** (see [`Composite::expansion`]): it says what the
+    /// *run* is asked for rather than what a facility is, so even the archive's gate rides
+    /// in the chosen set that the campaign builds per node, not in
+    /// [`Composite::Archive`]'s expansion.
     pub intel_to_exit: IntelGate,
     /// The **composite** this set was stated as, if it was stated as one (§12.6/#565) —
     /// [`Composite::None`] for every quick-play level and every hand-built state.
@@ -1297,8 +1357,9 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 25] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 26] = [
     LOCKED_PRIZE_ROOM,
+    WATCHES_ITS_SIDES,
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -1405,6 +1466,23 @@ const WATCHES_CONSOLES: ActiveModifier = ActiveModifier {
 /// "Search areas" rather than "investigation areas" because *search* is the word §7.6
 /// and the near line already use for the same thing — one name for one mechanic
 /// (§11.8).
+/// Named for the **guards**, like [`WATCHES_CONSOLES`] above and for the same reason: what
+/// a player can act on is what a guard notices, not which ring tier a carve drops. "Their
+/// sides" is §6.2's own word for the pair of cells this is about, so the caption and the
+/// rule are spelled the same (§11.8).
+///
+/// It says nothing about *Calm*, deliberately. The baseline rule is conditional on the
+/// mood and this one is not, so a caption naming the mood would invite the reading that
+/// something changes when a guard turns reactive — where in fact this is the mood
+/// condition being taken away.
+const WATCHES_ITS_SIDES: ActiveModifier = ActiveModifier {
+    name: "Guards watch their sides",
+    direction: ModifierDirection::Harder,
+    detail: None,
+    source: None,
+    short: "no blind flanks",
+};
+
 const SHOWS_SEARCH_AREAS: ActiveModifier = ActiveModifier {
     name: "Search areas shown",
     direction: ModifierDirection::Easier,
@@ -1908,6 +1986,7 @@ impl LevelModifiers {
             prize_room_locked,
             narrowed_guard_cones,
             scouted,
+            guards_watch_their_sides,
             intel_to_exit,
             // Not a rule and never a row of its own: what it stands for is already in the
             // fields above (resolution unioned it in), and putting its *name* in front of
@@ -1967,6 +2046,12 @@ impl LevelModifiers {
         // card is what tells them that is the run rather than the renderer.
         if narrowed_guard_cones {
             active.push(NARROWED_CONES);
+        }
+        // Read before turn one as well (#217): with this on, a cell that has been safe for
+        // six facilities is not — and a player who was not told would read being spotted
+        // from a patrol's flank as the game cheating rather than as the terminus it is.
+        if guards_watch_their_sides {
+            active.push(WATCHES_ITS_SIDES);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -2083,6 +2168,11 @@ impl LevelModifiers {
             // for. The §12.6 invariant reads unusually here and still holds — nothing in
             // this field adds pressure, so there is nothing for a partner to relieve.
             scouted: self.scouted || other.scouted,
+            // A plain toggle (#217), composed by the same OR as its neighbours: no source
+            // can talk another out of a rule, and a facility whose guards watch their
+            // sides cannot be talked back into blind flanks.
+            guards_watch_their_sides: self.guards_watch_their_sides
+                || other.guards_watch_their_sides,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
             // A composite is a *name* for some of the fields above rather than a rule
             // beside them, so there is no pressure here to add or relieve: a source that
@@ -2167,6 +2257,8 @@ impl LevelModifiers {
             prize_room_locked: self.prize_room_locked && !given.prize_room_locked,
             narrowed_guard_cones: self.narrowed_guard_cones && !given.narrowed_guard_cones,
             scouted: self.scouted && !given.scouted,
+            guards_watch_their_sides: self.guards_watch_their_sides
+                && !given.guards_watch_their_sides,
             // Never a composite's to set (see `Composite::expansion`), so it passes
             // through whole rather than being differenced against a value that is always
             // `neutral`'s.
@@ -2454,7 +2546,8 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **One short of the field count, with every field set** —
+        // **Two short of the field count, with every field set** — the composite is a name
+        // for the fields rather than a row of its own (#565), and
         // `calm_guards_detect_only_their_cone` is the retired slot 5 (#442), and a
         // retired toggle announces nothing: what it asked for is the rule the level
         // plays regardless, so a caption for it would tell the player about a difference
@@ -2475,13 +2568,14 @@ mod tests {
             prize_room_locked: true,
             scouted: true,
             narrowed_guard_cones: true,
+            guards_watch_their_sides: true,
             intel_to_exit: IntelGate::All,
             // A composite is a *name* for some of the fields above, not a sixteenth rule
             // beside them (#565) — it contributes no row of its own, only an owner in
             // front of the rows it set, so a set with none reads exactly as it always did.
             composite: Composite::None,
         };
-        assert_eq!(stacked.active().len(), 15);
+        assert_eq!(stacked.active().len(), 16);
         assert!(
             !stacked
                 .active()
@@ -2554,6 +2648,7 @@ mod tests {
             prize_room_locked: true,
             narrowed_guard_cones: false,
             scouted: true,
+            guards_watch_their_sides: true,
             intel_to_exit: IntelGate::All,
             composite: Composite::Vault,
         };
@@ -2573,6 +2668,7 @@ mod tests {
             prize_room_locked: false,
             narrowed_guard_cones: true,
             scouted: false,
+            guards_watch_their_sides: false,
             intel_to_exit: IntelGate::None,
             composite: Composite::None,
         };
@@ -2792,6 +2888,99 @@ mod tests {
                     difficulty.label(),
                 );
             }
+        }
+    }
+
+    /// **What the Level info tab says about the terminus** (#248/#565/#217): the archive is
+    /// one composite, and every rule it sets is drawn under its name — nothing is hidden
+    /// behind the label.
+    ///
+    /// That is what makes a composite legible rather than a caption: a player who reads
+    /// *Archive* and nothing else has not been told that a door will refuse them or that a
+    /// patrol's flank is live, and §2.3 calls that a facade. The rows are derived from the
+    /// expansion, so a clause cannot be added to the terminus without appearing here.
+    #[test]
+    fn the_archive_draws_every_rule_it_sets_under_its_own_name() {
+        let terminus = LevelModifiers {
+            composite: Composite::Archive,
+            intel_to_exit: IntelGate::All,
+            ..LevelModifiers::default()
+        }
+        .expand_composite();
+        let rows = terminus.active();
+        let owned: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.source == Some("Archive"))
+            .map(|row| row.short)
+            .collect();
+        assert_eq!(
+            owned,
+            vec![
+                "a locked room",
+                "no blind flanks",
+                "two more guards",
+                "two more consoles",
+            ],
+            "every clause of the terminus is drawn, and drawn as the archive's",
+        );
+        // The gate is the **node's**, not the composite's (#565), so it draws as a rule of
+        // its own — which is right: it is what the *run* is asked for, and the one row that
+        // says the archive cannot be left empty-handed.
+        assert!(rows.iter().any(|row| row.source.is_none()
+            && row.name == INTEL_GATE_ALL.name
+            && row.detail == INTEL_GATE_ALL.detail));
+        // **Every row but one reads Harder, and the exception is worth naming.** A row
+        // keeps the direction of the *primitive* it came from (#565: a composite has none
+        // of its own), and "one more console" is an **easier** primitive because a console
+        // is loot on every other facility (§2.2: intel is currency). At the terminus it is
+        // an errand — five consoles is how long the run has to stay — so the tab colours
+        // that row the calm blue while the building it describes is the hardest in the
+        // country.
+        //
+        // It is left as it is rather than special-cased. Giving a composite the power to
+        // recolour its parts would be exactly the label-over-rules move #565 refused, and
+        // the row beneath it says *Intel to exit: all of it* in the Warning colour — which
+        // is the fact that makes five consoles hard, stated where a player reads it.
+        let (easier, harder): (Vec<&ActiveModifier>, Vec<&ActiveModifier>) = rows
+            .iter()
+            .partition(|row| row.direction == ModifierDirection::Easier);
+        assert_eq!(
+            easier.iter().map(|row| row.short).collect::<Vec<_>>(),
+            vec!["two more consoles"],
+            "only the console count reads easier, and only because a console usually is",
+        );
+        assert!(harder.len() >= 3, "the rest of the terminus reads harder");
+    }
+
+    /// **The archive's ring rule is not something a difficulty draw may deal**
+    /// (§6.2/§12.6/#217/#442). It is the harder arm of the carve #442 settled the other
+    /// way, and putting it back in the pool would re-open that call by lottery on runs
+    /// nobody asked — appendix 28 measured the unconditional carve as a real mover. Its one
+    /// source is the terminus, where it is a stated property of one facility.
+    #[test]
+    fn no_difficulty_draw_takes_a_patrols_blind_flanks_away() {
+        assert!(
+            !POOL
+                .iter()
+                .any(|entry| entry.caption.name == WATCHES_ITS_SIDES.name),
+            "the ring rule is not a pool entry",
+        );
+        for difficulty in crate::Difficulty::ALL {
+            for seed in [0, 7, 4242, u64::MAX] {
+                assert!(
+                    !difficulty.draw(seed).guards_watch_their_sides,
+                    "{difficulty:?} at seed {seed} dealt the archive's ring rule",
+                );
+            }
+        }
+        // And it is nobody's but the terminus's among the flavours, so an ordinary node
+        // cannot be dealt one either.
+        for composite in Composite::ALL {
+            assert_eq!(
+                composite.expansion().guards_watch_their_sides,
+                composite == Composite::Archive,
+                "{composite:?}",
+            );
         }
     }
 

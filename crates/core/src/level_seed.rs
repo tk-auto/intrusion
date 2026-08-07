@@ -777,6 +777,15 @@ enum ModifierSlot {
     VaultComposite = 26,
     WorkshopComposite = 27,
     ArchiveComposite = 28,
+    /// Appended (#217): **guards watch their sides** — the §6.2 flank carve withdrawn, so
+    /// a Calm patrol detects its flanks like every other mood.
+    ///
+    /// It takes the next free slot rather than the retired slot 5, and the distance
+    /// between the two is the point. That slot asked for the *opposite* rule and #442 made
+    /// that rule the game's; reusing it would re-point every token that ever named it at
+    /// the rule's own inverse — the #286 break in its purest form. The harder arm was
+    /// always going to be a new slot, and this is it.
+    GuardsWatchTheirSides = 29,
 }
 
 impl Composite {
@@ -829,6 +838,7 @@ impl ModifierSlot {
         ModifierSlot::VaultComposite,
         ModifierSlot::WorkshopComposite,
         ModifierSlot::ArchiveComposite,
+        ModifierSlot::GuardsWatchTheirSides,
     ];
 }
 
@@ -868,16 +878,23 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
     // [`expand_composite`](LevelModifiers::expand_composite), applied on the way back — so
     // a Vault dealt a harder guard rule writes the composite's slot plus a plain
     // `MoreGuards`, and decoding adds the two back to the two guards it resolved to.
-    for (slot, active) in primitive_slots(m.departures_beyond_composite()) {
-        if active {
-            slots.push(slot as usize)?;
-        }
-    }
-    // Last, and so still ascending: every composite slot sits above every primitive one,
-    // which is why they were appended after the count knobs' two-step rungs rather than
-    // before (spec §3).
-    if let Some(slot) = m.composite.slot() {
-        slots.push(slot as usize)?;
+    //
+    // **Sorted, rather than primitives-then-composite** (#217). [`SlotSet::push`] takes
+    // slots ascending, and that used to fall out of the walk order because every composite
+    // slot (24–28) sat above every primitive one. It stopped being true the moment a
+    // primitive was appended past them, which is what slot 29 is — and a slot number is
+    // permanent, so the fix is here rather than a renumbering. Sorting changes no token:
+    // every set the old order could build was already ascending, so this is the same set
+    // written the same way.
+    let mut named: Vec<usize> = primitive_slots(m.departures_beyond_composite())
+        .into_iter()
+        .filter(|&(_, active)| active)
+        .map(|(slot, _)| slot as usize)
+        .chain(m.composite.slot().map(|slot| slot as usize))
+        .collect();
+    named.sort_unstable();
+    for slot in named {
+        slots.push(slot)?;
     }
     Some((slots, m.intel_to_exit))
 }
@@ -911,6 +928,7 @@ fn primitive_slots(m: LevelModifiers) -> [(ModifierSlot, bool); PRIMITIVE_SLOTS]
         prize_room_locked,
         narrowed_guard_cones,
         scouted,
+        guards_watch_their_sides,
         // Not a primitive slot: a composite has one of its own, written by
         // [`modifier_slots`] in place of the slots this table would have spent on the
         // fields it stands for (#565).
@@ -950,6 +968,8 @@ fn primitive_slots(m: LevelModifiers) -> [(ModifierSlot, bool); PRIMITIVE_SLOTS]
         (S::NarrowedGuardCones, narrowed_guard_cones),
         // The pre-level scout (#215).
         (S::Scouted, scouted),
+        // The archive's ring carve (#217) — a plain toggle, appended past the composites.
+        (S::GuardsWatchTheirSides, guards_watch_their_sides),
         // The count knobs' two-step rungs (#565), appended after the scout rather than
         // tidied in beside their one-step partners — a slot number is permanent, so a
         // knob that grows a rung appends it, exactly as the layout knob's harder end did.
@@ -1070,6 +1090,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
             prize_room_locked: at(S::PrizeRoomLocked),
             narrowed_guard_cones: at(S::NarrowedGuardCones),
             scouted: at(S::Scouted),
+            guards_watch_their_sides: at(S::GuardsWatchTheirSides),
             intel_to_exit: gate,
             composite,
         }
@@ -1086,7 +1107,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// (#207) and the layout knob (#233) spend one slot per rung, the cache knob
 /// (#209) one slot per rung, and each composite (#565) one slot for the whole
 /// combination it names.
-const MODIFIER_SLOTS_USED: usize = 29;
+const MODIFIER_SLOTS_USED: usize = 30;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1474,7 +1495,7 @@ mod tests {
         // The boolean fields as a bitmask rather than one nested loop each: the
         // knob (#232) would have made a further level of nesting out of a test whose
         // whole content is "every combination".
-        const TOGGLE_FIELDS: u32 = 10;
+        const TOGGLE_FIELDS: u32 = 11;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
             let (
@@ -1488,6 +1509,7 @@ mod tests {
                 areas,
                 locked,
                 narrowed,
+                sides,
             ) = (
                 on(0),
                 on(1),
@@ -1499,6 +1521,9 @@ mod tests {
                 on(7),
                 on(8),
                 on(9),
+                // The archive's ring carve (#217) — a plain toggle like its neighbours,
+                // so it joins the bitmask rather than the knob rows.
+                on(10),
             );
             // The layout knob (#233) joins the knob sweep rather than the bitmask: its
             // two ends are one field, so a bit per end would build configs — both at
@@ -1554,6 +1579,7 @@ mod tests {
                             prize_room_locked: locked,
                             narrowed_guard_cones: narrowed,
                             scouted,
+                            guards_watch_their_sides: sides,
                             intel_to_exit: gate,
                             // The sweep is over the **primitive** wire, which is what
                             // this test is about; the composites' own round-trip —
@@ -1574,7 +1600,7 @@ mod tests {
                         // spends a slot like any toggle, so it counts here too.
                         let active = [
                             search, sighting, body, cones, cone_only, doors, consoles, areas,
-                            locked, narrowed,
+                            locked, narrowed, sides,
                         ]
                         .into_iter()
                         .filter(|&flag| flag)
@@ -1728,6 +1754,10 @@ mod tests {
                 // be scouted decodes as the facility it always named — one whose
                 // contents are hidden until seen (§11.5a).
                 scouted: false,
+                // Slot 29 (#217) is the ninth: a token minted before the archive's guards
+                // could watch their sides decodes as the facility it always named — one
+                // where a Calm patrol's flanks are as free as they ever were (§6.2).
+                guards_watch_their_sides: false,
                 intel_to_exit: IntelGate::All,
                 // Slots 20–24 (#565) are the eighth: a token minted before a facility
                 // could be stated as one word decodes as the facility it always named —
@@ -1931,21 +1961,23 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 28, the Archive composite (#565). A knob
-        // holds one rung and a facility is one thing, so the highest five are the Archive
-        // composite (28), the intel knob's two-fewer rung (23), the guard knob's (21), the
-        // scout (19) and the short cones (18). Appending the composites and the two-step
-        // rungs pushed the locked room (17) and the fogged layout (16) out of the set,
-        // which is what "the widest payload" moving with the roster looks like. Holding
-        // more than five at once is over the cap and refused outright, asserted in
-        // `every_config_round_trips`.
+        // actually hold, which now reaches slot 29, the archive's ring carve (#217). A knob
+        // holds one rung and a facility is one thing, so the highest five are the guards'
+        // live sides (29), a composite (26 — a Vault, see below), the intel knob's
+        // two-fewer rung (23), the guard knob's (21) and the scout (19).
         //
-        // Read it as a *resolved* set, which is what the encoder takes: the Archive gives
-        // an extra guard and its hideout searches, so the guard knob one rung **below**
-        // the baseline is a two-step easier residual, and the hideout searches cost no
-        // slot at all. That is the whole mechanism, at the tightest corner of the format.
+        // **The composite here is a Vault and not the Archive, and that is the mechanism
+        // rather than a smaller corner.** Slot 29 can only be *written* as a departure, and
+        // an Archive already gives it — so the set that names both is exactly the set the
+        // encoder never has to write. What is left is the highest reachable combination,
+        // which is why the top slot and the top composite do not appear together.
+        //
+        // Read it as a *resolved* set, which is what the encoder takes: the Vault gives an
+        // extra guard, an extra console and three crates, so the knobs one rung **below**
+        // the baseline are two-step easier residuals and the crates cost no slot at all.
+        // That is the whole mechanism, at the tightest corner of the format.
         let all_modifiers = LevelModifiers {
-            guards_always_search_hideouts: true,
+            guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
@@ -1955,22 +1987,27 @@ mod tests {
             guards_watch_consoles: false,
             show_search_areas: false,
             guard_count: GuardCount::Fewer,
-            intel_count: IntelCount::TwoFewer,
-            caches: CacheCount::None,
+            intel_count: IntelCount::Fewer,
+            caches: CacheCount::Three,
             prize_room_locked: false,
-            narrowed_guard_cones: true,
+            narrowed_guard_cones: false,
             scouted: true,
+            // The newest slot (#217), which is where the top of the wire now is.
+            guards_watch_their_sides: true,
             intel_to_exit: IntelGate::All,
-            // The newest slots (#565), which is where the top of the wire now is.
-            composite: Composite::Archive,
+            composite: Composite::Vault,
         };
+        let mut widest: Vec<usize> = modifier_slots(all_modifiers)
+            .expect("under the cap")
+            .0
+            .iter()
+            .collect();
+        // Sorted for reading: the set is what matters, and the encoder writes it in the
+        // order the table walks (a composite last), not in slot order.
+        widest.sort_unstable();
         assert_eq!(
-            modifier_slots(all_modifiers)
-                .expect("under the cap")
-                .0
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![18, 19, 21, 23, 28],
+            widest,
+            vec![19, 21, 23, 26, 29],
             "the widest payload takes the five highest slots a run can hold",
         );
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
@@ -2286,6 +2323,10 @@ mod tests {
                 },
                 S::Scouted => LevelModifiers {
                     scouted: true,
+                    ..neutral
+                },
+                S::GuardsWatchTheirSides => LevelModifiers {
+                    guards_watch_their_sides: true,
                     ..neutral
                 },
                 // The count knobs' two-step rungs (#565).

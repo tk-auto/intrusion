@@ -227,21 +227,62 @@ impl GuardSight {
         blind: BlindPolicy::FlankWhileCalm,
     };
 
-    /// **The §155 control arm** ([`BlindPolicy::Rear`]) over §7.1's own cone: every
-    /// guard blind at its back alone, whatever its mood. Not reachable in a shipped
-    /// run — it is the contrast the flank rule's tests are stated against, which is why
-    /// it is a test-only constant rather than a fourth thing a level could ask for.
-    #[cfg(test)]
-    pub(crate) const REAR_CARVE: Self = Self {
+    /// **What the archive's guards see** (§6.1/§6.2/§14 v3/#217): §7.1's own cone, with
+    /// [`BlindPolicy::Rear`]'s carve — every guard watches its **sides** in every mood,
+    /// Calm included, and only the three cells at its back are blind.
+    ///
+    /// It is the §155 rule the whole game played before #442, standing on one facility.
+    /// What it takes away is the two things the flank carve buys and the rest of a
+    /// campaign teaches: the **flank takedown** on a patrol, and the **tail through a
+    /// corner** — walking in a Calm guard's blind spot no longer survives its 90° turn.
+    /// The terminus is where a run finds out those were a gift rather than a rule.
+    ///
+    /// **Reached only through
+    /// [`guards_watch_their_sides`](crate::LevelModifiers::guards_watch_their_sides)**,
+    /// whose one source is the archive — never by reviving the retired slot 5, which asked
+    /// for this rule's inverse.
+    pub const VIGILANT: Self = Self {
         arc: GUARD_SIGHT_ARC,
         range: GUARD_SIGHT_RANGE,
         blind: BlindPolicy::Rear,
     };
 
+    /// The vigilant carve over a **shortened** cone — what a facility whose run drew both
+    /// the archive's ring rule and the §12.6 narrowed-cones one (#495) hands its guards.
+    ///
+    /// It exists because the two are independent and both reachable: the ring rule comes
+    /// from the map's terminus and the shorter cone from the campaign alert's easier draw,
+    /// so a quiet run can arrive at an archive whose guards see six cells and miss nothing
+    /// beside them. Spelling the pair out keeps [`ALL`](Self::ALL) exhaustive over what a
+    /// run can actually be dealt, which is what the compile-time §7.6 zone check is worth
+    /// anything for.
+    pub const VIGILANT_NARROWED: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: NARROWED_GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::Rear,
+    };
+
+    /// **The §155 control arm** ([`BlindPolicy::Rear`]) over §7.1's own cone: every
+    /// guard blind at its back alone, whatever its mood. The contrast the flank rule's
+    /// tests are stated against — and, since #217, the same value the archive plays
+    /// ([`VIGILANT`](Self::VIGILANT)), which is why the tests name it rather than a
+    /// `#[cfg(test)]` twin of a shipped constant.
+    #[cfg(test)]
+    pub(crate) const REAR_CARVE: Self = Self::VIGILANT;
+
     /// Every sight configuration a shipped run can be dealt — what the §7.6 zone
     /// invariant is asserted over at compile time, so a future cone that collapsed the
     /// two zones would fail the build rather than be discovered in a playtest.
-    pub(crate) const ALL: [Self; 2] = [Self::BASELINE, Self::NARROWED];
+    ///
+    /// Four since #217: the cone's **reach** and its **ring carve** move independently
+    /// (the narrowed-cones modifier and the archive's rule), so the set is the product of
+    /// the two rather than a list of named runs.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::BASELINE,
+        Self::NARROWED,
+        Self::VIGILANT,
+        Self::VIGILANT_NARROWED,
+    ];
 
     /// The tier this level's policy carves for a guard in `state` — see
     /// [`BlindPolicy::tier`]. Resolved against the guard's own mood, which is why the

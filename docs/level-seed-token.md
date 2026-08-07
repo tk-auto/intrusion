@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and twenty-nine modifier slots as of writing).
+(six tech and thirty modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -140,6 +140,13 @@ Two composites at once is refused exactly as a knob's two ends are: a facility i
 thing, so a token calling it both a Vault and an Outpost describes a run no source can
 build. *Tests: `a_vault_spends_one_slot_and_leaves_four_of_five_free`,
 `every_composite_round_trips_through_one_slot`.*
+
+**The written set is sorted, not primitives-then-composite** (#217). `SlotSet::push` takes
+slots ascending, and that used to fall out of the walk order because every composite slot
+(24–28) sat above every primitive one. Appending a primitive **past** them — slot 29, the
+archive's ring rule — ended that, and the fix is to sort rather than to renumber, because a
+slot number is permanent. It changes no token: every set the old order could build was
+already ascending, so this is the same set written the same way.
 
 > **This is why the cap is not raised instead.** Five composed slots is a *format*
 > promise, and `MODIFIER_CAP` is what keeps `PAYLOAD_SPACE` against `TOKEN_SPACE` — every
