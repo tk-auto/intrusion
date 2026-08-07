@@ -767,9 +767,16 @@ fn wallet_text(run: &Campaign, ui: MapUi) -> (String, Category) {
 }
 
 /// **The last raid's three stars**, drawn segment by segment so each axis wears its own
-/// §11.2 colour: **Interest** — the goals-and-rewards channel — for a star earned, and
-/// **Ground** for one missed, with the separators in Ground so the row reads as three
-/// findings rather than one sentence.
+/// §11.2 colour: **Owned** — the player's own channel, the blue the `@` on this very
+/// picture is drawn in — for a star earned, and **Ground** for one missed, with the
+/// separators in Ground so the row reads as three findings rather than one sentence.
+///
+/// **Owned, not Interest**, for the reason the wallet line one row down is Owned: the
+/// stars are a verdict on *you*, already earned, in the same sense the intel in the purse
+/// is already yours. Interest is what is worth reaching for and it is spoken for twice on
+/// this screen — the archive and the marked row — so a third claim would blunt both. It
+/// also gives the score one colour identity across every surface that draws it (the end
+/// screen's block is Owned for the same reason).
 ///
 /// Each axis is **named** beside its mark. A bare `★★☆` on the map would tell the player
 /// how many they got and leave them to work out which — and knowing which one you missed
@@ -804,7 +811,7 @@ fn draw_score(grid: &mut Grid, y: u32, score: Score) {
         }
         let text = cell(axis);
         let category = if score.earned(axis) {
-            Category::Interest
+            Category::Owned
         } else {
             Category::Ground
         };
