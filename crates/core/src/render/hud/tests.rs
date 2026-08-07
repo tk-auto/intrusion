@@ -5,6 +5,7 @@ use crate::guard::Guard;
 use crate::guard::GuardState;
 use crate::modifiers::LevelModifiers;
 use crate::state::{BoreRefusal, Event, Input, State};
+use crate::status::near_line;
 use crate::test_support::open_room;
 use crate::{Difficulty, EndExit, EndUi, MapScreen, NodeId, Outlay, RunMode, RunOptions};
 
@@ -507,7 +508,7 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 
     for x in 0..width {
         let hit = is_help_button(x, NEAR_ROW)
-            || super::super::message_log::is_message_button(&s, x, NEAR_ROW);
+            || super::super::message_log::is_message_button(&s, ScreenUi::default(), x, NEAR_ROW);
         if hit {
             assert_eq!(
                 g.get(x, NEAR_ROW).bg,
@@ -519,12 +520,17 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 
     // …and the spans the layout names cover every hittable cell, with only whatever air
     // the row holds back beside each control over and above them.
-    let controls = near_line_controls(&s, width, false);
+    let controls = near_line_controls(&s, width, false, None);
     let held: Vec<u32> = controls.held_back().flatten().collect();
     let hittable: Vec<u32> = (0..width)
         .filter(|&x| {
             is_help_button(x, NEAR_ROW)
-                || super::super::message_log::is_message_button(&s, x, NEAR_ROW)
+                || super::super::message_log::is_message_button(
+                    &s,
+                    ScreenUi::default(),
+                    x,
+                    NEAR_ROW,
+                )
         })
         .collect();
     assert!(
@@ -545,7 +551,7 @@ fn the_held_back_cells_agree_with_the_controls_hit_tests() {
 fn holding_the_band_back_costs_the_message_nothing() {
     let s = near_line_with_deploy_control();
     let width = s.layout().facility().width();
-    let controls = near_line_controls(&s, width, false);
+    let controls = near_line_controls(&s, width, false, None);
     assert!(controls.log.is_some(), "both controls are up");
     assert_eq!(
         controls.capacity(),
@@ -737,7 +743,7 @@ fn status_rows_carry_the_band_and_the_categories() {
     assert_eq!(g.height(), TOP_ROWS + map.height() + BOTTOM_ROWS);
 
     let (near_y, usable_y) = (NEAR_ROW, USABLE_ROW);
-    let controls = near_line_controls(&s, g.width(), false);
+    let controls = near_line_controls(&s, g.width(), false, None);
     let held: Vec<u32> = controls.held_back().flatten().collect();
     for x in 0..g.width() {
         let cell = g.get(x, near_y);

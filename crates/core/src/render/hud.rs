@@ -33,7 +33,7 @@ use super::*;
 use crate::ability::{max_bar_name, AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
 use crate::place::LevelConfig;
-use crate::status::{near_line, PopIn};
+use crate::status::{near_line_beside, PopIn};
 
 /// The rows the screen adds **above** the map (§11.4): the near line and the
 /// usable line — read-only status, kept clear of the thumb (#267). A shell
@@ -437,8 +437,13 @@ impl NearLineControls {
 /// `log_open` picks the deploy glyph, never the width — the control is
 /// [`DEPLOY_LEN`](super::message_log::DEPLOY_LEN) cells whatever it says — so a
 /// hit-test may ask with either and land on the button the frame drew.
-pub(super) fn near_line_controls(state: &State, width: u32, log_open: bool) -> NearLineControls {
-    let label = super::message_log::deploy_label(state, log_open);
+pub(super) fn near_line_controls(
+    state: &State,
+    width: u32,
+    log_open: bool,
+    popped: Option<PopIn>,
+) -> NearLineControls {
+    let label = super::message_log::deploy_label(state, log_open, popped);
     debug_assert!(
         label
             .as_ref()
@@ -557,7 +562,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // The near line (§11.4/§11.7): the loudest live message as a category band —
     // or the ambient floor when nothing is live — plus the right-aligned help
     // toggle and, when the log has more to show, its deploy control beside it.
-    let top = near_line(state);
+    let top = near_line_beside(state, ui.pop_in);
     // **An ambient band paints the quiet fill; a message band paints the full one**
     // (§11.4/§11.5, #420). The row's colour then separates the facility's standing mood
     // — a permanent tint the eye stops reading as news — from something that just
@@ -572,7 +577,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // One layout for both controls: where each goes, and the span of row that leaves
     // the message. The budget comes *from* the layout, so a row can never run under a
     // control that is up (§11.4).
-    let controls = near_line_controls(state, width, ui.message_log_open);
+    let controls = near_line_controls(state, width, ui.message_log_open, ui.pop_in);
     let mut near = status_row(
         width,
         controls.text_start,
@@ -644,7 +649,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // so the board stays whole while you are not reading the log. The log owns the
     // question of what it holds and whether it holds anything at all.
     if ui.message_log_open {
-        super::message_log::overlay_message_log(&mut screen, state);
+        super::message_log::overlay_message_log(&mut screen, state, ui.pop_in);
     }
     // The level-start splash (§11.4/§12.6/#497), laid over the finished frame: until it
     // is dismissed there is nothing underneath it the player may act on, so it goes over

@@ -1,9 +1,12 @@
 use super::*;
 use crate::ability::AbilityId;
 use crate::cell::Direction;
+use crate::guard::Guard;
 use crate::place::LevelConfig;
 use crate::state::{Event, Input, State};
-use crate::status::{message_for, near_line, POP_IN_PRIORITY};
+use crate::status::{
+    live_messages, message_for, near_line, near_line_beside, PopIn, POP_IN_PRIORITY,
+};
 use crate::test_support::open_room;
 use crate::{render_screen, ScreenUi};
 
@@ -39,7 +42,10 @@ fn took_the_intel() -> State {
         Cell::new(30, 15),
     );
     state.step(Input::Step(Direction::North));
-    assert_eq!(near_line(&state).priority, POP_IN_PRIORITY, "a loud action");
+    assert!(
+        near_line(&state).priority >= POP_IN_PRIORITY,
+        "a loud action"
+    );
     state
 }
 
@@ -51,15 +57,26 @@ fn showing_the_pop_in(state: &State) -> ScreenUi {
     }
 }
 
-/// Every cell the pop-in changed about the frame — the box and nothing else, found by
-/// difference rather than by hunting for glyphs, so a box drawn in the wrong place is
-/// still found.
+/// Every cell of the **board** the pop-in changed, found by difference rather than by
+/// hunting for glyphs, so a box drawn in the wrong place is still found.
+///
+/// The status rows are excluded because the box changes those too, and deliberately: it
+/// **takes** its message off the near line rather than copying it there
+/// (`the_box_takes_its_message_off_the_near_line` is where that half is asserted).
 fn box_cells(state: &State, ui: ScreenUi) -> Vec<(u32, u32)> {
     let plain = render_screen(state, ScreenUi::default());
     let shown = render_screen(state, ui);
-    (0..plain.height())
+    (hud::TOP_ROWS..plain.height())
         .flat_map(|y| (0..plain.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| plain.get(x, y) != shown.get(x, y))
+        .collect()
+}
+
+/// The near line's words on a frame drawn with `ui`.
+fn near_line_row(state: &State, ui: ScreenUi) -> String {
+    let grid = render_screen(state, ui);
+    (0..grid.width())
+        .map(|x| grid.get(x, super::hud::NEAR_ROW).glyph)
         .collect()
 }
 
@@ -76,7 +93,7 @@ fn no_placement_covers_the_player_or_a_neighbour() {
     for py in 0..LevelConfig::V1.height {
         for px in 0..LevelConfig::V1.width {
             let player = (px, board.top + py);
-            let (x, y) = placement(board, player, WIDEST, TALLEST, |_, _| false)
+            let (x, y) = placement(board, player, WIDEST, TALLEST, |_, _| (0, 0))
                 .unwrap_or_else(|| panic!("a v1 board always has room for a box at {player:?}"));
             assert!(
                 fits(board, x, y, WIDEST, TALLEST),
@@ -105,11 +122,13 @@ fn no_placement_covers_the_player_or_a_neighbour() {
 fn the_box_gives_way_to_the_danger_overlay() {
     let board = v1_board();
     let player = (20, board.top + 20);
-    let quiet = placement(board, player, WIDEST, TALLEST, |_, _| false).expect("a placement");
+    let quiet = placement(board, player, WIDEST, TALLEST, |_, _| (0, 0)).expect("a placement");
     assert!(quiet.1 < player.1, "a quiet board puts the box above");
 
-    let watched = placement(board, player, WIDEST, TALLEST, |_, y| y < player.1)
-        .expect("a placement below the cones");
+    let watched = placement(board, player, WIDEST, TALLEST, |_, y| {
+        (0, usize::from(y < player.1))
+    })
+    .expect("a placement below the cones");
     assert!(
         watched.1 > player.1,
         "the box left the watched half of the board: {watched:?}"
@@ -281,6 +300,29 @@ fn a_second_loud_message_replaces_the_first() {
 fn every_pop_in_message_fits_its_box() {
     let at = Cell::new(3, 3);
     let mut events = vec![
+        // The escalation rung the threshold sits on, every rung of the §7.3 ladder.
+        Event::AlertRaised {
+            rung: 1,
+            trigger: crate::AlertTrigger::Sighting,
+        },
+        Event::AlertRaised {
+            rung: 3,
+            trigger: crate::AlertTrigger::RepeatSightings,
+        },
+        Event::BodyCalledIn { at },
+        // …and the rungs above it, up to the endings.
+        Event::Ejected {
+            from: at,
+            to: at,
+            stunned: crate::phase_eject_stun(1),
+        },
+        Event::CaptureSaved { at },
+        Event::Captured {
+            guard: 0,
+            state: crate::GuardState::Chasing,
+            at,
+        },
+        Event::Entombed { at },
         Event::IntelTaken {
             remaining: 0,
             still_needed: 0,
@@ -316,22 +358,27 @@ fn every_pop_in_message_fits_its_box() {
             message.priority >= POP_IN_PRIORITY,
             "{event:?} is not on the rung this test measures"
         );
-        let lines = wrap(&message.text, TEXT_MAX);
+        // The block as the box draws it: the headline, and the §11.7 subordinate under
+        // it where the event carries one (#418) — both have to fit, together.
+        let mut lines = wrap(&message.text, TEXT_MAX);
+        let reason = PopIn::of(event).and_then(PopIn::reason);
+        if let Some(reason) = &reason {
+            lines.extend(wrap(&reason.text, TEXT_MAX));
+        }
         assert!(
             lines.len() <= MAX_LINES,
             "{:?} needs {} lines — widen the box or shorten the message",
             message.text,
             lines.len()
         );
+        let whole = match &reason {
+            Some(reason) => format!("{} {}", message.text, reason.text),
+            None => message.text.clone(),
+        };
         assert_eq!(
             lines.join(" "),
-            message
-                .text
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" "),
-            "the wrap dropped words from {:?}",
-            message.text
+            whole.split_whitespace().collect::<Vec<_>>().join(" "),
+            "the wrap dropped words from {whole:?}"
         );
         let width = lines
             .iter()
@@ -357,4 +404,182 @@ fn an_unbreakable_word_is_cut_rather_than_lost() {
         ["remateri", "alizatio", "n"],
         "a word past the line's width is cut across lines, never dropped"
     );
+}
+
+/// §11.7/#576: the box **takes** its message rather than copying it. While it is up the
+/// near line does not repeat it — the row falls through to the next live message, or to
+/// the ambient floor when the box has taken the only one there was — and the message is
+/// back on the row the moment the box goes.
+#[test]
+fn the_box_takes_its_message_off_the_near_line() {
+    let state = took_the_intel();
+    let spoken = near_line(&state).text;
+    assert!(
+        near_line_row(&state, ScreenUi::default()).contains(&spoken),
+        "with no box the row speaks it as it always did"
+    );
+
+    let ui = showing_the_pop_in(&state);
+    let row = near_line_row(&state, ui);
+    assert!(
+        !row.contains(&spoken),
+        "the box has it, so the row does not: {row:?}"
+    );
+    assert!(
+        near_line_beside(&state, ui.pop_in).is_ambient(),
+        "and with nothing else live the row falls to the ambient floor"
+    );
+
+    // Two facts on one turn: the box takes the loudest and hands the row the next. Take
+    // the intel under a guard's nose, and the turn says both *intel in hand* and *a guard
+    // has seen you*.
+    let mut both = State::new(
+        open_room(40, 20),
+        Cell::new(5, 6),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 3))],
+        // West of the player, so the console is not standing between the guard and them.
+        [Cell::new(4, 6)],
+        Cell::new(30, 15),
+    );
+    // One turn under the guard's eye for the §7.6 sighting window to close, then take the
+    // intel: the turn lands the objective *and* the rung the facility climbed for it.
+    both.step(Input::Wait);
+    both.step(Input::Step(Direction::West));
+    let messages = live_messages(&both);
+    assert!(messages.len() > 1, "the turn said more than one thing");
+    let beside = near_line_beside(&both, crate::pop_in(&both));
+    assert_ne!(
+        beside.text, messages[0].text,
+        "the row is not repeating what the box has"
+    );
+    assert_eq!(
+        beside.text, messages[1].text,
+        "it speaks the next fact down instead"
+    );
+}
+
+/// A run the **facility has just noticed**: a guard holds the player in its cone until
+/// the §7.6 sighting window closes, which climbs the §7.3 ladder a rung. The one event
+/// that carries a §11.7 subordinate (#418), and the reason the rung came down to 5.
+fn the_facility_climbed() -> State {
+    let mut state = State::new(
+        open_room(40, 20),
+        Cell::new(5, 6),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 3))],
+        [Cell::new(15, 15)],
+        Cell::new(30, 18),
+    );
+    for _ in 0..8 {
+        state.step(Input::Wait);
+        if crate::pop_in(&state).is_some_and(|popped| popped.reason().is_some()) {
+            return state;
+        }
+    }
+    panic!("a guard staring at the player climbs the ladder within a few turns");
+}
+
+/// §11.7/#576: **the facility climbing a rung pops in.** It is the fact that most
+/// changes what the next ten turns should be, and it was arriving on the row the player
+/// was not reading — which is why [`POP_IN_PRIORITY`] sits at the escalation rung rather
+/// than at objective feedback.
+///
+/// And it brings its **reason** with it (#418): the pair is inseparable, so with the
+/// headline off the near line the *why* cannot be left behind on its own.
+#[test]
+fn the_facility_climbing_pops_in_and_brings_its_reason() {
+    let state = the_facility_climbed();
+    let popped = crate::pop_in(&state).expect("the raise pops in");
+    let headline = popped.message();
+    assert!(
+        headline.text.starts_with("security condition"),
+        "{headline:?}"
+    );
+    let reason = popped.reason().expect("a closed sighting says why");
+
+    let ui = ScreenUi {
+        pop_in: Some(popped),
+        ..ScreenUi::default()
+    };
+    let shown = render_screen(&state, ui);
+    let board: String = box_cells(&state, ui)
+        .iter()
+        .map(|&(x, y)| shown.get(x, y).glyph)
+        .collect();
+    for word in [headline.text.as_str(), reason.text.as_str()] {
+        let joined: String = word.split_whitespace().collect::<Vec<_>>().join("");
+        let drawn: String = board.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            drawn.contains(&joined),
+            "the box draws {word:?}; it drew {board:?}"
+        );
+    }
+}
+
+/// §11.7/#576: what the box takes, it takes from the **deployed log** too — the same
+/// words in two places at once is one fact wearing two surfaces. The block goes whole,
+/// headline and reason together, and is back at its expected offset the moment the box
+/// goes. The history stacked under the rule is never touched.
+#[test]
+fn the_log_gives_up_the_block_the_box_is_holding() {
+    let state = the_facility_climbed();
+    let popped = crate::pop_in(&state).expect("the raise pops in");
+    let reason = popped.reason().expect("with a reason under it");
+
+    // Asserted on the log's own rows rather than on the painted frame: the box is drawn
+    // over the board too, so a frame-wide search would find the block's words in the box
+    // and call that the log listing them.
+    let listed = |popped| format!("{:?}", super::super::message_log::log_rows(&state, popped));
+    assert!(
+        listed(None).contains(&reason.text),
+        "with no box up, the log lists the reason under the near line's headline: {}",
+        listed(None)
+    );
+    assert!(
+        !listed(Some(popped)).contains(&reason.text),
+        "with the box holding the block, the log does not list it as well: {}",
+        listed(Some(popped))
+    );
+    // …and the near line is not repeating the headline either: the whole block is the
+    // box's for as long as the box is up.
+    assert!(
+        !near_line_row(
+            &state,
+            ScreenUi {
+                pop_in: Some(popped),
+                ..ScreenUi::default()
+            }
+        )
+        .contains(popped.message().text.as_str()),
+        "the row has given the headline up as well"
+    );
+}
+
+/// §11.5/§9.2/#576: the box does not sit on a **guard**. A guard's own cell is never in
+/// its own cone, so the danger count alone cannot see this — and covering it is the
+/// overlay failure in its worst form: the cone stays perfectly readable while the guard
+/// has vanished from the middle of it.
+///
+/// The staged frame is the one that found it. With a guard three cells north of the
+/// player and its cone fanning south, the quietest placement by danger cells alone is
+/// *above* — straight on top of the `g` that just raised the alert the box is announcing.
+#[test]
+fn the_box_does_not_sit_on_a_guard() {
+    let state = the_facility_climbed();
+    let ui = showing_the_pop_in(&state);
+    let plain = render_screen(&state, ScreenUi::default());
+    let guards: Vec<(u32, u32)> = (hud::TOP_ROWS..plain.height())
+        .flat_map(|y| (0..plain.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| plain.get(x, y).glyph == GUARD_GLYPH)
+        .collect();
+    assert!(!guards.is_empty(), "the fixture has a guard on screen");
+
+    let covered = box_cells(&state, ui);
+    for guard in guards {
+        assert!(
+            !covered.contains(&guard),
+            "the box covers the guard at {guard:?}"
+        );
+    }
 }

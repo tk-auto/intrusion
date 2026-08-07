@@ -22,13 +22,13 @@
 //!
 //! Burying the danger overlay is the failure mode every surface drawn over the board is
 //! bounded against. This one is small, transient, and — among the placements that are
-//! legal at all — takes the one covering the **fewest** `Danger` cells. It scores the
-//! overlay as *painted*, by reading the finished frame's backgrounds, so it can never
-//! drift from the set §11.5 actually drew.
+//! legal at all — takes the **cheapest** by [`cost`]: fewest guards covered, then fewest
+//! `Danger` cells. It scores the frame as *painted*, by reading the finished grid, so it
+//! can never drift from what §11.5 and §9.2 actually drew.
 
 use super::{
-    hud, Category, Cell, Fill, GlyphCell, Grid, Visibility, CORNER_BOTTOM_LEFT,
-    CORNER_BOTTOM_RIGHT, CORNER_TOP_LEFT, CORNER_TOP_RIGHT, RULE_GLYPH, SIDE_GLYPH,
+    hud, Category, Cell, Fill, GlyphCell, Grid, Surface, Visibility, CORNER_BOTTOM_LEFT,
+    CORNER_BOTTOM_RIGHT, CORNER_TOP_LEFT, CORNER_TOP_RIGHT, GUARD_GLYPH, RULE_GLYPH, SIDE_GLYPH,
 };
 use crate::status::PopIn;
 
@@ -40,7 +40,12 @@ use crate::status::PopIn;
 /// note beside the player rather than a panel across the room, wide enough that the
 /// rung's messages land in two lines or fewer — `every_pop_in_message_fits_its_box`
 /// walks them and fails the build's tests if one ever needs a third.
-const TEXT_MAX: usize = 24;
+///
+/// It is **26 rather than 24** because of one line: *"security condition 3 of 3"* is 25
+/// cells, and the escalation is both the most frequent box in a run and the one whose
+/// whole content is a number — wrapping *"3 of 3"* onto a second row to save two columns
+/// would be the worst two columns in the game to save.
+const TEXT_MAX: usize = 26;
 
 /// The most lines of words the box will draw (§11.7/#576) — the bound that keeps it
 /// small enough to be laid over the board at all.
@@ -72,7 +77,14 @@ const EDGE_ROWS: u32 = 2;
 /// would break the one rule this surface has.
 pub(super) fn overlay_pop_in(grid: &mut Grid, pop_in: PopIn, player: Cell) {
     let message = pop_in.message();
-    let lines = wrap(&message.text, TEXT_MAX);
+    // The headline and, under it, the §11.7 subordinate the event carries (#418) — the
+    // block whole, because the near line and the live log have handed the whole of it
+    // over for as long as the box is up ([`live_messages_beside`](crate::live_messages_beside)).
+    let mut lines = wrap(&message.text, TEXT_MAX);
+    if let Some(reason) = pop_in.reason() {
+        lines.extend(wrap(&reason.text, TEXT_MAX));
+        lines.truncate(MAX_LINES);
+    }
     let width = lines
         .iter()
         .map(|line| line.chars().count() as u32)
@@ -84,12 +96,38 @@ pub(super) fn overlay_pop_in(grid: &mut Grid, pop_in: PopIn, player: Cell) {
     // The player in **screen** coordinates: the board's own rows start below the two
     // status lines (§11.4), and every placement decision below is made on the screen.
     let player = (player.x, player.y + hud::TOP_ROWS);
-    let Some((x, y)) = placement(board, player, width, height, |x, y| {
-        grid.get(x, y).bg == Some(Category::Danger)
-    }) else {
+    let Some((x, y)) = placement(board, player, width, height, |x, y| cost(grid, x, y)) else {
         return;
     };
     draw_box(grid, x, y, width, height, &lines, message.category);
+}
+
+/// What one cell costs the box to cover (§11.5/#576) — the two things drawn over the
+/// board must not hide, in the order they matter.
+///
+/// **A threat first.** A guard the player can see (`g`) or sense (the §9.2 orange dot) is
+/// the sharpest claim on the board — *a guard is exactly here* — and a box sitting on one
+/// is the failure the overlay rule is about, in its worst form: the cone that guard casts
+/// stays perfectly readable while the guard itself has vanished from the middle of it.
+/// A guard's own cell is never in its cone, so the danger count alone cannot see this at
+/// all.
+///
+/// **Then the overlay.** Every §11.5 `Danger` cell the box would cover — the lose
+/// condition, painted, and the thing §11.7 bounds every over-the-board surface against.
+///
+/// Both are read off the **finished frame** rather than re-derived from state, so this
+/// can never disagree with what was actually drawn. Only board cells count: chrome is the
+/// frame's own words, and a `g` in a sentence is a letter, not a guard (#460).
+fn cost(grid: &Grid, x: u32, y: u32) -> (usize, usize) {
+    let cell = grid.get(x, y);
+    if cell.surface != Surface::Board {
+        return (0, 0);
+    }
+    let threat = cell.glyph == GUARD_GLYPH || cell.bg == Some(Category::Sensed);
+    (
+        usize::from(threat),
+        usize::from(cell.bg == Some(Category::Danger)),
+    )
 }
 
 /// The board's extent in **screen** coordinates: the rows between the two status lines
@@ -121,17 +159,17 @@ impl Board {
 /// back over the ring on a cramped board, so legality is checked *after* it: the ring
 /// rule is absolute, the position is not.
 ///
-/// Among the legal ones the winner is the one covering the fewest `Danger` cells
-/// (§11.5) — `min_by_key` keeps the **first** minimum, so an all-quiet board resolves in
-/// the fixed order above → below → right → left rather than arbitrarily. Above leads
-/// because the near line saying the same thing is up there: with the box between the
-/// player and the row, both are one glance.
+/// Among the legal ones the winner is the **cheapest** by [`cost`] — fewest threats
+/// covered, then fewest §11.5 danger cells. `min_by_key` keeps the **first** minimum, so
+/// an all-quiet board resolves in the fixed order above → below → right → left rather
+/// than arbitrarily. Above leads because the near line saying the same thing is up there:
+/// with the box between the player and the row, both are one glance.
 fn placement(
     board: Board,
     player: (u32, u32),
     width: u32,
     height: u32,
-    danger: impl Fn(u32, u32) -> bool,
+    cost: impl Fn(u32, u32) -> (usize, usize),
 ) -> Option<(u32, u32)> {
     let (px, py) = (player.0 as i64, player.1 as i64);
     let (w, h) = (width as i64, height as i64);
@@ -160,8 +198,10 @@ fn placement(
         .min_by_key(|&(x, y)| {
             (y..y + height)
                 .flat_map(|cy| (x..x + width).map(move |cx| (cx, cy)))
-                .filter(|&(cx, cy)| danger(cx, cy))
-                .count()
+                .map(|(cx, cy)| cost(cx, cy))
+                .fold((0, 0), |(threats, danger), (t, d)| {
+                    (threats + t, danger + d)
+                })
         })
 }
 

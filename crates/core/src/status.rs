@@ -17,11 +17,12 @@
 //! under a separator rule (#300). The clear-on-action rule is the near line's, not
 //! the panel's.
 //!
-//! The loudest rung leaves the row altogether as well as filling it: a message at
-//! [`POP_IN_PRIORITY`] also raises a [`PopIn`] — the box drawn over the board beside the
+//! The loud rungs leave the row altogether rather than filling it: a message at
+//! [`POP_IN_PRIORITY`] raises a [`PopIn`] — the box drawn over the board beside the
 //! player for a couple of seconds (§11.7/#576) — which is *derived from the ladder*
-//! rather than flagged at the raise site, and which outlives the near line's copy
-//! rather than clearing with it.
+//! rather than flagged at the raise site, which outlives the near line's clear-on-action
+//! rule, and which **takes** its message rather than copying it: while the box is up,
+//! the near line and the log speak what is left ([`live_messages_beside`]).
 //!
 //! The **usable line** below it is deliberately *not* here: it is no message at
 //! all but a pure derived view of adjacency
@@ -38,7 +39,7 @@ mod history;
 pub use history::{MessageHistory, HISTORY_ACTIONS};
 
 mod pop_in;
-pub use pop_in::{pop_in, PopIn, POP_IN_PRIORITY};
+pub use pop_in::{live_messages_beside, near_line_beside, pop_in, PopIn, POP_IN_PRIORITY};
 
 /// One §11.7 message: what the near line says, the §11.2 category that colours
 /// its band, and its rung on the priority ladder. (A source cell joins when

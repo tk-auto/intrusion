@@ -3193,23 +3193,47 @@ system — it is derived from adjacency every frame and carries no state.
   it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
-- **The top rung pops in** (#576). Some events are too important to be lost on the
+- **The loud rungs pop in** (#576). Some events are too important to be lost on the
   near line: the player's eye is on the board — on the guard two rooms over and on the
   cell they are about to step into — not on the top row of the screen, and a one-row
   band at the far edge of their attention is exactly what gets missed. The near line is
   the right home for *what is around you*; it is the wrong home for *the thing you came
-  here for just happened*. So the loudest rung gets a **second surface**: a small
-  **pop-in box** drawn over the board next to what it is about, bordered in the
-  message's §11.2 category colour, which appears when the event fires, sits for about
-  **2 s [START]**, and goes. Not a strobe and not a pulse — it appears, it is read, it
-  disappears, with no animation in between. The near line keeps its copy unchanged; the
-  box is additive, and it is transient precisely so it can afford to be over the map.
+  here for just happened* or *the building just got worse*. So the loud rungs get a
+  **second surface**: a small **pop-in box** drawn over the board next to what it is
+  about, bordered in the message's §11.2 category colour, which appears when the event
+  fires, sits for about **2 s [START]**, and goes. Not a strobe and not a pulse — it
+  appears, it is read, it disappears, with no animation in between. It is transient
+  precisely so it can afford to be over the map.
   - **Which messages qualify is derived from the ladder, never hand-flagged.** The gate
-    is a threshold on the priority every message already carries — the objective-
-    feedback rung, **20 [START]**. Nothing gets a "loud" bit set at the raise site, so a
-    future objective event inherits the pop-in for free and cannot be forgotten, and the
+    is a threshold on the priority every message already carries — the facility-
+    escalation rung, **5 [START]**. Nothing gets a "loud" bit set at the raise site, so a
+    future loud event inherits the pop-in for free and cannot be forgotten, and the
     ladder stays the single place importance is decided. That it derives from the ladder
     is **[SETTLED]**; the threshold is not.
+    - **Where the line falls, and why there.** Below it a message is one guard's
+      business — a look that found you, a radio gone quiet, a body found — and the
+      *board already draws it*: the cone, the §9 sense mark, the watcher line. Those are
+      facts the player reads by looking where they are already looking. At the rung and
+      above, the message is the **facility's** or the **run's** — the §7.3 ladder
+      climbing, a body reported, the phase safety firing, a capture evaded, an ending,
+      an objective — and the board has no way to say any of it. The threshold started at
+      20, objective feedback alone, and came down the first time the ladder was watched
+      climbing in play: *the security condition just changed* is the fact that most
+      changes what the next ten turns should be, and it was arriving on the row the
+      player was not reading.
+  - **The box takes its message; it does not copy it.** While a box is up, the message
+    in it comes **off the near line and out of the live block of the deployed log**. The
+    same words in two places an inch apart is one fact wearing two surfaces, and the row
+    is better spent on the *next* thing the turn had to say — the box carrying *intel in
+    hand* while the row says *a guard has seen you* is two facts on two surfaces. With
+    nothing else live the row falls to the ambient floor, as it always does. Nothing is
+    lost by it: the moment the box goes, the message is back in its expected place on
+    both surfaces, and the history the log stacks under its rule is never touched.
+    - **The block moves whole.** An event's subordinate line travels with its headline
+      into the box, because §11.7 makes the pair inseparable — a reason left behind on
+      the log while its headline is in the box is exactly the separation the rule
+      forbids. The near line still never shows a subordinate: it is one row and speaks
+      the headline alone. The box is not that row.
   - **It rides out its life.** A message dies on the player's next action; the box does
     **not**. A player who acts inside two seconds is the very case where the near line
     lost the message, so a box a quick key-press erases fails at its only job. It
@@ -3219,6 +3243,8 @@ system — it is derived from adjacency every frame and carries no state.
     clock. One box at a time, always the newest fact; a backlog of stale boxes is the
     opposite of the point. It is not a second message log either — the deployed log
     already answers *what just happened*, and this surface answers *do not miss this*.
+    The message the replaced box was holding returns to the near line and the log as it
+    would have if the box had simply expired.
   - **It is anchored, not centred**, because the complaint being fixed is that the eye
     is on the board: a panel under the top rows would be missed for the same reason the
     near line is. Every message on the rung today is something the player did to a thing
@@ -3227,9 +3253,11 @@ system — it is derived from adjacency every frame and carries no state.
     ring the console, crate or exit being reported is standing in, which is what makes
     "never covers what it's talking about" true for the whole rung without knowing which
     message is up. It is clamped to the board, never clipped; and among the legal
-    placements it takes the one covering the **fewest §11.5 danger cells**, because
-    burying the lose condition is the failure mode every surface drawn over the map is
-    bounded against.
+    placements it takes the **cheapest**: fewest *guards* covered, then fewest **§11.5
+    danger cells**. Burying the lose condition is the failure mode every surface drawn
+    over the map is bounded against, and a guard is its worst form — a guard's own cell is
+    never inside its own cone, so counting cone cells alone will happily park the box on
+    the `g` and leave the cone around it perfectly readable.
   - **The clock is the shell's, never the core's** (§12.1). The rules stay pure and
     turn-based: the core says what to draw and is told when the box has expired, so no
     wall clock reaches the rules and a replay of the same seed and inputs is identical
