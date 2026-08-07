@@ -41,7 +41,11 @@
 use super::*;
 
 /// What a press has **already resolved** by the time the deck commits (§8.4:
-/// targeting is settled up front, not discovered on refusal).
+/// the aim is settled by the press itself, not discovered on refusal).
+///
+/// This *is* §8.4's aiming, and there is no other (#556): every arm is taken from
+/// where the player stands and which way they face — never from a scan for the
+/// nearest candidate, which is the failure appendix 1 records.
 ///
 /// The turn loop hands this straight to the effect that consumes it, so the cell,
 /// the door set and the blast the world change uses are the very ones the

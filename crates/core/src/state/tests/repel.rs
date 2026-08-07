@@ -288,7 +288,7 @@ fn a_route_across_the_field_goes_the_long_way_round() {
 /// the only clock in both. What the cordon buys is that it *reads* as the hunt still
 /// happening — a chase that stops dead two rooms away looks like the game giving up on
 /// you, where a guard standing at the edge of the wall looking in is the ability's own
-/// price made visible. It is also exactly where the player has to come out (appendix 60).
+/// price made visible. It is also exactly where the player has to come out (appendix 62).
 #[test]
 fn a_guard_with_no_route_closes_to_the_boundary_and_waits() {
     let fired_at = Cell::new(15, 15);

@@ -1,6 +1,6 @@
 # Dart
 
-**Salvaged tech (§8.3) — the experiment (#239).** 1 turn to press, instant, **no
+**Salvaged tech (§8.3) — on trial (#239).** 1 turn to press, instant, **no
 cooldown**, **a per-level use budget of 1**. *"Fires the way you face. The first guard on
 the line drops if it has not seen you."* The dart travels up to `DART_RANGE` (**8**
 **[START]**) cells along the cardinal the player faces, stops at the first solid or the

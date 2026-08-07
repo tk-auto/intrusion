@@ -29,7 +29,7 @@ cargo run --release -p intrusion-sim -- --inspect LINK
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `balanced` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
-| `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
+| `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay on stdout — the `seed` field a level-seed token (#245) — instead of the metrics batch; a play link goes to stderr with the summary | off |
 | `--inspect LINK` | read a replay someone pasted and narrate it turn by turn (below) — a mode of its own, taking no other flag | — |
 
 And the **run config** (below): what every run of the batch boots from.
@@ -212,7 +212,15 @@ replay reproduces rather than approximates, and the default one reproduces the s
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
 {"seed":"nfdxttsytrdorexcqn","inputs":"NNE+rN..SS-r…"}
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
+play: https://tk-auto.github.io/intrusion/#seed=nfdxttsytrdorexcqn
 ```
+
+The **play link** on stderr is for a person, not a pipe (§13.1/#572): it opens the
+facility this run was measured on in the published build, so a flagged seed is one
+click from being played rather than a number to be typed in somewhere. Nowhere in the
+game takes a typed token any more — sharing is the URL — which is why the sim prints
+one wherever it hands a run to a human. (For the *run* rather than the level, build a
+`…#seed=<token>&inputs=<script>` link out of the stdout pair.)
 
 The only ability in that stream is `r` (Run), because the default config boots the
 **bare, innate-only** loadout (§8.3) — a level must be winnable with no salvaged
@@ -245,6 +253,7 @@ one — the help panel's `replay [r]` control copies the run a player just had.
 ```
 $ cargo run --release -p intrusion-sim -- --inspect '…#seed=hwqcwzlhzanrdsdfzd&inputs=NNNNNEEEEEESS'
 level  hwqcwzlhzanrdsdfzd  (seed 18900)
+play   https://tk-auto.github.io/intrusion/#seed=hwqcwzlhzanrdsdfzd
 rules  Intel to exit: all of it
 tech   Run, Camouflage, Decoy, Pierce Wall
 start  (31,12) facing north, 13 input(s) to replay
@@ -438,7 +447,7 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"profile":"balanced","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3,"stow":1,"silence_radio":1},"alert_peak":2,"alert_escalations":[{"turn":9,"rung":1,"trigger":"sighting"},{"turn":31,"rung":2,"trigger":"repeat-sightings"}],"reinforcements":1}
+{"seed":17,"profile":"balanced","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3,"stow":1,"silence_radio":1},"alert_peak":2,"alert_escalations":[{"turn":9,"rung":1,"trigger":"sighting"},{"turn":31,"rung":2,"trigger":"repeat-sightings"}],"reinforcements":1,"par":155,"stars":1,"score":{"speed":false,"stealth":false,"haul":true}}
 ```
 
 | Field | Meaning |
@@ -453,12 +462,15 @@ it is a deliberate, visible break.
 | `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`, `pierce_wall`, `lockdown`, `crouch`, `stow`, `silence_radio`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb), and neither is the body **release** — letting go is free (§4.4), so it is on the same side of the line, while `stow` beside it spends the turn and locks the cupboard (§10.3). The counts sum to `≤ turns` |
 | `alert_peak` | the highest §7.3 **alert rung** the facility reached, `0`..=`3` (#311/#376). A `0` is a real reading — a raid nobody noticed — where this field's old `null` meant "nothing measures this" |
 | `reinforcements` | guards the ladder walked into the facility this run (§7.3/#374) — rung 2 sends one, rung 3 two more. Counted rather than derived from `alert_peak`, because an arrival is **refused** when the facility offers no cell out of the player's sight: a run can reach rung 3 and face fewer than three newcomers, and the difference is a fact about the level rather than about the ladder |
+| `par` | the **facility's par turn count** (§14 v2/#563) — derived from the building's own span, consoles and crates, and the number `stars`' speed axis is measured against. Carried on the row so a par that is plainly wrong for a recipe is visible in the data rather than only in the star that fell out of it |
+| `stars` | the run's **star total**, `0`..=`3`, or `null` for a run that did not get out (a capture, an entombment, a run the cap stopped mid-raid). `null` and `0` are different findings: one raid never finished, the other finished badly |
+| `score` | the three axes it is the count of: `{"speed":bool,"stealth":bool,"haul":bool}`, or `null` on the same terms as `stars`. Speed is `turns <= par`, stealth is a final alert rung of `0`, haul is every console **and** every crate taken. **Reported, never optimised for** — the bot has cues, not an objective function, and handing it *maximise stars* would make the histogram measure the scorer rather than the game (§13.3) |
 | `alert_escalations` | the **path** up the ladder: one object per escalation, oldest first, each `{"turn":T,"rung":R,"trigger":"…"}`. At most three (the ladder is monotone and three rungs tall), and `[]` for a facility that stayed quiet. The peak alone cannot tell a run that reached rung 3 by leaving bodies from one that got there by being seen over and over; this can. Trigger keys, in ladder order: `sighting`, `missed-ping`, `repeat-sightings`, `console-tampered`, `body-found`, `second-post-silent` |
 
 ### Summary row
 
 ```json
-{"summary":{"profile":"balanced","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18,"stow":9,"silence_radio":2},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017,"stow":0.0009,"silence_radio":0.0002},"diversity":0.1837,"alert_peak_mean":1.8700,"alert_rungs":{"0":4,"1":31,"2":22,"3":43},"alert_triggers":{"sighting":96,"missed-ping":12,"repeat-sightings":22,"console-tampered":9,"body-found":12,"second-post-silent":3},"reinforcements":58}}
+{"summary":{"profile":"balanced","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18,"stow":9,"silence_radio":2},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017,"stow":0.0009,"silence_radio":0.0002},"diversity":0.1837,"alert_peak_mean":1.8700,"alert_rungs":{"0":4,"1":31,"2":22,"3":43},"alert_triggers":{"sighting":96,"missed-ping":12,"repeat-sightings":22,"console-tampered":9,"body-found":12,"second-post-silent":3},"reinforcements":58,"stars":{"0":0,"1":1,"2":2,"3":0},"star_axes":{"speed":3,"stealth":0,"haul":3}}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
@@ -505,6 +517,23 @@ row:
   same keys as the run row's `trigger`. Which *path* a batch takes up the ladder is
   the interesting half — a facility driven to rung 3 by bodies is a different game
   from one driven there by sightings.
+
+And the three stars (§15 Q4/#563), over the **winning** runs only — a capture has no
+score, so folding losses in as zero would report the win rate again under another name:
+
+- `stars` — how the wins' totals were **distributed**, one key per total `0`..=`3`.
+  The distribution rather than a mean, for the reason `alert_rungs` is one: *"most wins
+  are one-star"* and *"wins split between none and three"* are opposite balance findings
+  with the same average.
+- `star_axes` — how often each axis was earned across those wins. This is the column
+  that settles the design's own stated risk: if `stealth` reads near zero over a batch,
+  the condition-0 threshold is *impossible* rather than aspirational, and it moves to
+  ≤ 1 before the design is blamed.
+
+> **The bot does not play for stars.** It has cues, not an objective function
+> (`docs/bot-behaviour.md`), and nothing in #563 changed that. Reporting the score is a
+> balance readout; optimising it would make the histogram measure the scorer rather than
+> the game (§13.3), which is the one thing the sim exists to avoid.
 
 > **Reading a zero in `alert_triggers` (§13.4/#260).** The count is escalations a
 > trigger **caused**, which is what the core reports: a trigger firing at or below the

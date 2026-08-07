@@ -36,28 +36,6 @@ impl State {
         self.facing
     }
 
-    /// Open a targeting session (§8.4) for `mode`, anchored on the player's cell
-    /// and facing (§5). The shell drives the returned [`Targeting`] — steering the
-    /// cursor with cardinals and confirming — while core owns validity: a `Tile`
-    /// cursor is bounded to the §6.1 range box on this facility, and cancelling is
-    /// just dropping the session (free, no turn — §4.4). Nothing here auto-targets;
-    /// that absence is the whole point of building targeting up front (§8.4).
-    pub fn begin_targeting(&self, mode: TargetingMode) -> Targeting {
-        Targeting::begin(mode, self.player, self.facing)
-    }
-
-    /// Open a targeting session for `ability` by its declared [`TargetingMode`]
-    /// (§8.4) — the seam an ability key or a bar tap resolves an ability's
-    /// target through, so no ability ever falls back to auto-targeting (the exact
-    /// §8.4/§2.3 regression this system exists to prevent).
-    ///
-    /// `None` for a **passive** (#264): it is never activated, so there is nothing
-    /// to aim and no session to open — the caller's key press is the free §4.4
-    /// no-op it already is for an ability on cooldown.
-    pub fn begin_ability_targeting(&self, ability: AbilityId) -> Option<Targeting> {
-        Some(self.begin_targeting(ability.def().economy()?.targeting()))
-    }
-
     /// The player's field of view (§6): the ~180° forward half-disc, or the full
     /// 360° on a turn spent waiting — the only way to see behind you (§8.3) —
     /// including the auto-peek around adjacent corners (#121,
@@ -845,6 +823,30 @@ impl State {
         self.turn
     }
 
+    /// **This facility's par turn count** (§14 v2/#563): the allowance a raid has to get
+    /// out inside if it wants the speed star ([`Score`](crate::Score)).
+    ///
+    /// Derived from the building's **own contents** — the span of its floor, the consoles
+    /// standing in it, the crates hidden in it — and not from the recipe that asked for
+    /// them ([`LevelConfig`](crate::LevelConfig)). A par is a fact about the facility the
+    /// player is standing in, so a *Vault* is held to a longer number than an *Outpost*
+    /// (§14 v3) for free, and a hand-built state with no recipe behind it still has one.
+    ///
+    /// Fixed for the run: nothing here changes with play, since taking a console does not
+    /// remove it from the level. That is what lets [`run_stats`](Self::run_stats) carry it
+    /// out to a screen that draws after the raid is over.
+    ///
+    /// Reported on the help panel's **Level info** tab (§12.6) and nowhere on the board:
+    /// a par counting down in the corner would turn a stealth game into a speedrun, and
+    /// §1/§7.6 are built to reward the patience that would cost.
+    pub fn par(&self) -> u32 {
+        par_for(
+            self.layout.facility().width() + self.layout.facility().height(),
+            self.objectives.len(),
+            self.caches.len(),
+        )
+    }
+
     /// The facility alert **rung**, 0..=3 (§7.3): how far up the ladder this raid has
     /// pushed the facility — 1 from a confirmed sighting or a post going quiet, 2 from
     /// three sightings or a console tampered with while already seen, 3 from a found
@@ -889,6 +891,14 @@ impl State {
             turns: self.turn,
             intel: self.intel_in_hand(),
             intel_total: self.objectives.len(),
+            // The crates as **counts** (#563), beside `salvaged`'s set: the thoroughness
+            // star asks how many boxes were opened, which a set of abilities cannot say
+            // once two of them hold the same tech.
+            caches: self.caches.iter().filter(|c| c.taken).count(),
+            caches_total: self.caches.len(),
+            // The facility's allowance, read while the facility is still here to read it
+            // from (§14 v2).
+            par: self.par(),
             takedowns: self.takedowns,
             detections: self.detections,
             // The ladder never decays (§7.3), so the rung standing now is the run's

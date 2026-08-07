@@ -62,6 +62,7 @@ use crate::campaign::{
 use crate::category::Category;
 use crate::modifiers::ModifierDirection;
 use crate::place::LevelConfig;
+use crate::score::{Axis, Score, STAR_EARNED, STAR_MISSED};
 
 pub mod brief;
 #[cfg(test)]
@@ -145,8 +146,20 @@ const UNKNOWN_GLYPH: char = '▫';
 /// exactly once, at the moment the player was reading it.
 const HEADING_ROW: u32 = 0;
 const ALERT_ROW: u32 = 1;
-const WALLET_ROW: u32 = 2;
-const MAP_TOP: u32 = 3;
+/// The **score row** (#563): what the raid the run just walked out of was worth, three
+/// stars, one per axis.
+///
+/// It sits directly under the alert line because the two say the same kind of thing — *the
+/// raid behind you*, in the past tense — and a fixed row for the same reason the wallet's
+/// is fixed: it is reserved on every frame, drawn only once there is a raid to report, so
+/// the picture below never jumps when the first score arrives.
+///
+/// **This is the campaign's only score surface**, because §14 v3 settles that a completed
+/// facility does not raise the end screen: the map comes up instead, so if the stars are
+/// not here they are nowhere.
+const SCORE_ROW: u32 = 2;
+const WALLET_ROW: u32 = 3;
+const MAP_TOP: u32 = 4;
 
 /// Rows the list of rows-you-may-take needs beneath the map: one per offer at
 /// [`ENTRY_SPACING`], for the widest offer a choice point can make — three open edges
@@ -191,6 +204,13 @@ const fn row_width(label: usize, blurb: usize) -> usize {
 /// What stands between a facility's name and what it is worth. Its own constant because
 /// [`row_width`] has to measure exactly what [`row_text`] prints.
 const SEPARATOR: &str = " — ";
+
+/// What stands between the score row's three axes (#563) — the **middot**, not the dash.
+///
+/// The dash above joins a thing to what it is worth (*Depot — an ordinary facility*), and
+/// the three axes are not that: they are peers, none of them a gloss on another, and the
+/// footers already teach this mark as *and another one of the same kind*.
+const SCORE_SEPARATOR: &str = " · ";
 
 /// How the alert line names a run that nobody ever noticed (§7.3 condition 0/#210).
 ///
@@ -746,6 +766,79 @@ fn wallet_text(run: &Campaign, ui: MapUi) -> (String, Category) {
     (line, Category::Owned)
 }
 
+/// **The last raid's three stars**, drawn segment by segment so each axis wears its own
+/// §11.2 colour: **Owned** — the player's own channel, the blue the `@` on this very
+/// picture is drawn in — for a star earned, and **Ground** for one missed, with the
+/// separators in Ground so the row reads as three findings rather than one sentence.
+///
+/// **Owned, not Interest**, for the reason the wallet line one row down is Owned: the
+/// stars are a verdict on *you*, already earned, in the same sense the intel in the purse
+/// is already yours. Interest is what is worth reaching for and it is spoken for twice on
+/// this screen — the archive and the marked row — so a third claim would blunt both. It
+/// also gives the score one colour identity across every surface that draws it (the end
+/// screen's block is Owned for the same reason).
+///
+/// Each axis is **named** beside its mark. A bare `★★☆` on the map would tell the player
+/// how many they got and leave them to work out which — and knowing which one you missed
+/// is the whole reason the score is three marks instead of a tier (#563).
+///
+/// `★` is also this screen's archive glyph. The two do not read as one thing because they
+/// are different kinds of thing in different places — a node standing in the picture, and
+/// a mark on a named axis in a labelled row — and `docs/render-reference.md` records the
+/// second reading rather than leaving it to be discovered.
+fn draw_score(grid: &mut Grid, y: u32, score: Score) {
+    let cell = |axis: Axis| {
+        format!(
+            "{} {}",
+            axis.label(),
+            if score.earned(axis) {
+                STAR_EARNED
+            } else {
+                STAR_MISSED
+            },
+        )
+    };
+    let len: usize = Axis::ALL
+        .iter()
+        .map(|&a| cell(a).chars().count())
+        .sum::<usize>()
+        + SCORE_SEPARATOR.chars().count() * (Axis::ALL.len() - 1);
+    let mut x = centre(grid.width, len as u32);
+    for (i, &axis) in Axis::ALL.iter().enumerate() {
+        if i > 0 {
+            draw(grid, x, y, SCORE_SEPARATOR, Category::Ground);
+            x += SCORE_SEPARATOR.chars().count() as u32;
+        }
+        let text = cell(axis);
+        let category = if score.earned(axis) {
+            Category::Owned
+        } else {
+            Category::Ground
+        };
+        draw(grid, x, y, &text, category);
+        x += text.chars().count() as u32;
+    }
+}
+
+/// The widest the score row can be — every axis at its longest label, marked, with a
+/// separator between each. A compile-time bound like the list rows' own, so a re-worded
+/// axis fails the build here rather than clipping on a player's screen.
+const SCORE_LINE_MAX: usize = {
+    // One cell per mark: `★`/`☆` are one character each, and the row is measured in
+    // characters because that is what the grid is (§11.1).
+    let mut widest = 0;
+    let mut i = 0;
+    while i < Axis::ALL.len() {
+        widest += Axis::ALL[i].label().len() + " x".len();
+        i += 1;
+    }
+    widest + SCORE_SEPARATOR.len() * (Axis::ALL.len() - 1)
+};
+const _: () = assert!(
+    SCORE_LINE_MAX <= LevelConfig::V1.width as usize,
+    "the score row overruns the v1 board — shorten an axis label",
+);
+
 /// What the line says the noise did to the facility it names.
 fn suffix(direction: ModifierDirection) -> &'static str {
     match direction {
@@ -946,6 +1039,12 @@ pub(super) fn picture(
     if let Some((line, category)) = alert_text(run, &ahead) {
         let len = line.chars().count() as u32;
         draw(&mut grid, centre(width, len), ALERT_ROW, &line, category);
+    }
+
+    // What the last raid was **worth** (#563) — the three stars, under the noise it made,
+    // and drawn only once there is a raid behind the run to score.
+    if let Some(score) = run.last_score() {
+        draw_score(&mut grid, SCORE_ROW, score);
     }
 
     // What the run has to spend (§2.2/#211) — always, so the hub's balance is never a

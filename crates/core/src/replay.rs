@@ -176,6 +176,19 @@ pub fn replay_fragment(token: &str, script: &str) -> String {
     format!("seed={token}&inputs={script}")
 }
 
+/// The fragment a **level** travels as (§13.1/#572): `seed=<token>`, the shorter half
+/// of [`replay_fragment`] and the whole of what a shared link needs to name a run
+/// nobody has played yet.
+///
+/// Spelled here rather than at its three sites — the address bar the shell reflects
+/// into, the Level info tab's `copy [c]` link, and the sim's play link — because a
+/// level link and a replay link that disagreed about the field name would be two
+/// carriers pretending to be one (§12.4). The same fragment-safety argument holds: a
+/// token is eighteen lowercase letters, so nothing here needs percent-encoding.
+pub fn level_fragment(token: &str) -> String {
+    format!("seed={token}")
+}
+
 /// Read one `name=<value>` field out of a `?a=b&…` / `#a=b&…` fragment, tolerating a
 /// leading `?`/`#` and any other fields around it. The single splitter every reader
 /// of the pair shares, so no consumer re-derives what a field looks like.
@@ -370,6 +383,30 @@ mod tests {
             parse_replay_link(&fragment),
             Ok((level, inputs)),
             "the pair survives its own spelling",
+        );
+    }
+
+    /// A **level** link round-trips through the same reader (§13.1/#572): what
+    /// `copy [c]` writes is what a paste reads back, and it names the level with no
+    /// run attached — a replay of length zero, which is exactly what being handed a
+    /// facility nobody has played yet means.
+    ///
+    /// The two fragments are asserted to agree on the field, because the whole reason
+    /// the shorter one is spelled beside the longer is that they must.
+    #[test]
+    fn a_level_link_round_trips_and_names_no_run() {
+        let level = LevelSeed::quick_play(8371);
+        let token = level.encode().expect("a config a run can hold");
+        let fragment = level_fragment(&token);
+        assert_eq!(fragment, format!("seed={token}"));
+        assert_eq!(
+            parse_replay_link(&fragment),
+            Ok((level, Vec::new())),
+            "a level link is a replay of length zero",
+        );
+        assert!(
+            replay_fragment(&token, "N").starts_with(&fragment),
+            "the level fragment is the replay fragment's own first field",
         );
     }
 

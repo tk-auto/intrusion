@@ -12,7 +12,7 @@ nothing** — a guard that can see through it sees you, steps §7.3's ladder and
 (§7.7) — so what gathers outside is a ring of guards one step from the disc, standing
 where you have to come out. Every cell is released when the window ends. A firing with
 nobody in reach is never refused and never greyed, and costs its full turn and lockout.
-Appendix 60.
+Appendix 62.
 
 ## What the cue says
 
@@ -58,7 +58,7 @@ never against another's (§13.4).
 
 ### The two changes, told apart
 
-The guard rules changed after the first playtest (appendix 60): a cut-off guard now
+The guard rules changed after the first playtest (appendix 62): a cut-off guard now
 **closes on the boundary** instead of holding where it stood, and a guard caught **inside
 walks out** instead of milling about. The cue's third gate went with them. Those pull in
 opposite directions, so they are worth separating — measured with the *original* cue, which
@@ -113,7 +113,7 @@ measured (§13.4):
   Today the win rate climbs and detections *fall*, so this threshold is not tripped — but
   the win-rate half of it is already the largest on the shelf, and the ability has no
   "when would a good player not press this" left beyond the turn and the lockout since
-  guards started leaving the disc (appendix 60 §3). **The named repair, if it trips:**
+  guards started leaving the disc (appendix 62 §3). **The named repair, if it trips:**
   exempt a guard that currently *has* the player from the exit rule, so the field clears
   patrols out of itself but never rescues you from a hunt that has already arrived. One
   condition in `State::repel_exit_step`, and it restores the ability's old failure case
@@ -135,4 +135,4 @@ measured (§13.4):
   stood, and a guard caught inside walks out by the shortest way; the cue's stale gate came
   off with them. Win rate now up in **all eight** blocks (+0.05 … +0.17) on twice the
   presses, detections down in all four, and the ability has lost its stated failure case —
-  see the kill-thresholds and appendix 60 §3 for the repair that would give it back.
+  see the kill-thresholds and appendix 62 §3 for the repair that would give it back.

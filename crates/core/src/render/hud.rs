@@ -33,7 +33,7 @@ use super::*;
 use crate::ability::{max_bar_name, AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
 use crate::place::LevelConfig;
-use crate::status::near_line;
+use crate::status::{near_line_beside, PopIn};
 
 /// The rows the screen adds **above** the map (§11.4): the near line and the
 /// usable line — read-only status, kept clear of the thumb (#267). A shell
@@ -239,6 +239,26 @@ pub struct ScreenUi {
     /// draws neither verdict and a finished one always draws its own. That is the one
     /// thing about this screen a shell cannot get wrong.
     pub end: EndUi,
+    /// The **loud-message pop-in** currently up (§11.7/#576), or `None` — the box drawn
+    /// over the board beside the player when a message reaches the ladder's top rung
+    /// ([`POP_IN_PRIORITY`](crate::POP_IN_PRIORITY)).
+    ///
+    /// It is view state like everything else here — the message is already on the near
+    /// line and in the log, and the box changes no world and costs no turn (§4.4) — but
+    /// it is the one field with a **clock** behind it, and the clock is deliberately the
+    /// shell's: `crates/core` is pure and turn-based (§12.1), and two seconds is not a
+    /// number the rules may know. The shell raises it from
+    /// [`pop_in`](crate::pop_in) on the turn it fires, arms a timer, and puts it back to
+    /// `None` when that timer says so.
+    ///
+    /// Being the shell's is also what gives the surface its two rules for free. It
+    /// **rides out its life**: the near line's copy clears on the player's next action
+    /// (§11.7) and this does not, because nothing about a step touches it — which is the
+    /// case the box exists for, a player who acts inside two seconds. And it **never
+    /// queues**: there is one field, so a second loud message overwrites the first and
+    /// re-arms the one timer, exactly as the autosave's debounce replaces rather than
+    /// stacks.
+    pub pop_in: Option<PopIn>,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable`](super::usable)), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -417,8 +437,13 @@ impl NearLineControls {
 /// `log_open` picks the deploy glyph, never the width — the control is
 /// [`DEPLOY_LEN`](super::message_log::DEPLOY_LEN) cells whatever it says — so a
 /// hit-test may ask with either and land on the button the frame drew.
-pub(super) fn near_line_controls(state: &State, width: u32, log_open: bool) -> NearLineControls {
-    let label = super::message_log::deploy_label(state, log_open);
+pub(super) fn near_line_controls(
+    state: &State,
+    width: u32,
+    log_open: bool,
+    popped: Option<PopIn>,
+) -> NearLineControls {
+    let label = super::message_log::deploy_label(state, log_open, popped);
     debug_assert!(
         label
             .as_ref()
@@ -518,6 +543,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
                 ghosted: state.ghosted(),
+                par: state.par(),
             },
         );
     }
@@ -539,7 +565,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // The near line (§11.4/§11.7): the loudest live message as a category band —
     // or the ambient floor when nothing is live — plus the right-aligned help
     // toggle and, when the log has more to show, its deploy control beside it.
-    let top = near_line(state);
+    let top = near_line_beside(state, ui.pop_in);
     // **An ambient band paints the quiet fill; a message band paints the full one**
     // (§11.4/§11.5, #420). The row's colour then separates the facility's standing mood
     // — a permanent tint the eye stops reading as news — from something that just
@@ -554,7 +580,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // One layout for both controls: where each goes, and the span of row that leaves
     // the message. The budget comes *from* the layout, so a row can never run under a
     // control that is up (§11.4).
-    let controls = near_line_controls(state, width, ui.message_log_open);
+    let controls = near_line_controls(state, width, ui.message_log_open, ui.pop_in);
     let mut near = status_row(
         width,
         controls.text_start,
@@ -610,6 +636,15 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         height,
         cells,
     };
+    // The loud-message pop-in (§11.7/#576), laid over the board: the top rung of the
+    // ladder said a second time, next to the thing it is about, because the eye reading
+    // the board is the eye that misses the near line. It goes on **first** of the
+    // overlays, so every surface the player deliberately raised — the log they deployed,
+    // the card a fresh run opens on, the verdict the run ended with — is drawn over a
+    // transient they did not ask for and cannot dismiss.
+    if let Some(raised) = ui.pop_in {
+        super::pop_in::overlay_pop_in(&mut screen, raised, state.player());
+    }
     // The deployed message log is laid over the finished frame (§11.7/#300), not over
     // the map alone: it hangs from the near line's band across the **whole** row,
     // covering the usable line and as much board as it needs. Nothing else overlays
@@ -617,7 +652,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // so the board stays whole while you are not reading the log. The log owns the
     // question of what it holds and whether it holds anything at all.
     if ui.message_log_open {
-        super::message_log::overlay_message_log(&mut screen, state);
+        super::message_log::overlay_message_log(&mut screen, state, ui.pop_in);
     }
     // The level-start splash (§11.4/§12.6/#497), laid over the finished frame: until it
     // is dismissed there is nothing underneath it the player may act on, so it goes over

@@ -46,7 +46,7 @@
 //! (§7.6/§10.4) and loses the turns that costs; and a guard the field has cut off
 //! **entirely** closes on the boundary and waits there, facing in
 //! ([`repel_approach_step`](State::repel_approach_step)) — a cordon, not a stall. That is
-//! the ticket's open question settled the *second* way it offered (appendix 60): the two
+//! the ticket's open question settled the *second* way it offered (appendix 62): the two
 //! answers are the same hold mechanically, and only one of them looks like the hunt is
 //! still happening.
 //!
@@ -216,7 +216,7 @@ impl State {
     /// # Why a guard walks up to a wall it cannot cross
     ///
     /// This is the ticket's open question, and it is settled the second way it offered
-    /// (appendix 60): **a guard with no route waits at the boundary, facing in**, rather
+    /// (appendix 62): **a guard with no route waits at the boundary, facing in**, rather
     /// than holding wherever it happened to be standing. Both are the same hold —
     /// mechanically nothing crosses the line either way — but a hunt that stops dead in a
     /// corridor two rooms away reads as the game giving up on you, where a hunt that walks

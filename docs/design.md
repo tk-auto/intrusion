@@ -25,6 +25,13 @@ Status markers used throughout:
 | **[START]** | A starting value or approach, expected to change under playtest. |
 | **[OPEN]** | Genuinely undecided. Listed in §15. |
 
+**Those three are the whole vocabulary — there is no experimental tier** (#564). An
+ability either ships, in which case it is in the draw pool (§8.3) and gets played and
+measured like every other, or it does not exist; a shipped ability nobody can draw is
+inert (§2.3). Scepticism about one goes in its prose, where it can say what it actually
+means, and every player-facing change is playtested by hand before it merges regardless
+— so a marker singling one out promised a gate that was never a separate thing.
+
 ### What goes where
 
 **This document says how the game is supposed to be.** Rules, values, and the
@@ -275,7 +282,7 @@ If you are adding an ability and about to make it free, re-read §2.3.
   captures you. That is the only loss condition. There is no health, no combat,
   no damage. **[SETTLED]**
 
-  > **The one declared exception, and it is an experiment** (#243). The **Saver**
+  > **The one declared exception, and it is on trial** (#243). The **Saver**
   > (§8.3) is a passive that turns the *first* capture of a facility into a takedown
   > of the guard that made it: that guard goes down where it stood, a body is left
   > (§7.2/§7.3), and the run continues. It is bounded by the level rather than by a
@@ -335,6 +342,110 @@ If you are adding an ability and about to make it free, re-read §2.3.
 > being invisible does not make you safe. A guard patrolling into the cell you
 > are standing in catches you even if it cannot see you. Hiding is not the same
 > as being somewhere safe. This is a good rule; keep it.
+
+---
+
+### 4.6 The score — three stars, one per axis
+
+**[SETTLED]** on the shape, **[START]** on every number. A facility the player **got out
+of** is scored out of **three stars, awarded one per axis** (#563):
+
+| Star | Earned when | On screen |
+|---|---|---|
+| **Speed** | Turns taken ≤ the facility's **par** (below) | `speed ★ out inside par` |
+| **Stealth** | The run ended at **security condition 0** (§7.3) — nobody ever knew | `stealth ★ never noticed` |
+| **Thoroughness** | **Every** intel console *and* every equipment cache the building held was taken | `haul ★ took everything` |
+
+**One per axis, independently earned, is the whole design.** A weighted total mapped onto
+three tiers would say *"two stars"* and nothing else; three independent stars say **which
+one you missed**, which is the only thing a rating is good for in a game with no
+meta-progression. §2.2 says the one thing carrying between runs is what you learned —
+*"you had it all, but you were seen"* is that sentence given a surface.
+
+**The range is 0–3, and zero is a real reading.** Escaping is not the first star: a floor
+that made winning worth one would spend the most legible mark on the fact the player
+already knows, and would stop the readout being diagnostic. A run that crawled out slow,
+loud and half-empty earned none of the three, and the screen says so plainly.
+
+**Only a run that got out is scored.** A capture has no score at all — not zero stars.
+The end screen owes a lost run a *reason* (§14 v2), and a rating standing where the reason
+belongs would be answering a question the run never finished asking.
+
+#### Par — derived from the building, never a constant
+
+**Par is computed at level start from the facility's own contents**, because a *Vault* has
+one more of everything (§14 v3) and legitimately takes longer than an *Outpost*. A flat
+number would be wrong for half the facilities on the map and would read as the game being
+arbitrary, which is worse than having no speed star at all.
+
+    par = 2 × span + 90 × consoles + 50 × crates      (span = width + height)
+
+All three **[START]**. The span term is the ground: a 40×40 is eighty cells across and
+back, doubled because the way in is not a straight line — a raid that walked one would be
+walking through guards. **The console term carries the number**, and it is large on
+purpose: a console is not a detour off a route, it is a *search*, since the room it stands
+in is fogged until you have been in it (§11.5a) and exploration is most of a raid (§10). A
+crate is worth less, because a crate is a detour the player chooses rather than one the
+level asks for.
+
+| | Outpost | quick play | Workshop | Depot | Archive | Vault |
+|---|---|---|---|---|---|---|
+| **par** | 340 | 430 | 440 | 480 | 610 | 670 |
+
+**The first set of numbers was wrong, and how it was wrong is worth keeping.** Par shipped
+at `span + 25 × consoles + 15 × crates` — quick play on 155 — and *no* all-intel run ever
+came in under it: a played run with the fog lifted **and** the guards blinded missed it,
+and a 100-seed bot batch at the quick-play gate scored zero speed stars against a median
+of 428 turns. The numbers had been set against the **sim's** gate, where a run takes one
+console and leaves, which is a different job from taking all three. Appendix 61 §4.
+
+**Par lives on the help panel's Level info tab, not on the board.** It is a fact about the
+level like every active modifier (§12.6), so it is available on demand and never nagging.
+A par counting down in the corner would turn a stealth game into a speedrun and push
+against exactly the patience §1 and §7.6 are built to reward.
+
+#### It grants nothing — with exactly one planned exception
+
+**Nothing reads the score.** Not an ability, not a modifier, not the wallet (#211), and
+nothing at all across runs — §2.2's no-meta-progression rule is not negotiable, and a
+score a system can *spend* is a currency the player plays toward instead of playing well.
+The one exception the design has chosen is the campaign's **archive gate** (#573, v3): the
+run's accumulated stars set how hard the terminus is, earned and spent inside one run
+exactly as intel is. Until that ships the set of readers is empty, and a test asserts it.
+
+#### Where the stars are shown
+
+- **Quick play** — on the end screen, beside the run's ledger.
+- **The campaign** — on the **map**, per facility, because §14 v3 settles that a completed
+  facility does not raise the end screen; the map comes up instead, so if the stars are
+  not there they are nowhere. The run keeps the score of every facility it completed, in
+  raid order, and its total is the sum.
+
+Either way the axes are **named**, never a bare `★★☆`: knowing which one you missed is the
+entire point.
+
+#### Two known states, recorded rather than hidden
+
+- **The thoroughness star is free in quick play.** Quick play sets `intel_to_exit: All`
+  (§4.5) and plants no crates (§10.2), so *taking every objective* is exactly the win
+  condition — the star follows the escape. Quick play therefore scores meaningfully out of
+  two, and the campaign is where the axis bites. Accepted for v2, to be revisited once the
+  campaign exists; the alternative on the table is a different third axis for quick play
+  (**no bodies left** is the strongest candidate).
+- **The stealth star is demanding, not impossible.** Rung 1 costs one sighting *or* one
+  missed ping and never comes back down (§7.3), so this was the number most likely to be
+  unreachable. The sim says otherwise: over 400 bare-bot runs it was earned by **60–75% of
+  winning runs** across all four profiles (appendix 61). The threshold stays at condition
+  0; if a played run says otherwise, it moves to ≤ 1 before the design is blamed.
+- **Par must be measured against the mode's own gate.** How long a raid takes is decided
+  more by *how many objectives the exit asks for* than by anything about the building: the
+  same facility is a ~140-turn job at the minimum haul (§4.5) and a ~430-turn one when the
+  exit wants all the intel. So a par tuned on one gate is wrong on the other — which is
+  exactly the mistake the first set of numbers made. The consequence to keep in view is
+  that the speed star is **cheap at the minimum haul**: a campaign run that grabs one
+  objective and leaves clears par easily, and pays for it in the haul star. That tension is
+  the axes working, not a hole — but if beelining ever becomes the *only* sane play, par is
+  the wrong lever and the gate is the right one.
 
 ---
 
@@ -560,7 +671,7 @@ is a wall; it is that it is **evidence on a clock**:
 > end rather than a decision. Appendix 4.
 
 > **The one declared exception to the range (#239).** *Adjacent only* stays **[SETTLED]**,
-> and the **Dart** (§8.3) is a costed experiment against it rather than a relaxation of it:
+> and the **Dart** (§8.3) is a costed exception on trial against it rather than a relaxation of it:
 > one dart a facility, fired along the cardinal you face with nothing to aim, and the two
 > requirements that matter here — **unaware**, and a **body** left behind — are untouched.
 > What the range changes is which of those two costs bites: the body drops where the guard
@@ -759,8 +870,14 @@ does with its *own* eyes: the one that loses you still searches, the one that fi
 body still hunts it (§7.6/§7.2). Only the *calling of others* stops — and where a
 *calm* one chooses to walk.
 
-**[OPEN]** — whether a run **score** exists, and whether takedowns cost score.
-See §15.
+**Takedowns cost score, and this ladder is how.** *(Resolved — §4.6 owns the answer,
+and §15 Q4 is closed with it.)* A run **is** scored, out of three stars, and one of them
+is *stealth*: left at condition 0. A takedown leaves a body (§7.2), a found body is a
+rung-3 trigger above, and any rung above zero costs that star. So aggression is priced
+through the clock this section already builds — **no second rule, and no leaderboard.**
+That is the *"which may well be enough"* branch §15 Q4 named, taken deliberately: a
+separate score penalty on takedowns would charge twice for one decision, and the charge
+the radio already makes is the one the player can see coming.
 
 ### 7.4 State machine
 
@@ -1050,10 +1167,17 @@ headless sim (§13.2) can measure what they do to a run.
 
 **Hybrid: data for the common case, code for the weird case.** **[SETTLED]**
 
-Most abilities are a declarative record — cost, range, targeting mode, duration,
-cooldown, and a list of effects drawn from a small vocabulary of primitives.
-Trying "what if there were a smoke grenade" should mean **adding a row**, not
-writing a system.
+Most abilities are a declarative record — turn cost, duration, cooldown, an optional
+per-level use budget (§8.2), and a list of effects drawn from a small vocabulary of
+primitives. Trying "what if there were a smoke grenade" should mean **adding a row**,
+not writing a system.
+
+**How an ability aims is not in the record, and neither is its reach.** Aiming is
+one of the three §8.4 ways, applied by the ability's own precondition where the
+press is resolved; a reach (`CONFUSION_RADIUS`, `DART_RANGE`) is that effect's own
+constant. The record used to declare a targeting mode as a fourth field, and it was
+stored and never read — the aim was always taken at the press — so #556 removed it
+rather than leave the record asserting something nothing checked (§2.3, appendix 61).
 
 When a primitive won't stretch — piloting a drone, rewinding time — there is an
 escape hatch to plain code behind the same interface. Both named cases now have a
@@ -1207,13 +1331,13 @@ whole reason the architecture looks the way it does.
 | **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched, which is what keeps it from being a no-guard-may-act field you carry. Capture-is-contact still holds (§4.5): a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7). It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4); a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). Appendix 24. |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket**, which is a use of the tool rather than a waste of it. It conceals nothing (it is not a cupboard, §10.3), so **three walls around you means you can dig a hole to hide in, never a tunnel**. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. Appendix 24. |
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
-| **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
+| **Saver** | — | **passive** | — | **[START] (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 | **Guide** | — | **passive** | — | **[START] (#505).** A second passive after Vision: one of the **eight cells around you** is washed `Effect` — the one lying in the direction of the nearest **unclaimed objective** (an intel console `$` or an equipment cache `¤`; both are things you go and *take*, and both drop out of the set once taken). It is a **compass, not a route**: the bearing is taken **as the crow flies**, with no regard for walls, doors or reachability — the deliberate opposite of §7.3's *"nearest means the shortest walk"*, which is control routing a guard where this is a needle pointing. **Expect it to point straight through a wall**; that is the tool working, not failing, and the restraint is the whole design — a guide that pathed would be a solver and would answer §10's exploration outright. It **reveals nothing else** (§11.5a **[SETTLED]**): the objective's cell, glyph and distance stay fogged until seen, so what you gain is an eighth of a circle and not a location — which is what leaves #215's v3 intel sink something to sell. **Not** the comms console (§7.3 — the cost is the route, not the switch, and its distance is a knob the sim sweeps) and **not** the exit (drawn as itself from turn one). Diagonals are kept though movement is cardinal: rounding a bearing to the nearest cardinal would throw away half of it. Ties break by the level's own ordering, never a draw (§12.4). Nothing left unclaimed and it **goes dark** — which itself says *there is nothing left in this building*. The wash is the **weakest** background there is (§11.5), so every threat cue paints over it: a convenience must never sit on top of the thing that can kill you. Two knobs if it plays too strong: a **range cap**, which makes it a local tool rather than a global one, and pointing home when everything is claimed. **It pulses**: the bearing shows on one turn in `GUIDE_BLINK_TURNS` (**3** **[START]**) and is dark on the rest, **turn zero included**. That is the ability's main balance lever, and both halves earn their place — a standing needle is a line you simply follow, and the fog stops being something you plan around, where a pulse gives you a *fix* you then walk on your own memory of; and a run that opened already pointing would make the first move free. The phase is the turn counter and nothing else, so it is deterministic (§12.4) and a player can count to it. Held is on: no key, no turn, no cooldown, `(on)` on the bar; it pays with the loadout slot and nothing else. |
-| **Drone** | 1 turn | 40 | 40 | **[START]/experiment (#273).** Launch a drone from the cell you stand on and **fly it yourself**: your input moves the machine and your body stands still, so every drone move is a full turn the guards get (§4.2) while nobody is watching where you left yourself. Press again and the controls come back — **free** (§4.4), and the window does **not** end: the drone holds the cell you left it in and keeps feeding you its camera for the rest of the duration, and you can take the controls back later for the price of a turn. **One clock covers both halves**, which is the design: how much of the 40 you spend flying rather than watching is the decision the ability sells, and the bar's `[N]` means *turns of machine* throughout (appendix 45). Its camera is the full **360°** at `DRONE_SIGHT_RANGE` (**8** **[START]**) and is unioned into your own sight — your eyes keep working — and what it sees is remembered (§11.5a). The **guard sense (§9) is not widened with it**: that is your body's channel, and your body is what this costs. It **respects the building at its own scale**: everywhere a person could squeeze, plus **over a table** and **through a shut door's ventilation holes** — it is hand-sized and airborne — but never a wall, a **door frame**, a duct entry or a solid usable (`Terrain::admits_drone`). It crosses a shut door **without opening it**, which is the difference between reading a wing and unlocking one; the consequence worth stating is that a closed-door wing is scoutable and a Lockdown seals nothing against a camera. It is **not an actor** (nothing blocks it, it blocks nothing, no door shuts on it), has **no interaction verb at all** — it opens nothing, takes nothing, wins nothing — and **guards cannot perceive it** in any way. While flying, every other ability is greyed and refused: your hands are on the controls. **Launching, and taking the controls back, needs you on your feet** — a crawlspace refuses both (§10.7), because a body nothing can reach pays nothing, and the exposed body is the whole cost (§2.3). |
+| **Drone** | 1 turn | 40 | 40 | **[START] (#273).** Launch a drone from the cell you stand on and **fly it yourself**: your input moves the machine and your body stands still, so every drone move is a full turn the guards get (§4.2) while nobody is watching where you left yourself. Press again and the controls come back — **free** (§4.4), and the window does **not** end: the drone holds the cell you left it in and keeps feeding you its camera for the rest of the duration, and you can take the controls back later for the price of a turn. **One clock covers both halves**, which is the design: how much of the 40 you spend flying rather than watching is the decision the ability sells, and the bar's `[N]` means *turns of machine* throughout (appendix 45). Its camera is the full **360°** at `DRONE_SIGHT_RANGE` (**8** **[START]**) and is unioned into your own sight — your eyes keep working — and what it sees is remembered (§11.5a). The **guard sense (§9) is not widened with it**: that is your body's channel, and your body is what this costs. It **respects the building at its own scale**: everywhere a person could squeeze, plus **over a table** and **through a shut door's ventilation holes** — it is hand-sized and airborne — but never a wall, a **door frame**, a duct entry or a solid usable (`Terrain::admits_drone`). It crosses a shut door **without opening it**, which is the difference between reading a wing and unlocking one; the consequence worth stating is that a closed-door wing is scoutable and a Lockdown seals nothing against a camera. It is **not an actor** (nothing blocks it, it blocks nothing, no door shuts on it), has **no interaction verb at all** — it opens nothing, takes nothing, wins nothing — and **guards cannot perceive it** in any way. While flying, every other ability is greyed and refused: your hands are on the controls. **Launching, and taking the controls back, needs you on your feet** — a crawlspace refuses both (§10.7), because a body nothing can reach pays nothing, and the exposed body is the whole cost (§2.3). |
 | **False Call** | 1 turn | — (instant) | 30 | **[START] (#504).** A **radio spoofer**. Firing transmits a forged control message to every guard within `FALSE_CALL_RADIUS` (**10** **[START]**) of you, through walls like the guard sense (§9), naming **the cell you fired it from** — and they converge on it and **search** (§7.6), because it *is* a real call with a forged source. It adds **no second verb to §7.7**: cooperation has exactly one — *a call sends guards to search a cell* — and this hands the player that one, through the same seam control's dispatch and both call-ins run through. **The play is a vacuum, not a trap**: you call them here and then you are not here. The cell is a **snapshot**, stale the moment you leave it — the property §7.7 already names for genuine calls — so fired and then stood on it is a way to be caught, and a cupboard inside the search it opened is no answer (§10.3/§7.6). **The reach is the transmitter's, not the eyes'** and is deliberately **unclamped** by the guard sense, unlike Confusion's blast: a called guard is not held out of view, it *walks to you* and arrives inside the §9 sense long before it arrives anywhere else, and the near line says how many answered at the moment of firing (§11.7). So a **crawling player broadcasts in full** — a duct degrades perception, and a transmitter does not perceive (§10.7). **Who answers is still §7.7's rule**: a guard that has the live player is never pulled off it, a guard already on an errand *is* redirected, and a call nobody was free for goes unanswered (a spent turn). The **alert never steps** — nothing was seen and no ping was missed (§7.3). **It is always pressable, and it never reports what it found** — the one place it parts company with Confusion, and the reason is §9. Confusion may refuse an empty blast and may name a count, because its reach is clamped inside the guard sense: everything it could have caught was already drawn for the player. This reach is **not** clamped, so it covers guards behind the §5 cone and, in a duct, well past the §9 sense — and a refusal would answer *"is anyone within ten cells of me?"* while a greyed bar entry would answer it **every frame, for free, without spending the turn**. That is a detector, and this is a transmitter. So a firing into an empty facility goes out anyway and costs its turn and lockout, and the near line says the call went out and stops: what answered is learned the way everything about guards is learned, by watching the §9 dots turn (§9.3). **It dies with the net** (§7.3): a silenced facility has nothing listening, so the press is refused for free — see the comms console's table. Unlike every other call, which sends a *fixed number*, this one sends however many are in the box, so the response size varies with where you fire it; if that plays too swingy the fallback is the **nearest N within the reach**. |
-| **Dart** | 1 turn | — (instant) | — | **[START]/experiment (#239).** A **takedown at range**, and the one row in the catalogue that deliberately reopens the ability §2.3 records as having *been* the old game (*"unlimited range, no cooldown, and it did not consume a turn"*). It is on trial: filed with no milestone, because it contradicts §7.2's **[SETTLED]** *adjacent only*. **You do not pick a guard.** Firing sends a dart along **the cardinal you face**: it travels up to `DART_RANGE` (**8** **[START]**) cells, stopping at the first **solid** (`blocks_movement` — wall, hinge, closed panel, duct entry, a table, any solid usable) or the first **guard**, whichever comes first, and resolves entirely on that turn. The guard it stops on goes down **only if it is unaware** (§7.2) **and in your line of sight** (§6) — a guard that has seen you, or one known only as a §9 sense dot, is not a legal hit — and the body drops **where it stood**, on that guard's own radio cadence, with the §7.3 clock running exactly as an adjacent takedown's does. **Aiming by facing is a stronger safeguard than a cursor**: the §2.3 failure was *auto-target-nearest-visible*, which asked nothing of where you stood, and a cursor would have asked for two keypresses; this asks you to be in the corridor, on the line, pointing the right way, unseen — paid for in movement, exposure and turns, on the board, where the guards can punish it. There is **no target list anywhere in the implementation** to snap to (§8.4/appendix 1). **A miss costs everything a hit does**: nothing on the line, an aware guard, a guard you can only sense — all three spend the turn and the level's dart, all three read as the *same* near line, and the press is **never refused and the bar entry never greys for an empty line**, because a refusal would answer *"is there a guard in front of me?"* for free, every frame (False Call's reasoning, and it bites harder here since the answer is worth a takedown). **The cost is the body, and at range you often cannot reach it** (§7.3): a takedown you cannot hide is a takedown that finds you later, and shooting one down a corridor makes that a fact rather than a choice. Its scarcity is a **per-level use budget of 1** (§8.2) and **no cooldown at all** — Pierce Wall's shape, and the ticket's *"very large cooldown"* is met by something stricter: a lockout ends and this does not, so the bar reads `(1)` then `—` (appendix 54). It flies **over** a loose body and over your own decoy — a dart spent on your own prop is a joke you get once. The reach is clamped to `min(DART_RANGE, sense_range())`, inert on open floor and cutting a crawler's shot to **5**: the flight is painted (§11.5), so an unclamped duct shot would report a guard in the dark. **Watch the corridor**, which is the risk: if standing at the end of one becomes a reliable free kill the lever is `DART_RANGE`, not the budget — though §10.1a already stamps a table into every over-long straight, and a table stops the dart. Appendix 54. |
-| **Repel** | 1 turn | 8 | 40 | **[START] (#554).** A **wall you can put down in the open**: firing stamps the `REPEL_RADIUS` (**3** **[START]**) box on **the cell you fired it from** as ground **no guard will stand in**. One sentence, two halves. **Nobody gets in** — the boundary refuses a step inward in any state, Calm, investigating, searching or chasing alike, so a route across it goes the long way round (§7.6/§10.4's *"a guard cannot get it open, so its route goes the long way round"*, read over open floor), and a guard the field has cut off **entirely closes on the boundary and waits there, facing in** rather than stopping wherever its route failed: a cordon, not a stall, and the two are the same hold mechanically. **Anybody inside walks out**, by the shortest way, the turn after it lands and every turn until they are clear — the stamp moves nobody, a guard spends its own turn leaving and keeps its mood, its lead and its errand, and once out it is one of the guards the boundary refuses, so it cannot come back (nothing is remembered). It is **Lockdown's trade where Lockdown is inert** — a hub room, open floor, a corridor with nothing to shut — which is why it carries Lockdown's own clocks: if the two play as one press the knob is the radius, not the pair of clocks. A **snapshot**, not a travelling bubble: the disc stays where it fell, because one centred on a moving player is one no guard could ever reach him in, and §4.5's capture-is-contact is **[SETTLED]**. **You** are never refused — you walk your own field freely, in and out. **It conceals nothing**: a guard that can see through it sees you, steps §7.3's ladder and calls it in (§7.7), so what gathers outside is a **ring of guards** standing exactly where you must come out, one step closer than they would have been. **Because guards leave rather than being trapped inside, firing it late works** — a chaser at arm's length is put out and held out, which is the ability's one genuinely free moment and the thing the sim watches (it has no *"when would a good player not press this"* left beyond the turn and the lockout). **Every cell is released when the window ends**, expiry or early toggle-off alike (§8.2). A firing with nobody in reach is **never refused and never greyed** and costs its full turn and lockout: the only precondition worth asking would be *"is a guard near enough?"*, and answering it — every frame, for free — is a detector, not terrain (False Call's reasoning). Appendix 60. |
+| **Dart** | 1 turn | — (instant) | — | **[START] (#239).** A **takedown at range**, and the one row in the catalogue that deliberately reopens the ability §2.3 records as having *been* the old game (*"unlimited range, no cooldown, and it did not consume a turn"*). It is on trial: filed with no milestone, because it contradicts §7.2's **[SETTLED]** *adjacent only*. **You do not pick a guard.** Firing sends a dart along **the cardinal you face**: it travels up to `DART_RANGE` (**8** **[START]**) cells, stopping at the first **solid** (`blocks_movement` — wall, hinge, closed panel, duct entry, a table, any solid usable) or the first **guard**, whichever comes first, and resolves entirely on that turn. The guard it stops on goes down **only if it is unaware** (§7.2) **and in your line of sight** (§6) — a guard that has seen you, or one known only as a §9 sense dot, is not a legal hit — and the body drops **where it stood**, on that guard's own radio cadence, with the §7.3 clock running exactly as an adjacent takedown's does. **Aiming by facing is a stronger safeguard than a cursor**: the §2.3 failure was *auto-target-nearest-visible*, which asked nothing of where you stood, and a cursor would have asked for two keypresses; this asks you to be in the corridor, on the line, pointing the right way, unseen — paid for in movement, exposure and turns, on the board, where the guards can punish it. There is **no target list anywhere in the implementation** to snap to (§8.4/appendix 1). **A miss costs everything a hit does**: nothing on the line, an aware guard, a guard you can only sense — all three spend the turn and the level's dart, all three read as the *same* near line, and the press is **never refused and the bar entry never greys for an empty line**, because a refusal would answer *"is there a guard in front of me?"* for free, every frame (False Call's reasoning, and it bites harder here since the answer is worth a takedown). **The cost is the body, and at range you often cannot reach it** (§7.3): a takedown you cannot hide is a takedown that finds you later, and shooting one down a corridor makes that a fact rather than a choice. Its scarcity is a **per-level use budget of 1** (§8.2) and **no cooldown at all** — Pierce Wall's shape, and the ticket's *"very large cooldown"* is met by something stricter: a lockout ends and this does not, so the bar reads `(1)` then `—` (appendix 54). It flies **over** a loose body and over your own decoy — a dart spent on your own prop is a joke you get once. The reach is clamped to `min(DART_RANGE, sense_range())`, inert on open floor and cutting a crawler's shot to **5**: the flight is painted (§11.5), so an unclamped duct shot would report a guard in the dark. **Watch the corridor**, which is the risk: if standing at the end of one becomes a reliable free kill the lever is `DART_RANGE`, not the budget — though §10.1a already stamps a table into every over-long straight, and a table stops the dart. Appendix 54. |
+| **Repel** | 1 turn | 8 | 40 | **[START] (#554).** A **wall you can put down in the open**: firing stamps the `REPEL_RADIUS` (**3** **[START]**) box on **the cell you fired it from** as ground **no guard will stand in**. One sentence, two halves. **Nobody gets in** — the boundary refuses a step inward in any state, Calm, investigating, searching or chasing alike, so a route across it goes the long way round (§7.6/§10.4's *"a guard cannot get it open, so its route goes the long way round"*, read over open floor), and a guard the field has cut off **entirely closes on the boundary and waits there, facing in** rather than stopping wherever its route failed: a cordon, not a stall, and the two are the same hold mechanically. **Anybody inside walks out**, by the shortest way, the turn after it lands and every turn until they are clear — the stamp moves nobody, a guard spends its own turn leaving and keeps its mood, its lead and its errand, and once out it is one of the guards the boundary refuses, so it cannot come back (nothing is remembered). It is **Lockdown's trade where Lockdown is inert** — a hub room, open floor, a corridor with nothing to shut — which is why it carries Lockdown's own clocks: if the two play as one press the knob is the radius, not the pair of clocks. A **snapshot**, not a travelling bubble: the disc stays where it fell, because one centred on a moving player is one no guard could ever reach him in, and §4.5's capture-is-contact is **[SETTLED]**. **You** are never refused — you walk your own field freely, in and out. **It conceals nothing**: a guard that can see through it sees you, steps §7.3's ladder and calls it in (§7.7), so what gathers outside is a **ring of guards** standing exactly where you must come out, one step closer than they would have been. **Because guards leave rather than being trapped inside, firing it late works** — a chaser at arm's length is put out and held out, which is the ability's one genuinely free moment and the thing the sim watches (it has no *"when would a good player not press this"* left beyond the turn and the lockout). **Every cell is released when the window ends**, expiry or early toggle-off alike (§8.2). A firing with nobody in reach is **never refused and never greyed** and costs its full turn and lockout: the only precondition worth asking would be *"is a guard near enough?"*, and answering it — every frame, for free — is a detector, not terrain (False Call's reasoning). Appendix 62. |
 
 Notes carried forward, because they are good and non-obvious:
 
@@ -1262,9 +1386,11 @@ Notes carried forward, because they are good and non-obvious:
   extension point assumes there is one.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the whole shipped set (ten tech now ship, so
-  "three random" is a genuine draw of three of the ten — the pool has outgrown the
-  grant and it finally bites, #241); a campaign accumulates its set
+  tech from a pool that defaults to the whole shipped set — **the whole of it, with
+  nothing held back** (§0/#564): the roster and the pool are one list, so anything in
+  this table can be drawn here and stocked into a crate, and "three random" is a genuine
+  draw of three of the thirteen (the pool has outgrown the grant and it finally bites,
+  #241). A campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
   tech — it competes for the same slot, which is exactly what it pays with. The
   resolved loadout is one of the three pieces of the shareable level-seed token
@@ -1311,15 +1437,48 @@ Notes carried forward, because they are good and non-obvious:
   > charging the debt on top would charge twice for the same grab. Half speed starts
   > from the first step, which is where §8.3's "one cell per two turns" lives.
 
-### 8.4 Targeting
+### 8.4 Aiming
 
 The old version had **no targeting system at all**, and its absence is the direct
 cause of the free unlimited-range neutralise: auto-target-nearest-visible was the path
-of least resistance (appendix 1).
+of least resistance (appendix 1). Everything below exists because of that sentence.
 
-**Build targeting up front.** **[SETTLED]** At minimum: **self**, **direction**,
-and **tile within range** (with a cursor). It unblocks most of the interesting
-ability space, and its absence actively distorted the design.
+**An ability aims by where you stand and which way you face.** **[SETTLED]** The
+vocabulary is **closed**, and it is these three:
+
+1. **Itself** — the player's own cell. Run, Camouflage, Dephase, Autodoors.
+2. **The facing cardinal** — the cell in front of you (Decoy), or the ray out from
+   it (the Dart, §8.3/appendix 54).
+3. **An area around the cell you fired from** — a radius taken as a **snapshot** at
+   the press. Confusion, Lockdown, False Call. Walking away does not move it.
+
+And the prohibitions, which are the load-bearing half:
+
+- **No auto-target-nearest, ever, for anything.** Not the nearest guard, not the
+  nearest door, not the nearest anything. This is the sentence the section exists
+  for (appendix 1), and there is **no target list anywhere in the implementation**
+  to snap to. Where an ability needs to know what it caught — the blast's guards,
+  the dart's line — it measures from the aim, never the reverse.
+- **No cursor, and no modal picking step.** An ability is answered by **one
+  keypress**, from the bar or its mnemonic (§11.4/§11.6). Aiming is paid for in
+  movement, exposure and turns — on the board, where the guards can punish it —
+  rather than in a UI the guards cannot see.
+- **A fourth way to aim is a design conversation**, not a quiet extension — the
+  same fence §8.2 puts around the use budget.
+
+One seam resolves all three: the press settles what it acts on *before* the ability
+commits (`state::activation`), so no ability grows its own way of picking a thing
+and therefore its own way of picking the wrong one (appendix 44). An aim that comes
+back with nothing to act on refuses the press for **free** — no turn, no cooldown,
+no use spent (§4.4) — and the §11.4 bar greys the entry from the same answer, which
+is why a refusal is never a thing the player discovers by spending a turn. What the
+record holds is the economy; **the aim is not a stored field** — it is the rule each
+ability's own precondition applies.
+
+> **[SETTLED] reversed here.** This section used to read *"build targeting up front
+> — self, direction, and tile within range (with a cursor)"*. The cursor half was
+> built, used by nothing, and cut in #556; the ban on auto-nearest — the part the
+> section was actually written for — stands unchanged. **Appendix 61.**
 
 ---
 
@@ -3223,6 +3382,75 @@ system — it is derived from adjacency every frame and carries no state.
   it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
+- **The loud rungs pop in** (#576). Some events are too important to be lost on the
+  near line: the player's eye is on the board — on the guard two rooms over and on the
+  cell they are about to step into — not on the top row of the screen, and a one-row
+  band at the far edge of their attention is exactly what gets missed. The near line is
+  the right home for *what is around you*; it is the wrong home for *the thing you came
+  here for just happened* or *the building just got worse*. So the loud rungs get a
+  **second surface**: a small **pop-in box** drawn over the board next to what it is
+  about, bordered in the message's §11.2 category colour, which appears when the event
+  fires, sits for about **2 s [START]**, and goes. Not a strobe and not a pulse — it
+  appears, it is read, it disappears, with no animation in between. It is transient
+  precisely so it can afford to be over the map.
+  - **Which messages qualify is derived from the ladder, never hand-flagged.** The gate
+    is a threshold on the priority every message already carries — the facility-
+    escalation rung, **5 [START]**. Nothing gets a "loud" bit set at the raise site, so a
+    future loud event inherits the pop-in for free and cannot be forgotten, and the
+    ladder stays the single place importance is decided. That it derives from the ladder
+    is **[SETTLED]**; the threshold is not.
+    - **Where the line falls, and why there.** Below it a message is one guard's
+      business — a look that found you, a radio gone quiet, a body found — and the
+      *board already draws it*: the cone, the §9 sense mark, the watcher line. Those are
+      facts the player reads by looking where they are already looking. At the rung and
+      above, the message is the **facility's** or the **run's** — the §7.3 ladder
+      climbing, a body reported, the phase safety firing, a capture evaded, an ending,
+      an objective — and the board has no way to say any of it. The threshold started at
+      20, objective feedback alone, and came down the first time the ladder was watched
+      climbing in play: *the security condition just changed* is the fact that most
+      changes what the next ten turns should be, and it was arriving on the row the
+      player was not reading.
+  - **The box takes its message; it does not copy it.** While a box is up, the message
+    in it comes **off the near line and out of the live block of the deployed log**. The
+    same words in two places an inch apart is one fact wearing two surfaces, and the row
+    is better spent on the *next* thing the turn had to say — the box carrying *intel in
+    hand* while the row says *a guard has seen you* is two facts on two surfaces. With
+    nothing else live the row falls to the ambient floor, as it always does. Nothing is
+    lost by it: the moment the box goes, the message is back in its expected place on
+    both surfaces, and the history the log stacks under its rule is never touched.
+    - **The block moves whole.** An event's subordinate line travels with its headline
+      into the box, because §11.7 makes the pair inseparable — a reason left behind on
+      the log while its headline is in the box is exactly the separation the rule
+      forbids. The near line still never shows a subordinate: it is one row and speaks
+      the headline alone. The box is not that row.
+  - **It rides out its life.** A message dies on the player's next action; the box does
+    **not**. A player who acts inside two seconds is the very case where the near line
+    lost the message, so a box a quick key-press erases fails at its only job. It
+    outlives the near line's copy and keeps drawing over the following turn — and it is
+    not dismissible, for the same reason.
+  - **It never queues.** A second qualifying message replaces the first and restarts the
+    clock. One box at a time, always the newest fact; a backlog of stale boxes is the
+    opposite of the point. It is not a second message log either — the deployed log
+    already answers *what just happened*, and this surface answers *do not miss this*.
+    The message the replaced box was holding returns to the near line and the log as it
+    would have if the box had simply expired.
+  - **It is anchored, not centred**, because the complaint being fixed is that the eye
+    is on the board: a panel under the top rows would be missed for the same reason the
+    near line is. Every message on the rung today is something the player did to a thing
+    they are standing next to, or to themselves, so the anchor is the **player's cell**
+    and the box is placed clear of that cell *and all eight of its neighbours* — the
+    ring the console, crate or exit being reported is standing in, which is what makes
+    "never covers what it's talking about" true for the whole rung without knowing which
+    message is up. It is clamped to the board, never clipped; and among the legal
+    placements it takes the **cheapest**: fewest *guards* covered, then fewest **§11.5
+    danger cells**. Burying the lose condition is the failure mode every surface drawn
+    over the map is bounded against, and a guard is its worst form — a guard's own cell is
+    never inside its own cone, so counting cone cells alone will happily park the box on
+    the `g` and leave the cone around it perfectly readable.
+  - **The clock is the shell's, never the core's** (§12.1). The rules stay pure and
+    turn-based: the core says what to draw and is told when the box has expired, so no
+    wall clock reaches the rules and a replay of the same seed and inputs is identical
+    whether or not a box was ever drawn.
 - **Objective messaging derives from the gate, never from a fixed intel count**
   (§4.5/#310). Whether the exit is open is `exit_ready()`, and how much it still
   wants is `intel_needed_to_exit()` — which is *not* the tally of consoles still out
@@ -3729,6 +3957,29 @@ the replay Artifact build (#197 slice C) share so they cannot diverge.
 > that a token's meaning depends on. What follows here is only what the *design* turns
 > on.
 
+**Sharing is the URL** (#572) **[SETTLED]**. A run is handed over as a
+`…#seed=<token>` **link** and by no other route: the Level info tab's `copy [c]` puts
+one on the clipboard, the address bar holds one from a run's first frame, and the
+recipient clicks it. There is nowhere to type a token — the title screen's *Seed play*
+entry, the sub-screen behind it and its DOM text box are all retired — which is what
+makes the second half of the rule true: **the whole game is the character grid**
+(§11.1), with no exception outside the debug session.
+
+The **token stays displayed** on the panel, and that split is the decision rather than
+an inconsistency. Eighteen letters is what a 40-column grid can print and a human can
+read back off a screen; a URL is what the person on the other end can actually open.
+So the *display* is the short form and the *copy* is the link, and when a link arrives
+mangled — a chat client eating the fragment, a line wrap through a paste — reading the
+token off the screen and rebuilding the URL by hand is the recovery path. That is also
+why a clipboard that refuses says so instead of claiming a copy: the token is still
+printed one row above.
+
+A shared link is **the page's origin and path with a fresh fragment, and nothing
+else**. Neither a `?debug=` activation nor the `&inputs=` of a replay the sharer
+happens to be watching rides along — one strip, in one place, rather than a rule each
+copy control remembers separately. And where the sim offers a run to a *person* rather
+than to the playtest skill's parser, it offers a link too.
+
 **A number is not a token** (#333, superseding #328). A bare `?seed=8371` names *this
 build's quick-play preset applied to 8371* — not a run — so a shared link silently
 re-resolves whenever the preset moves, and it did ([token spec](level-seed-token.md)
@@ -3870,8 +4121,8 @@ a campaign of **one** facility is exactly the game v1 ships.
   source (§12.4). A whole run therefore reproduces from `(run seed, [inputs])` exactly
   as one level does, which is what makes bug repro and golden tests possible across a
   2–3 hour run. It is derived **narrowed to the level-seed token's seed field**, so
-  every facility of a campaign is also a *sayable level*: a token you can hand to
-  someone, or to the sim, and play on its own (§13.1).
+  every facility of a campaign is also a *sayable level*: a link you can hand to
+  someone, or the token inside it to the sim's `--config`, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
   (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
   intel is currency in the campaign and never a fee at the exit, which takes nothing
@@ -4361,11 +4612,13 @@ default.
    sensed dot stay a **flat presence marker**, or convey *some* state — say, a
    distinct tint when a guard is Chasing — trading legibility for tension? Does it
    name *which* guard, or just "a guard"?
-4. **Run score.** Does a run have a score? If so, takedowns cost score — giving
-   "no killing" mechanical teeth via a leaderboard rather than a rule, and creating
-   a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
-   takedown cost, which may well be enough. Note a score also gives the bot in §13
-   a far better objective function, which is an argument for it beyond the game.
+4. **Run score.** *(Resolved — §4.6 owns the answer: a completed facility is scored
+   out of three stars, one per axis, and takedowns are charged through the **stealth**
+   star rather than by a rule of their own. The ghost↔aggressive spectrum falls out of
+   the §7.3 ladder, which is the "may well be enough" branch this question named. The
+   bot's objective function is deliberately **not** changed: the sim reports the star
+   distribution and optimises nothing, because a bot playing for stars would make the
+   histogram measure the scorer rather than the game — §13.3.)*
 5. **Do guards check hideouts?** *(Resolved — §10.3 owns the answer: only when
    alerted, and only if they saw you go in or found a body nearby.)*
 6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A

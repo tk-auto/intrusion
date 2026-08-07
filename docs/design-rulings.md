@@ -4730,10 +4730,283 @@ state where the building has genuinely closed around you. Not softening the gate
 would put the revolving door straight back. That hatch is [OPEN] until a played run asks
 for it.
 
+---
+
+## Appendix 60 — Aiming is where you stand, and the cursor was never the safeguard
+
+*(§8.4, whose **[SETTLED]** *"build targeting up front… tile within range (with a cursor)"*
+this reverses in half; §8.1's record; §8.3's rows; §2.3 on stubs; appendix 1, whose
+sentence it keeps; appendix 44 on one selection seam; appendix 54 on the Dart.
+The ticket is #556, on the system #149 shipped.)*
+
+`crates/core/src/targeting.rs` was 356 lines resolving a `TargetingMode` to a validated
+target: a `Target` for effects to consume, a `Targeting` session the shell would drive, and
+a `TileCursor` the player would steer inside a §6.1 range box. It was careful work and it
+was correct. It was also **used by nothing**. No ability in the catalogue declared
+`TargetingMode::Tile` — the enum arm said so itself (*"No v1 ability uses it; it is here so
+the vocabulary is complete"*) — and `State::begin_ability_targeting` had no caller outside
+the two tests written to exercise it. Nine months of catalogue growth, and the ability space
+went the other way.
+
+### 1. What §8.4 was actually for
+
+Appendix 1's audit of the old game lists, among the smaller faults, *no targeting system at
+all — every ability was self-targeted or auto-targeted at the nearest valid thing*, and
+names it **the direct cause** of the free unlimited-range neutralise: auto-target-nearest-
+visible was the path of least resistance. §8.4 was written to close that door.
+
+The door it closes is **auto-target-nearest**. The cursor was one proposal for what to put
+there instead — and, being the proposal that was in the sentence, it got built. Cutting the
+cursor and keeping the ban is not a softening of §8.4; it is §8.4 with the mechanism it
+turned out not to need removed from in front of the rule it exists to state.
+
+### 2. The abilities had already answered the question
+
+The §8.3 set aims three ways, and every one of them was arrived at by the ability's own
+ticket without reaching for a cursor:
+
+- **Itself** — Run, Camouflage, Dephase, Autodoors. Nothing to point at.
+- **The facing cardinal** — Decoy's faced cell; the Dart's ray along it (appendix 54).
+- **An area around the cell fired from** — Confusion's blast, Lockdown's door set, False
+  Call's reach, each a **snapshot** taken at the press.
+
+Pierce Wall is the sharpest case: its precondition is *exactly one* adjacent wall, so the
+target is unique by construction and its §8.3 row already says *there is nothing to aim
+(§8.4)*. Not one of these wanted a cell-picker, and the reason is not laziness. **Aiming
+by position and facing is paid for on the board.** Lining a dart up costs being in the
+corridor, on the line, pointing the right way, unseen — movement, exposure and turns the
+guards can punish. A cursor costs two keypresses inside a modal step the guards cannot
+see, and it would have been the *cheapest* aiming in the game while looking like the
+strictest.
+
+### 3. The declared mode went with it, because nothing read it
+
+`Economy` carried a `targeting: TargetingMode` field. With `begin_ability_targeting` gone,
+its only reader was the catalogue test asserting the value it stored — a field pinned by a
+test and consulted by no rule, which is §2.3's *don't ship a stub that looks like a feature*
+applied to the code rather than to a system.
+
+What resolves an aim, and always did, is the precondition ladder (`state::activation`,
+#345). `Aimed` hands the committing press the concrete thing it acts on — `Decoy(Cell)` from
+the facing, `Blast`/`Call(EffectArea)` from the fired cell, `Dart(DartShot)` down the line —
+so the world change acts on exactly what the precondition approved. That is one seam every
+ability resolves through, which is the part of §8.4 worth keeping under appendix 44's
+principle: *every ability that grew its own way of picking a thing grew its own way of
+picking the wrong thing*. The ladder is that one way. The declared mode was a second,
+weaker description of it that no code consulted.
+
+Range left with the same argument. It only ever existed as `TargetingMode::Tile { range }`,
+so with `Tile` gone the record has never held a reach; `CONFUSION_RADIUS`, `LOCKDOWN_RADIUS`
+and `DART_RANGE` are each their effect's own constant, and each is clamped to what the
+player can sense at the point it is measured — which a shared field could not have done.
+
+### 4. What is fenced, and what would reopen this
+
+The replacement is **closed on purpose**: self, facing, area-around-the-firing-cell, and a
+fourth is a design conversation rather than a quiet extension — the same fence §8.2 puts
+around the use budget. Two prohibitions stand behind it, and they are the load-bearing part
+of the section:
+
+- **No auto-target-nearest, for anything.** There is no target list in the implementation to
+  snap to; where an ability needs to know what it caught, it measures out from the aim and
+  never scans for a candidate to aim at.
+- **No cursor and no modal picking step.** One keypress answers an ability (§11.4/§11.6).
+
+The tempting simplification after deleting all this is *"abilities just hit the nearest
+valid thing"* — which is precisely the failure appendix 1 records, arrived at by exactly the
+same path of least resistance, and it is why §8.4 was rewritten rather than deleted.
+
+What would genuinely reopen the cursor is an ability whose aim **cannot** be expressed as a
+position and a facing: something thrown over a wall to a cell you choose, or picked out of a
+set with no geometric ordering. None has been proposed in the catalogue's whole growth, and
+if one is, the argument to beat is section 2 — what does aiming it cost the player *on the
+board*, and is that more or less than standing in the right place?
+
+## Appendix 61 — Three stars, one per axis: what the score is for, and the one number that had to be derived
+
+**Ticket #563.** Closes §15 Q4 and the matching §7.3 `[OPEN]`. The design lives in §4.6;
+this is the reasoning that cost the argument, and the measurements that set the numbers.
+
+### 1. Why three marks and not one number
+
+The brief could have been read as *"rate the run 1–3"*. It was not built that way, and the
+reason is what a rating is **for** in a game with no meta-progression. §2.2 is explicit
+that the only thing carrying between runs is what you learned. A weighted total mapped
+onto tiers tells the player *"two stars"*, which they cannot act on; three independent
+axes tell them *"you were quick and quiet and you left a console standing"*, which they
+can. The readout is a **diagnosis**, and a diagnosis that averages its findings is not one.
+
+That is also why the axes are never traded off against each other. A run cannot buy speed
+with noise, because the two are answers to different questions about different mistakes.
+
+**Zero is a real reading**, against the brief's 1/2/3. A floor — *"winning is the first
+star"* — would spend the most legible mark on the fact the player already knows (they are
+looking at the escape screen), and would make the first star meaningless. A run that
+crawled out slow, loud and half-empty earned none of the three and is told so.
+
+### 2. §15 Q4's other half: takedowns cost score, and it costs no second rule
+
+Q4 asked whether takedowns should cost score, *"giving 'no killing' mechanical teeth via a
+leaderboard rather than a rule"*. The answer taken is **yes to a score, no to a separate
+takedown penalty**, because the stealth star already charges for it:
+
+    takedown → a body (§7.2) → the body is found → rung 3 (§7.3) → the stealth star is gone
+
+Aggression is therefore priced through the clock the design already built, with one
+mechanism instead of two and no leaderboard at all. A second, explicit *"−1 star per
+takedown"* would charge twice for one decision — and it would charge it in a currency the
+player cannot see coming, where the radio's clock is deliberately readable (§7.3: the
+responder is a dot that peels off toward where you struck).
+
+The ghost↔aggressive spectrum Q4 wanted falls out of this for free: a ghost run keeps the
+star, an aggressive run spends it, and the *cost* of spending it is the raid getting
+harder rather than a number getting smaller.
+
+### 3. Par is the hard number, and a flat one would have been wrong
+
+The speed star needs a threshold, and a threshold is where this design could most easily
+have gone wrong. Turn counts vary with facility size, flavour, modifiers and how much of
+the building the run chose to see (§10 exploration is most of a raid). **A flat constant
+would be wrong for half the facilities and would read as the game being arbitrary** —
+which is worse than shipping no speed star at all.
+
+So par is derived, from the building's own contents rather than from the recipe that asked
+for them:
+
+    par = 2 × span + 90 × consoles + 50 × crates      (span = width + height)
+
+Three decisions inside that:
+
+- **Span, not area, and doubled.** The ground a raid covers is *across and back*; 40×40
+  gives 80 cells of span, and the factor of two is the admission that the way in is not a
+  straight line — a raid that walked one would be walking through guards. Area would have
+  made a bigger board quadratically more forgiving, and the board is screen-bound anyway
+  (§10.2/§11.4), so the term has nowhere to run.
+- **From the facility, not from `LevelConfig`.** The number is read off the built level —
+  its carved span, the consoles seated in it, the crates hidden in it — so a hand-built
+  fixture with no recipe behind it still has a par, and so the flavours are handled with no
+  per-flavour table: an *Outpost* lands on 340 and a *Vault* on 670 because that is what
+  they hold.
+- **The console term carries the number, and a crate is worth less.** A console is not a
+  detour off a route, it is a *search*: the room it stands in is fogged until you have been
+  in it (§11.5a). A crate is a detour the player *chooses*; par allows for taking it rather
+  than funding it comfortably, and the thoroughness star is what pays for the choice.
+
+### 3a. The first set of numbers was wrong, and the way it was wrong is the lesson
+
+Par shipped at `span + 25 × consoles + 15 × crates`, putting quick play on **155**. It was
+wrong by a factor of nearly three, and both the report and the confirmation are worth
+recording because the mistake is easy to make again.
+
+**The report.** A played run with **omni-vision and ghost both on** — the fog lifted and
+the guards blinded, which is about as close to the optimal walk as this game allows — did
+not make par. That is a decisive kind of evidence: a threshold no *cheating* run can clear
+is not demanding, it is broken.
+
+**The confirmation.** A 100-seed bot batch at the **quick-play** gate:
+
+| Profile (`--intel-gate all`) | Wins | Median turns | speed stars |
+|---|---|---|---|
+| balanced | 4 | 428 | **0** |
+| cautious | 20 | 683 | **0** |
+
+Not one all-intel win in two hundred runs came in under par.
+
+**The mistake was measuring against the wrong gate.** The first numbers were sanity-checked
+against the sim's own baseline, which runs at `IntelGate::AtLeastOne` — a bot that takes
+*one* console and leaves, median 137 turns. Quick play asks for **all three**, and that is
+not the same job with a bigger number on it: each further console is a fresh search of a
+fogged building. 63% of those one-console wins were "inside par", which read like a healthy,
+discriminating threshold and was in fact a measurement of a different game.
+
+**The general rule this leaves behind:** *how long a raid takes is decided more by the
+exit's gate than by anything about the building.* Par is a fact about the facility, but the
+**calibration** of par is a fact about the mode, and the mode a human plays (quick play,
+all the intel) is the one it has to be right for.
+
+The tuned set puts quick play on **430** against that 428 median. Re-measured on the same
+two batches:
+
+| Profile (`--intel-gate all`) | Wins | Median turns | speed stars | best total |
+|---|---|---|---|---|
+| balanced | 4 | 428 | **2** (50%) | 3★ |
+| cautious | 20 | 683 | **3** (15%) | 3★ |
+
+Half of *balanced* wins clear it and a seventh of *cautious* ones do — the temperament that
+buys safety with turns pays for it in the speed star, which is the trade the axis exists to
+price. A three-star run appears for the first time. The consequence to keep in view is the other end: at the
+campaign's minimum haul (§4.5/#574) the speed star is *cheap*, because a run that grabs one
+objective and leaves clears par easily and pays for it in the haul star. That tension is the
+axes doing their job; if beelining ever becomes the only sane play, the lever is the gate
+and not par.
+
+### 4. What the sim measured, and the one worry it retired
+
+400 bare-bot runs, 100 per profile (`--bot --profile P --runs 100 --seed 0 --cap 1000`), at
+the sim's own `intel_to_exit: AtLeastOne` gate:
+
+| Profile | Wins | Median turns | 0★ | 1★ | 2★ | 3★ | speed | stealth | haul |
+|---|---|---|---|---|---|---|---|---|---|
+| balanced | 35 | 137 | 6 | 10 | 19 | 0 | 22 | 26 | 0 |
+| cautious | 53 | 235 | 12 | 27 | 14 | 0 | 15 | 40 | 0 |
+| aggressive | 40 | 136 | 13 | 10 | 17 | 0 | 23 | 21 | 0 |
+| careless | 43 | 142 | 12 | 15 | 16 | 0 | 24 | 23 | 0 |
+
+Three findings:
+
+- **The stealth star is demanding, not impossible** — which was the risk the ticket named
+  and the one thing worth measuring before shipping. It is earned by **60–75% of winning
+  runs** across every temperament. The threshold stays at condition 0; had this read near
+  zero, the honest response was to move it to ≤ 1 rather than blame the design.
+- **The speed star discriminates between temperaments**, which is what a threshold is for:
+  63% of *balanced* wins were inside the *original* par against 28% of *cautious* ones —
+  the profile whose whole temperament is spending turns to stay safe. That the numbers
+  themselves were wrong (§3a) does not touch the shape: a threshold every win or no win
+  cleared would be a row with nothing behind it (§2.3), and this one separates the two
+  temperaments at whatever value it sits at. **These rows are at the sim's own gate**, and
+  §3a is the reason that sentence now has to be said out loud.
+- **`haul` is zero everywhere, and that is the sim's gate rather than the axis.** The sim
+  leaves after one console (§13.2), so it never takes everything; the axis is unearned
+  rather than unearnable. It is exactly the opposite degeneracy to quick play's, where the
+  gate is *all the intel* and no crates are planted, so the star is free. Both are recorded
+  in §4.6 rather than papered over, and both are campaign-shaped problems: the campaign is
+  the mode where objectives are surplus and the axis has teeth.
+
+**The bot was not adapted, deliberately.** §13.2's policy decides by cues and has no
+objective function. Handing it *maximise stars* would make the histogram measure the
+scorer rather than the game (§13.3, `docs/bot-behaviour.md`'s standing warning), so the sim
+**reports** the distribution and optimises nothing. That the bot's numbers above are
+unchanged from the previous baseline is the evidence that nothing about how it plays moved.
+
+### 5. The glyph that is doing double duty
+
+`★` was already the campaign map's **archive** node, and `docs/render-reference.md` said in
+so many words that it was the one glyph that screen did not reuse. The score now puts
+`★`/`☆` on that same screen.
+
+It was kept rather than swapped, for two reasons. The star is the one mark every player
+already reads as *this is the good one*, and spending it on a rating is what it is for;
+and the two readings are told apart by **kind and place** — a node standing in the picture,
+against a mark on a named axis in a labelled report row (`speed ★ · stealth ☆ · haul ☆`).
+The alternative was a private mark for the score, which would have made the most legible
+row on the screen the one nobody had seen before. The render reference records the second
+reading rather than leaving it to be discovered.
+
+### 6. The criterion that has to survive
+
+**Nothing reads the score.** The test that says so steps two campaigns side by side whose
+raids differ *only* in what they score, and asserts every other thing the layer hands out —
+the next facility's whole config, the loadout, the wallet, the alert, the offers — is
+identical. It is the criterion that stops stars drifting into meta-progression, and the
+first suggestion after this ships will be *"stars should give something else too"*.
+
+#573 will **narrow** it to exactly one reader (the archive gate) and must not delete it.
+Inside a run, a second consumer would make the score a resource the player plays toward
+rather than a verdict on how they played — which is the thing §4.6 exists to not be.
 
 ---
 
-## Appendix 60 — Repel: a wall in the open, and what a guard does about ground it will not stand in
+## Appendix 62 — Repel: a wall in the open, and what a guard does about ground it will not stand in
 
 *(§7.6, §8.3, §10.4, §4.5 — the #554 ruling.)*
 

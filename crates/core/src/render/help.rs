@@ -8,9 +8,10 @@
 //! has somewhere to live without the page overflowing the board:
 //!
 //! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
-//!   the run's own **level-seed token**, with a `copy [c]` control that puts it on the
-//!   clipboard (§13.1/#353), the **objective** the exit will hold the run to (§4.5/#574,
-//!   drawn by [`super::objective`]), the active [`LevelModifiers`] by name and direction
+//!   the run's own **level-seed token**, with a `copy [c]` control that puts a link to
+//!   it on the clipboard (§13.1/#353/#572), the **objective** the exit will hold the run
+//!   to (§4.5/#574, drawn by [`super::objective`]), the active [`LevelModifiers`] by name
+//!   and direction
 //!   (§12.6), and the **facility alert** — the rung reached and the retaliation it has
 //!   in force (§7.3/#375, drawn by [`super::alert`]). The first two are fixed at boot;
 //!   the third is the one thing on the card that moves while you play, which is why the
@@ -76,6 +77,7 @@ use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::place::LevelConfig;
+use crate::score::Axis;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
 /// key, an ability key, or another UI control — and the conventional roguelike
@@ -202,11 +204,12 @@ pub enum HelpHit {
     /// debug session the §12.6 switches — would be keyboard-only on a game that is
     /// played on phones (§11.6: every control reachable by key *and* touch).
     Setting(SettingsRow),
-    /// The Level info tab's `copy [c]` control — put this run's level-seed token on
-    /// the system clipboard (§13.1/#353). The **core neither performs nor knows
-    /// about** the write: it owns the geometry and the token, and the shell owns the
-    /// clipboard (§12.1). Only ever produced when a token is actually drawn, so a
-    /// hand-built state offers no control rather than one that copies nothing.
+    /// The Level info tab's `copy [c]` control — put a **link to this run's level** on
+    /// the system clipboard (§13.1/#353/#572). The **core neither performs nor knows
+    /// about** the write, and does not even compose the link: it owns the geometry and
+    /// the token, and the shell owns the clipboard and the page's own address (§12.1).
+    /// Only ever produced when a token is actually drawn, so a hand-built state offers
+    /// no control rather than one that copies nothing.
     CopySeed,
 }
 
@@ -214,8 +217,10 @@ pub enum HelpHit {
 /// (§13.1/#353) — the acknowledgement the panel prints under the control, and its
 /// answer to "did that work?". One line for both copy controls: the Level info tab's
 /// `copy [c]` under its token, and the Debug tab's `replay [r]` under its own row
-/// (#411/#459) — "copied to clipboard" is the honest answer either way, and a tab
-/// switch drops it, so the line always belongs to the tab it is drawn on.
+/// (#411/#459) — since #572 **both put a link on the clipboard**, one naming a level
+/// and one naming a whole run, so a single wording is honest for both rather than
+/// merely convenient. A tab switch drops it, so the line always belongs to the tab it
+/// is drawn on.
 ///
 /// It lives on [`ScreenUi`](super::ScreenUi), **not** on [`State`](crate::State): the
 /// panel writes no state ([`render_help`]'s standing promise), the copy costs no turn
@@ -227,12 +232,13 @@ pub enum SeedCopy {
     /// the row under the token stays the blank spacer it always was.
     #[default]
     Idle,
-    /// The token reached the system clipboard.
+    /// The link reached the system clipboard.
     Copied,
     /// The browser had no clipboard to write to, or refused the write — an insecure
     /// context, or a frame without clipboard permission. **Not silent, and not a
     /// claim**: the token is still printed one row above, ready to be read off by
-    /// eye as it was before this control existed.
+    /// eye as it was before this control existed — which is the whole reason the panel
+    /// keeps displaying the short form while copying the long one (#572).
     Unavailable,
     /// **The game refused, not the browser** (§12.6/#507): the run has had the ghost
     /// switch on, so it cannot be exported as a replay at all — the inputs were played
@@ -265,7 +271,7 @@ impl SeedCopy {
 /// clipboard failure says what did *not* happen and never names the clipboard as
 /// holding anything, and the refusal (#507) names the **switch** rather than the
 /// clipboard, because the clipboard was never asked.
-const COPIED_ACK: &str = "copied to clipboard";
+const COPIED_ACK: &str = "link copied to clipboard";
 const UNAVAILABLE_ACK: &str = "clipboard unavailable";
 const REFUSED_ACK: &str = "no replay: ghost was used";
 
@@ -289,8 +295,8 @@ const _: () = {
 pub(super) const CLOSE_BUTTON: &str = "[x]";
 pub(super) const CLOSE_BUTTON_LEN: u32 = 3;
 
-/// The key that copies the run's **level-seed token** to the clipboard while the
-/// panel is open (§13.1/#353) — `c`, for *copy*. It is drawn as `copy [c]` beside the
+/// The key that copies a **link to the run's level** to the clipboard while the panel
+/// is open (§13.1/#353/#572) — `c`, for *copy*. It is drawn as `copy [c]` beside the
 /// token, the same label-and-key shape [`OPTIONS_LABEL`] uses, and matched in
 /// [`help_nav_for_key`](crate::help_nav_for_key).
 ///
@@ -570,6 +576,23 @@ pub(super) struct PanelRun<'a> {
     /// **latch**, not the switch beside it, which is why it is a field of its own: the
     /// replay row answers to the run's history and not to what is currently flipped.
     pub(super) ghosted: bool,
+    /// **The facility's par turn count** ([`State::par`](crate::State::par), §14 v2/#563)
+    /// — the Level info tab's par row, and the one number on this panel that belongs to
+    /// the building rather than to the run's setup.
+    pub(super) par: u32,
+}
+
+/// The Level info tab's **par** section (§14 v2/#563) — the facility's turn allowance,
+/// and what beating it is worth.
+///
+/// *Par* is meta vocabulary in §11.8's sense: it names the run's measurement, not
+/// anything inside the building, so it stays the word the design uses rather than being
+/// dressed up diegetically. The blurb comes from [`Axis::Speed`] itself, so the panel and
+/// the end screen cannot end up promising different things about the same star.
+const PAR_HEADING: &str = "PAR";
+
+fn par_row(par: u32) -> String {
+    format!("{par} turns · {} for a star", Axis::Speed.blurb())
 }
 
 /// Draw the tab bar on row 0: each tab as `[Label]` — the active one in Interest
@@ -678,6 +701,23 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
         draw(grid, CONTENT_INDENT, y, &text, category);
         y += 1;
     }
+
+    // The facility's **par** (§14 v2/#563), under the modifiers and above the alert: it
+    // is a fact about the level like every active modifier, so this is where it lives —
+    // available on demand, never nagging. It is deliberately **not** on the board HUD: a
+    // par counting down in the corner would turn a stealth game into a speedrun and push
+    // against exactly the patience §1 and §7.6 are built to reward.
+    y += 1;
+    draw(grid, SECTION_INDENT, y, PAR_HEADING, Category::System);
+    y += 1;
+    draw(
+        grid,
+        CONTENT_INDENT,
+        y,
+        &par_row(run.par),
+        Category::Neutral,
+    );
+    y += 1;
 
     // The facility alert (§7.3/#375), **last**: the modifiers above say what was
     // bending the rules before the raid started, and this says what the raid itself

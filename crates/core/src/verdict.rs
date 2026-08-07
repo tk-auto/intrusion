@@ -30,6 +30,7 @@ use crate::cell::Cell;
 use crate::difficulty::Difficulty;
 use crate::guard::GuardState;
 use crate::level_seed::LevelSeed;
+use crate::score::Score;
 
 /// **Why** a run ended (§4.5) — the terminal event, latched at the instant it fired.
 ///
@@ -82,6 +83,24 @@ pub struct RunStats {
     pub intel: usize,
     /// How many objectives the level had in total.
     pub intel_total: usize,
+    /// **Crates opened, and how many the facility hid** (§8.3/#209) — the other half of
+    /// the thoroughness axis ([`Axis::Thoroughness`](crate::Axis)).
+    ///
+    /// Counts, where [`salvaged`](Self::salvaged) is a *set*: two crates holding the same
+    /// piece of tech collapse to one entry in a [`Loadout`], so the set can say what a
+    /// raid found but never how many boxes it opened. The star asks the second question.
+    pub caches: usize,
+    /// How many equipment caches the facility held in total — zero for a recipe that hides
+    /// none, which is every quick-play level (§10.2).
+    pub caches_total: usize,
+    /// **The facility's par turn count** ([`par_for`](crate::par_for), §14 v2/#563): the
+    /// allowance the speed star is measured against.
+    ///
+    /// Carried on the reading rather than recomputed at each surface, because par is a
+    /// fact about the facility fixed at level start and the run is over by the time
+    /// anything asks: a screen that derived it again would be deriving it from a board
+    /// whose crates have all been opened.
+    pub par: u32,
     /// Takedowns landed (§7.2) — the permanent cost the run chose to pay.
     pub takedowns: u32,
     /// How often stealth **broke**: fresh detections (§7.6), counted on the
@@ -131,6 +150,17 @@ pub struct Verdict {
     pub ending: Ending,
     /// What the run amounted to.
     pub stats: RunStats,
+}
+
+impl Verdict {
+    /// **The three stars this facility was worth** (§15 Q4/#563), or `None` for a run
+    /// that did not get out.
+    ///
+    /// One line, so that "scoring happens only on escape" is answered in one place: a
+    /// capture has no score, and its screen says why you lost instead (§14 v2).
+    pub fn score(&self) -> Option<Score> {
+        Score::of(self)
+    }
 }
 
 /// **How a run is being played** — which decides what the end screen may offer

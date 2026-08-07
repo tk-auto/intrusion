@@ -51,6 +51,7 @@ mod debug;
 mod input;
 mod menu;
 mod palette;
+mod pop_in;
 mod replay;
 mod save;
 mod screen_settings;
@@ -58,6 +59,7 @@ mod seed;
 mod settings;
 mod tap;
 mod tiles;
+mod timer;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -118,9 +120,10 @@ pub(crate) fn new_run(level: &LevelSeed, debug: DebugModifiers) -> Result<State,
 /// level is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
 /// from the URL when a `…#seed=<token>` link was shared, from a baked global in a
 /// seed-locked artifact, and otherwise off the clock ([`seed`]). It is the whole
-/// reproducible config `(seed, modifiers, abilities)` (#245), re-enterable through
-/// the menu's seed prompt ([`menu`]) as a compact level-seed token — the
-/// seed-sharing loop (§13.1/#110/#244).
+/// reproducible config `(seed, modifiers, abilities)` (#245), carried as a compact
+/// level-seed token — and since #572 the URL is the *only* way one comes back in: the
+/// help panel copies a link, and there is nothing anywhere to type a token into
+/// (§13.1/#110/#244).
 ///
 /// **Where a load lands** (#268): a load that was *told* which level to play — a
 /// shared link, a baked artifact, a replay — boots straight into it, because the
@@ -229,6 +232,7 @@ pub fn start() -> Result<(), JsValue> {
             tiles: tiles::Tiles::boot(),
             campaign: None,
             autosave: save::browser(handle.clone()),
+            pop_in: pop_in::clock(handle.clone()),
             resume,
             handle: handle.clone(),
         })
@@ -240,12 +244,12 @@ pub fn start() -> Result<(), JsValue> {
     tiles::install(&game)?;
     if game.borrow().replay.is_some() {
         // A replay is a pure view: only the scrub pump is wired, never the live
-        // pumps or the seed bar — so the gesture maps cannot collide (§11.6).
+        // pumps — so the gesture maps cannot collide (§11.6).
         replay::install(&document, &game)?;
     } else {
         input::install_input(&document, &game)?;
         input::install_gestures(&document, &game)?;
-        menu::install(&document, &game)?;
+        menu::publish_screen(&game);
         // The page-hide flush (§12.5/#514) — live play only: a replay has no run of its
         // own to write.
         save::install(&document, &game)?;
@@ -315,7 +319,7 @@ struct Game {
     ui: ScreenUi,
     /// The level the current run booted from (§12.4/#245) — the shell's, not the
     /// core's: the whole reproducible config `(seed, modifiers, abilities)`. Held so
-    /// the seed bar can show its [level-seed token](LevelSeed::encode) and a
+    /// the help panel can show its [level-seed token](LevelSeed::encode) and a
     /// `…#seed=<token>` link can carry it, modifiers and loadout and all ([`seed`]).
     level: LevelSeed,
     /// The replay being played back, or `None` in ordinary live play (#197). When
@@ -364,6 +368,12 @@ struct Game {
     /// is drawn — and it is the page's, not the run's: a fresh facility keeps the same
     /// slot and simply overwrites it.
     autosave: save::Autosave,
+    /// The **loud-message pop-in's clock** (§11.7/#576): the couple of seconds the box
+    /// on [`ui`](Game::ui) stays up. Held here for the autosave's reason — it is the
+    /// page's, not the run's — and separate from the box itself, because the box is
+    /// what is *drawn* (so it lives on the view state the core renders from) and this
+    /// is only what takes it away ([`pop_in`]).
+    pop_in: Box<dyn timer::Timer>,
     /// The saved run this load found and has **not yet resumed**, or `None`.
     ///
     /// Read once at boot and taken by [`Game::continue_run`], so a run can be resumed
@@ -413,10 +423,6 @@ impl Game {
             cell_h: CELL_H * scale * dpr,
             font: (CELL_H - 2.0) * scale * dpr,
         };
-        // Tell the page how big a glyph is now (in CSS pixels, so the same number the
-        // stylesheet works in): the seed box types itself at the board's own size
-        // rather than a fixed one that would tower over a small fit ([`menu`]).
-        menu::set_glyph_size((CELL_H - 2.0) * scale);
         self.draw();
     }
 
@@ -464,6 +470,10 @@ impl Game {
         // page's, not the run's. The carried set is named once, beside the fields, so
         // a new one cannot be forgotten here (#473).
         self.ui = self.ui.for_fresh_run();
+        // …and the old run's pop-in with it (§11.7/#576), clock included: a box raised
+        // by a facility that no longer exists must not expire — and repaint — over the
+        // card the new one opens on.
+        self.reset_pop_in();
         self.fit_and_draw();
         Ok(())
     }

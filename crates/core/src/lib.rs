@@ -83,10 +83,10 @@ mod render;
 mod replay;
 mod rng;
 mod salvage;
+mod score;
 mod scout;
 mod state;
 mod status;
-mod targeting;
 #[cfg(test)]
 mod test_support;
 mod verdict;
@@ -94,7 +94,7 @@ mod vision;
 
 pub use ability::{
     Ability, AbilityId, AbilityMode, AbilityState, AbilityStatus, Behaviour, Economy, Effect,
-    Loadout, TargetingMode,
+    Loadout,
 };
 pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
@@ -139,11 +139,15 @@ pub use render::{
     SeedCopy, SettingsRow, SettingsUi, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
-    ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
-    to_script,
+    ability_script_letter, field_in, input_token, level_fragment, parse_replay_link, parse_script,
+    replay_fragment, to_script,
 };
 pub use rng::Rng;
 pub use salvage::cache_contents;
+pub use score::{
+    par_for, Axis, Score, NO_SCORE, PAR_PER_CACHE, PAR_PER_INTEL, PAR_SPAN, STAR_EARNED,
+    STAR_MISSED,
+};
 pub use scout::scouted_cells;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
@@ -151,8 +155,10 @@ pub use state::{
     GUARD_CUE_DECAY_TURNS, LOCKDOWN_RADIUS, PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE,
     PLAYER_SENSE_RANGE_WAITING,
 };
-pub use status::{live_messages, message_for, near_line, Message, MessageHistory, HISTORY_ACTIONS};
-pub use targeting::{within_range, Target, Targeting, TileCursor};
+pub use status::{
+    live_messages, message_for, near_line, pop_in, Message, MessageHistory, PopIn, HISTORY_ACTIONS,
+    POP_IN_PRIORITY,
+};
 pub use verdict::{EndExit, Ending, RunMode, RunOptions, RunStats, Verdict};
 pub use vision::{
     field_of_view, field_of_view_with_blind_spot, field_of_view_with_peek, BlindPolicy, BlindTier,
