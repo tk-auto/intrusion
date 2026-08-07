@@ -140,6 +140,22 @@ pub struct ScreenUi {
     /// routes input to it ([`help_nav_for_key`](crate::help_nav_for_key) /
     /// [`help_hit`](crate::help_hit)), so the game never steps underneath.
     pub help_open: bool,
+    /// Whether the **level-start splash** is up (§11.4/§12.6/#497): the card that says
+    /// what this raid is for and what is bending its rules, drawn over the frame before
+    /// the first turn ([`splash`](super::splash)).
+    ///
+    /// A pure view flag like [`help_open`](Self::help_open) — no world change, no turn
+    /// (§4.4), so no guard moves under it — raised for a **fresh facility** by
+    /// [`for_fresh_run`](Self::for_fresh_run) and lowered by the first input of any
+    /// kind, which the shell consumes rather than passing on. It is deliberately not a
+    /// clock: nothing anywhere schedules its removal, because a card that dismissed
+    /// itself would race the player's first keypress into the world (see
+    /// [`splash`](super::splash)).
+    ///
+    /// [`Default`] is **down**, so a hand-built state, a test and the replay viewer all
+    /// draw the frame they always drew; it is the *start of a run* that raises it, not
+    /// the existence of one.
+    pub splash_open: bool,
     /// The title screen / main menu, while it is up (§14/#268) — `None` once a run
     /// is playing. Like [`help_open`](Self::help_open) it is modal and full-screen:
     /// [`render_screen`] draws it *instead of* the game frame and the shell routes
@@ -254,6 +270,12 @@ impl ScreenUi {
     /// simply not extended, so the choice made on the title screen died on the way
     /// into the run. One named seam means the next field added answers the question
     /// once, where the field is declared, and a test can name what survives.
+    ///
+    /// It is also where the **level-start splash** is raised (#497): a fresh facility
+    /// opens on its own card, and this is the one seam every fresh facility crosses —
+    /// the title screen's *Quick play*, a shared link, an end screen's *retry*, a
+    /// campaign raid. The resume path uses this as its base and lowers the flag again,
+    /// because a run picked up mid-raid is past its first turn.
     #[must_use]
     pub fn for_fresh_run(self) -> Self {
         Self {
@@ -261,6 +283,7 @@ impl ScreenUi {
             theme: self.theme,
             renderer: self.renderer,
             debug_mode: self.debug_mode,
+            splash_open: true,
             ..Self::default()
         }
     }
@@ -594,9 +617,23 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     if ui.message_log_open {
         super::message_log::overlay_message_log(&mut screen, state);
     }
+    // The level-start splash (§11.4/§12.6/#497), laid over the finished frame: until it
+    // is dismissed there is nothing underneath it the player may act on, so it goes over
+    // the board and the chrome alike. It draws about the **run**, not about progress
+    // through it — the gate the exit will hold the player to and the console count it
+    // holds them to it with, plus the §12.6 rules in force — so a card and the Level info
+    // tab can only ever say the same thing about the same facility.
+    if ui.splash_open {
+        super::splash::overlay_splash(
+            &mut screen,
+            state.modifiers(),
+            state.intel_total(),
+            ui.modality,
+        );
+    }
     // The verdict is the **last** thing laid on (§14 v2/#138): a finished run has one
-    // thing left to say, and nothing — not the log, not the bar — may sit on top of
-    // it. It is an overlay rather than a scene on purpose: the board that reads above
+    // thing left to say, and nothing — not the log, not the bar, not a card from a turn
+    // that never happened — may sit on top of it. It is an overlay rather than a scene on purpose: the board that reads above
     // and below it is most of how a capture gets traced (§2.2).
     if let Some(verdict) = state.verdict() {
         super::verdict::overlay_verdict(&mut screen, verdict, ui.end, state.level());

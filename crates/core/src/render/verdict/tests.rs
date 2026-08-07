@@ -10,7 +10,7 @@ use crate::difficulty::Difficulty;
 use crate::guard::Guard;
 use crate::level_seed::LevelSeed;
 use crate::place::LevelConfig;
-use crate::render::{render_screen, ScreenUi};
+use crate::render::{render_screen, ScreenUi, BOTTOM_ROWS, TOP_ROWS};
 use crate::state::{Input, Outcome, State};
 use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel};
 use crate::verdict::{RunMode, RunOptions};

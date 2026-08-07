@@ -352,6 +352,11 @@ impl Game {
         self.campaign = None;
         self.ui = ScreenUi {
             menu: Some(MenuUi::default()),
+            // The level-start card belongs to the facility being left (#497), and the
+            // title screen is not one — the same clear the campaign map makes, and for
+            // the same reason: no surface the pumps ask about first may outlive the
+            // frame it was drawn on.
+            splash_open: false,
             ..self.ui
         };
         self.draw();

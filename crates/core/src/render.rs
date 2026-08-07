@@ -1188,13 +1188,55 @@ pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Catego
     }
 }
 
+/// The glyph an **overlay card** is bounded with, top and bottom — the same rule the
+/// deployed message log closes on (§11.7/#300), so every surface laid *over* the frame
+/// reads as one family rather than as a series of inventions.
+pub(super) const RULE_GLYPH: char = '─';
+
+/// Where an overlay card `rows` tall starts on a `height`-tall screen: the block
+/// centred in the **map area**, so the board reads above and below it (§11.4 — the
+/// screen is the board, and a card that covered it would take away the very thing
+/// the player is being told about).
+///
+/// Clamped to the top of the map rather than allowed to climb into the status lines:
+/// those rows are the near line's and the usable line's, and an overlay that ate them
+/// would cover live state to show standing state.
+pub(super) fn overlay_top(height: u32, rows: usize) -> u32 {
+    let map_h = height.saturating_sub(hud::TOP_ROWS + hud::BOTTOM_ROWS);
+    hud::TOP_ROWS + map_h.saturating_sub(rows as u32) / 2
+}
+
+/// Blank one row of the frame — an overlay card's own surface, so no board glyph
+/// reads through the words laid over it.
+pub(super) fn clear_row(grid: &mut Grid, y: u32) {
+    for x in 0..grid.width {
+        grid.cells[(y * grid.width + x) as usize] = GlyphCell {
+            vis: Visibility::Live,
+            ..GlyphCell::blank()
+        };
+    }
+}
+
+/// Draw an overlay card's bounding rule across row `y`.
+pub(super) fn draw_rule(grid: &mut Grid, y: u32) {
+    for x in 0..grid.width {
+        grid.cells[(y * grid.width + x) as usize] = GlyphCell {
+            glyph: RULE_GLYPH,
+            fg: Category::System,
+            ..GlyphCell::blank()
+        };
+    }
+}
+
 mod alert;
 mod campaign_map;
 mod help;
 mod hud;
 mod menu;
 mod message_log;
+mod modifier_rows;
 mod settings;
+mod splash;
 mod usable;
 mod verdict;
 pub use campaign_map::{

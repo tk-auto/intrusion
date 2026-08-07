@@ -36,9 +36,8 @@
 
 use super::alert::condition_line;
 use super::help::seed_token;
-use super::hud::{BOTTOM_ROWS, TOP_ROWS};
 use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
-use super::{draw, GlyphCell, Grid, Visibility};
+use super::{clear_row, draw, draw_rule, overlay_top, Grid};
 use crate::alert::{rung_category, NO_ALERT};
 use crate::category::Category;
 use crate::guard::GuardState;
@@ -123,11 +122,6 @@ const ESCAPED_CAUSE: &str = "the tunnel closes behind you";
 /// What the [`Entombed`](Ending::Entombed) loss says (§8.3/#329): the phase window ran
 /// out inside a solid with nowhere to be thrown clear to.
 const ENTOMBED_CAUSE: &str = "the wall closed around you";
-
-/// The rule that bounds the panel top and bottom — the same glyph the deployed message
-/// log closes on (§11.7/#300), so the two overlays read as one family of surface
-/// rather than two inventions.
-const RULE_GLYPH: char = '─';
 
 /// The footer of a screen with a choice to make, and of one without. A campaign run
 /// has a single exit (§2.2), and telling it to choose between one thing would be a
@@ -274,17 +268,6 @@ fn ledger(stats: RunStats) -> Vec<(String, Category)> {
     ]
 }
 
-/// Where the panel's first row lands on a `height`-tall screen: the block centred in
-/// the **map area**, so the finished board reads above and below it (§2.2's tracing).
-///
-/// Clamped to the top of the map rather than allowed to climb into the status lines:
-/// the near line still carries the run's last message, which is the one sentence the
-/// screen's own cause line is the long form of.
-fn panel_top(height: u32, rows: usize) -> u32 {
-    let map_h = height.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
-    TOP_ROWS + map_h.saturating_sub(rows as u32) / 2
-}
-
 /// Lay the panel over a finished frame (§14 v2/#138) — the last thing drawn, over the
 /// board and over any chrome, because a verdict is the one thing on screen that
 /// nothing may sit on top of.
@@ -298,7 +281,11 @@ pub(super) fn overlay_verdict(
     level: Option<LevelSeed>,
 ) {
     let rows = rows(verdict, ui, level);
-    let top = panel_top(grid.height, rows.len());
+    // Centred in the map area, so the run's last frame — the evidence — reads above and
+    // below it (§2.2's tracing), and never over the near line, which still carries the
+    // run's last message: the one sentence this screen's own cause line is the long form
+    // of.
+    let top = overlay_top(grid.height, rows.len());
     let selected = ui.selected();
     for (i, row) in rows.iter().enumerate() {
         let y = top + i as u32;
@@ -308,15 +295,7 @@ pub(super) fn overlay_verdict(
         clear_row(grid, y);
         match row {
             Row::Blank => {}
-            Row::Rule => {
-                for x in 0..grid.width {
-                    grid.cells[(y * grid.width + x) as usize] = GlyphCell {
-                        glyph: RULE_GLYPH,
-                        fg: Category::System,
-                        ..GlyphCell::blank()
-                    };
-                }
-            }
+            Row::Rule => draw_rule(grid, y),
             Row::Line(text, category) => {
                 let len = text.chars().count() as u32;
                 draw(grid, centre(grid.width, len), y, text, *category);
@@ -332,17 +311,6 @@ pub(super) fn overlay_verdict(
                 );
             }
         }
-    }
-}
-
-/// Blank one row of the frame — the panel's surface, so no board glyph reads through
-/// the words laid over it.
-fn clear_row(grid: &mut Grid, y: u32) {
-    for x in 0..grid.width {
-        grid.cells[(y * grid.width + x) as usize] = GlyphCell {
-            vis: Visibility::Live,
-            ..GlyphCell::blank()
-        };
     }
 }
 
@@ -382,7 +350,7 @@ pub fn verdict_hit(
         return None;
     }
     let rows = rows(verdict, ui, level);
-    let index = y.checked_sub(panel_top(height, rows.len()))? as usize;
+    let index = y.checked_sub(overlay_top(height, rows.len()))? as usize;
     match rows.get(index)? {
         Row::Exit(exit) => Some(*exit),
         _ => None,

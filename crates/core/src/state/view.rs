@@ -667,6 +667,17 @@ impl State {
         self.objectives.len() - self.objectives_remaining()
     }
 
+    /// How much intel the facility holds **in all** — taken and still out together
+    /// (§10.2's console count, as the §12.6 intel knob left it).
+    ///
+    /// A fact about the *building* rather than about progress through it, which is why
+    /// it is its own question: the level-start splash states the objective before a turn
+    /// has been taken (#497), and the end screen's ledger reports it as the denominator
+    /// of the haul ([`run_stats`](Self::run_stats)).
+    pub fn intel_total(&self) -> usize {
+        self.objectives.len()
+    }
+
     /// Whether the exit will accept the player — the run's **intel gate**
     /// (§10.2/§4.5), now a level modifier ([`IntelGate`](crate::IntelGate)/#244)
     /// rather than one fixed rule, so the three modes gate the same facility

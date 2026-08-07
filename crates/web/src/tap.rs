@@ -230,10 +230,16 @@ impl Game {
             log_rows: message_log_rows(&self.state, self.ui),
             // A finished run is modal too: the board behind the verdict is evidence
             // to read, not a surface to tap (§14 v2/#138) — and a stray wait on it
-            // would be an input to a loop that is already over.
+            // would be an input to a loop that is already over. So is a run that has
+            // not started: the level-start card is up over the board (§11.4/#497), and
+            // the press that dismisses it must not also spend the first turn. The tap
+            // resolves as [`Tap::Captured`] and the gesture pump turns it into the
+            // dismissal ([`Game::gesture_command`]), which is the same route the menu's
+            // and the panel's captured presses take.
             modal: self.ui.menu.is_some()
                 || self.map_open()
                 || self.ui.help_open
+                || self.ui.splash_open
                 || self.state.verdict().is_some(),
         }
     }
@@ -249,6 +255,13 @@ impl Game {
     /// the one that can be raised over the other (#513).
     fn control_at(&self, col: u32, row: u32) -> Option<Control> {
         let width = self.state.layout().facility().width();
+        // **The level-start card carries no control at all** (#497), and that is its
+        // whole input model rather than an omission: every press dismisses it, so a
+        // press that landed on a control would be the one press that did something
+        // else. Asked first, so nothing drawn underneath it can answer.
+        if self.ui.splash_open {
+            return None;
+        }
         // **The open panel is asked before the menu** (#513): the menu's `Options` entry
         // raises it on the Options tab, so a press that fell through to the list
         // underneath would fire an entry the player cannot see.

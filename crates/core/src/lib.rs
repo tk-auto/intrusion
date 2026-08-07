@@ -115,10 +115,11 @@ pub use facility::{Facility, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use guard::{Guard, GuardState};
 pub use input::{
-    ability_slot_for_code, declines_exchange, end_nav_for_gesture, end_nav_for_key,
-    help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key, key_for_code,
-    map_nav_for_gesture, map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key,
-    ui_command_for_key, EndNav, Gesture, HelpNav, MapNav, MenuNav, UiCommand,
+    ability_slot_for_code, declines_exchange, dismisses_splash, end_nav_for_gesture,
+    end_nav_for_key, gesture_dismisses_splash, help_nav_for_gesture, help_nav_for_key,
+    input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture, map_nav_for_key,
+    menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, EndNav, Gesture, HelpNav, MapNav,
+    MenuNav, UiCommand,
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
