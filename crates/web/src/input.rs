@@ -147,14 +147,21 @@ impl Game {
         // discard *is* the decline. This is the second spelling of that one press, for
         // the hand that reaches for `Escape` when a game asks a question, and it resolves
         // to the same `Input::Discard` rather than to a cancel path of its own.
+        //
+        // **It is asked before the UI table below, and that order is the binding**
+        // (#551): the board opens the help panel with the same key now, and the older
+        // claim wins while an offer is up. `exchange_claims_key` is that rule, pure so a
+        // native test pins it.
         if let Some(offer) = self.state.exchange() {
-            if declines_exchange(key) {
+            if exchange_claims_key(true, key) {
                 self.step_and_draw(Input::Discard(offer.offered()));
                 return true;
             }
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
-        // ever touching the turn loop. `m` deploys the message list; `?` opens help.
+        // ever touching the turn loop. `m` deploys the message list; `?` and `Escape`
+        // open help (#551) — the same command, so the panel comes up on the tab it was
+        // last left on whichever of the two the hand reached for.
         if let Some(command) = ui_command_for_key(key) {
             self.apply_ui_command(command);
             self.draw();
@@ -821,6 +828,24 @@ enum GestureCommand {
 /// keyboard of a run in progress.
 fn splash_swallows(splash_open: bool, key: &str) -> bool {
     splash_open && dismisses_splash(key)
+}
+
+/// Whether an **open exchange** takes this press for itself (§8.3/#266/#551) — the pure
+/// rule behind [`Game::handle_key`]'s decline arm, in the spirit of [`splash_swallows`]
+/// above it.
+///
+/// It exists because the key stopped being uncontested. `Escape` declined an offer at a
+/// time when the board bound it to nothing else; since #551 it also opens the help panel
+/// ([`ui_command_for_key`]), so *which* of the two a press means is decided by the order
+/// the shell asks its tables in — and an order that lives only in the arms of a wasm-only
+/// method is an order no native test can hold. Stated here, the precedence is one line
+/// and pinned: **offer open → decline; no offer → panel.**
+///
+/// The decline wins because it is the claim already made, and because a panel opened
+/// over an unanswered offer would be the worse mis-key: the offer is what the player is
+/// looking at, and `Escape` is the answer the usable line is telling them to press.
+fn exchange_claims_key(exchange_open: bool, key: &str) -> bool {
+    exchange_open && declines_exchange(key)
 }
 
 /// Which surfaces are up, as the gesture rule reads them — the view flags
@@ -1711,6 +1736,34 @@ mod tests {
             assert!(
                 !splash_swallows(true, held),
                 "{held:?} is not the press the card is waiting for",
+            );
+        }
+    }
+
+    /// **An open offer outranks the help key** (§8.3/#266/#551): both claims spell
+    /// themselves `Escape`, and the older one wins while the offer is up.
+    ///
+    /// The two halves are what the rule is for. With an offer open the press is the
+    /// decline and the panel does not come up — even though the board's own table now
+    /// answers the key. With no offer the exchange claims nothing, and the press falls
+    /// through to the `ToggleHelp` the UI table has for it, exactly as `?` does.
+    #[test]
+    fn an_open_offer_outranks_the_help_key() {
+        assert!(exchange_claims_key(true, "Escape"), "the offer is answered");
+        assert!(
+            !exchange_claims_key(false, "Escape"),
+            "with no offer the key is the panel's",
+        );
+        // The board's binding is real either way — which is what makes the ordering
+        // load-bearing rather than academic (#551).
+        assert_eq!(ui_command_for_key("Escape"), Some(UiCommand::ToggleHelp));
+        // And the offer claims *only* `Escape`: its other four answers are the bar's
+        // slots, reached by the digits and the mnemonics below, so no other key is
+        // diverted here — the help key's own spelling included.
+        for key in ["?", "m", "n", "w", "Enter", " ", "ArrowUp", "c"] {
+            assert!(
+                !exchange_claims_key(true, key),
+                "{key:?} is not the decline",
             );
         }
     }

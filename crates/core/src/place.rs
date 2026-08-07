@@ -78,9 +78,10 @@ const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
 /// **[START]** — the comms console's rule, over the reward the campaign's whole power
 /// curve hangs on (§2.2/§14 v3/#209).
 ///
-/// **Cost is load-bearing (§2.3).** A cache is optional — the campaign's exit never
-/// refuses (`IntelGate::None`), so skipping one is a legal and sometimes correct choice
-/// — and an optional reward is only a *decision* if taking it costs something. Sat near
+/// **Cost is load-bearing (§2.3).** A cache is optional — the minimum haul is met by a
+/// console just as well ([`IntelGate::AtLeastOne`](crate::IntelGate::AtLeastOne), #574),
+/// so skipping one is a legal and sometimes correct choice — and an optional reward is
+/// only a *decision* if taking it costs something. Sat near
 /// the mouth it would be a free grab on the way past, and the choice would be nobody's;
 /// sat a real detour deep, taking it is turns and exposure spent against a permanent
 /// ability, which is the trade the flavour offered on the map.
@@ -228,11 +229,16 @@ impl LevelConfig {
     /// The fewest intel consoles the [`IntelCount`] modifier may leave a facility with
     /// (§10.2/#207).
     ///
-    /// **Two.** Under the campaign's [`IntelGate::None`](crate::IntelGate::None) intel
-    /// is currency (§2.2), so a thin facility is a poor raid rather than an unwinnable
-    /// one — but a facility with a *single* console is not a raid at all: there is one
-    /// place worth going and no route to choose between. Two is the last count that
-    /// still asks the player where to go first.
+    /// **Two.** Intel is currency in a campaign (§2.2) and the exit takes none of it, so
+    /// a thin facility is a poor raid rather than an unwinnable one — but a facility with
+    /// a *single* console is not a raid at all: there is one place worth going and no
+    /// route to choose between. Two is the last count that still asks the player where to
+    /// go first.
+    ///
+    /// **It is also what makes the minimum haul satisfiable** (#574). The gate asks for
+    /// one objective, and an Outpost hides no crates at all — so the floor on *consoles*
+    /// is the whole guarantee that a campaign facility can be left. A floor of zero would
+    /// be a softlock waiting for the seed that used it.
     ///
     /// **It did not move when the knob became a delta** (#565), unlike its guard-side
     /// twin, and the asymmetry is deliberate. Nothing but a node **flavour** names this
@@ -880,8 +886,9 @@ fn pick_free(floor: &[Cell], taken: &[Cell], rng: &mut Rng) -> Option<Cell> {
 /// seed that seals it away silently deletes the mechanic from that run.
 ///
 /// The **equipment cache** (#209) is held to it for exactly that reason, one system
-/// over. It is optional by design — the campaign's exit never refuses, so skipping one
-/// is a legal choice — but *choosing* to skip it and never being able to reach it are
+/// over. It is optional by design — the minimum haul (#574) is met by a console just as
+/// well, so skipping a crate is a legal choice — but *choosing* to skip it and never
+/// being able to reach it are
 /// not the same thing, and only the first is a decision. A sealed-off crate is the
 /// campaign's power curve silently deleted from that facility, which is the failure
 /// §14 v3 says the axis has already suffered once.

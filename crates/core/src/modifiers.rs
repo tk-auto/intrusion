@@ -58,14 +58,32 @@ use crate::rng::Rng;
 /// easiest, so the sources compose it *harder-ward* ([`IntelGate::harder_of`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelGate {
-    /// **Easier.** The exit opens immediately — no intel required. Reserved for
-    /// campaign (§14 v3), where intel is currency (§2.2), not an exit key.
+    /// **Easier.** The exit opens immediately — no intel required, and a facility can
+    /// be walked into and straight back out of having taken nothing.
+    ///
+    /// **Nothing ships on it since #574.** It was the campaign's gate (§14 v3) on the
+    /// grounds that intel is currency (§2.2) and not an exit key — which is still true,
+    /// and is why the campaign's gate is now [`AtLeastOne`](Self::AtLeastOne) rather
+    /// than [`All`](Self::All): a *minimum haul* is not a toll, because nothing is
+    /// spent (appendix 59). It stays as the identity [`LevelModifiers::union`] composes
+    /// from ([`LevelModifiers::neutral`]) and as a value the level-seed token can carry,
+    /// so its slot is not reused and no shared token changes meaning.
     None,
-    /// The §4.5 **[START]** baseline and the headless-sim preset (§13.2/§13.3):
-    /// the exit opens once **at least one** intel is in hand. One objective is a
-    /// complete run; pressing on for more is the aggressive style's trade, not a
-    /// requirement. Keeps the sim bot's outcome profile mixed (§13.3) — the
-    /// all-intel march pinned it in the facility long enough to be caught nearly
+    /// The §4.5 **[START]** baseline, the campaign's gate (§14 v3/#574) and the
+    /// headless-sim preset (§13.2/§13.3): the exit opens once **at least one
+    /// objective** has been taken.
+    ///
+    /// **One objective, not one console** (#574). An intel console `$` *or* an
+    /// equipment cache `¤` satisfies it — what the rule forbids is leaving with
+    /// *nothing*, and a raid that walked out with a crate did not walk out
+    /// empty-handed. The widening costs the sim nothing: crates are campaign-only
+    /// (§8.3 — [`LevelConfig::V1`](crate::LevelConfig::V1) plants none and only the
+    /// [`CacheCount`] knob raises that), so there one objective and one console are the
+    /// same thing.
+    ///
+    /// One objective is a complete run; pressing on for more is the aggressive style's
+    /// trade, not a requirement. Keeps the sim bot's outcome profile mixed (§13.3) —
+    /// the all-intel march pinned it in the facility long enough to be caught nearly
     /// every seed. This is [`Default`], so a hand-built state and the sim play the
     /// unchanged §4.5 game.
     #[default]

@@ -3,7 +3,7 @@ use crate::ability::{AbilityMode, Loadout};
 use crate::cell::{Cell, Direction};
 use crate::guard::Guard;
 use crate::guard::GuardState;
-use crate::modifiers::LevelModifiers;
+use crate::modifiers::{IntelGate, LevelModifiers};
 use crate::state::{BoreRefusal, Event, Input, State};
 use crate::test_support::open_room;
 use crate::{Difficulty, EndExit, EndUi, MapScreen, NodeId, Outlay, RunMode, RunOptions};
@@ -135,7 +135,10 @@ fn every_near_line_message_fits() {
             remaining: 9,
             still_needed: 9,
         },
-        Event::ExitRefused { still_needed: 9 },
+        Event::ExitRefused {
+            still_needed: 9,
+            gate: IntelGate::All,
+        },
         Event::Won,
         Event::Captured {
             guard: 0,

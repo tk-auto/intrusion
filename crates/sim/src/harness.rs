@@ -325,6 +325,42 @@ mod tests {
         assert_eq!(explicit, record);
     }
 
+    /// **Widening the gate to "one objective" changed nothing here** (§13.3/#574).
+    ///
+    /// The minimum haul let an equipment cache satisfy [`IntelGate::AtLeastOne`] as well
+    /// as an intel console — and `AtLeastOne` is the sim's own preset, so the widening
+    /// would be free to move the bot's numbers if the sim had crates in it. It has none:
+    /// caches are campaign-only (§8.3), planted by the §12.6 [`CacheCount`] knob that no
+    /// sim preset and no `--modifier` name touches. So one objective and one console are
+    /// the same thing here, and the histogram measures the game it measured before.
+    ///
+    /// Asserted over a seed sweep rather than one board, because "the sim plants no
+    /// crates" is a claim about generation and not about a lucky carve.
+    ///
+    /// [`CacheCount`]: intrusion_core::CacheCount
+    #[test]
+    fn the_sim_has_no_crates_so_the_widened_gate_is_the_old_one() {
+        let config = RunConfig::sim();
+        assert_eq!(config.modifiers.intel_to_exit, IntelGate::AtLeastOne);
+        for seed in 0..24 {
+            let state = intrusion_core::start_level_with(&config.facility, &config.level(seed))
+                .expect("the sim preset carves");
+            assert_eq!(
+                state.cache_total(),
+                0,
+                "seed {seed}: the sim plants no crates"
+            );
+            // …so what the gate wants is exactly what the console-only rule wanted: one,
+            // while nothing has been taken, and none at all on an empty facility.
+            assert_eq!(state.haul_available(), state.intel_total(), "seed {seed}");
+            assert_eq!(
+                state.intel_needed_to_exit(),
+                state.intel_total().min(1),
+                "seed {seed}: the widening moved the sim's gate",
+            );
+        }
+    }
+
     /// The config **reaches the run**: a batch that grants tech plays a game holding
     /// it, and one that bends a modifier plays a game bent by it. Asserted through
     /// the booted state rather than through a metric, so it holds whatever the bot

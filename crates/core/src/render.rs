@@ -1235,6 +1235,7 @@ mod hud;
 mod menu;
 mod message_log;
 mod modifier_rows;
+mod objective;
 mod settings;
 mod splash;
 mod usable;

@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::category::Category;
 use crate::control::transfers_control;
+use crate::modifiers::IntelGate;
 use crate::state::{Event, State};
 
 mod history;
@@ -146,9 +147,19 @@ pub fn message_for(event: Event) -> Option<Message> {
             (format!("intel in hand — {still_needed} more to go"), 20)
         }
         // The refusal names the requirement it enforces, so it can never contradict a
-        // take message from the same run: under `All` that is the rest of the set,
-        // under `AtLeastOne` the single console the player has yet to reach.
-        Event::ExitRefused { still_needed } => {
+        // take message from the same run: under `All` that is the rest of the set.
+        //
+        // **`AtLeastOne` gets its own sentence** (#574), because the count alone would
+        // be a lie there: the minimum haul is met by an intel console *or* an equipment
+        // cache, so "one more intel" would name half the rule and send a player who has
+        // a crate in reach walking past it. The number is always 1 under that gate and
+        // saying so adds nothing — what the line owes the player is *what kind of
+        // thing*, which is: any.
+        Event::ExitRefused {
+            gate: IntelGate::AtLeastOne,
+            ..
+        } => ("the exit needs one thing taken".to_string(), 20),
+        Event::ExitRefused { still_needed, .. } => {
             (format!("the exit needs {still_needed} more intel"), 20)
         }
         // The §7.7 counterplay landing (§7.3): the whole net is down for the rest of

@@ -9,11 +9,18 @@
 //! # Why intel is not the exit key any more
 //!
 //! In quick play intel is what the exit asks for (§4.5): gather the set, then leave. The
-//! campaign takes that gate off ([`IntelGate::None`](crate::IntelGate)) and the two rules
-//! cannot both hold, because a currency you must spend on the way out is not a currency —
-//! it is a toll. So in a campaign **extraction is voluntary**: intel, caches and every
-//! unlockable in a facility are *surplus*, the exit never refuses, and what a raid was
-//! worth is settled at the hub afterwards rather than at the mouth of the tunnel.
+//! campaign takes that gate off and the two rules cannot both hold, because a currency
+//! you must spend on the way out is not a currency — it is a toll. So in a campaign
+//! **nothing is handed over to leave**: intel, caches and every unlockable in a facility
+//! are *surplus*, and what a raid was worth is settled at the hub afterwards rather than
+//! at the mouth of the tunnel.
+//!
+//! **A minimum haul is not a toll** (#574, appendix 59). The campaign's gate is
+//! [`IntelGate::AtLeastOne`](crate::IntelGate): the exit refuses a run that has taken
+//! *nothing at all* from this facility. Nothing is debited — the wallet has no part in
+//! it and never sees the exit — so the currency argument above is untouched; what closes
+//! is only the revolving door. Everything past the first thing is still surplus, and how
+//! much of it you stay for is still your call.
 //!
 //! That is a deliberate relaxation and not an oversight — see appendix 47, which also
 //! records why walking out empty-handed carries **no** explicit penalty: the campaign
