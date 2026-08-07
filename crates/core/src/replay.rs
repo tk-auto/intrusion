@@ -75,6 +75,10 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // letters is free — `d` is the Decoy's and `t` the Takedown's — and the letters
         // have to stay unique for [`parse_script`] to be unambiguous.
         "Dart" => 'n',
+        // `p` for the second letter of *Repel*: `r` is Run's, and the letters have to stay
+        // unique for [`parse_script`] to be unambiguous. (The bar's own mnemonic is a
+        // different question with a different answer — it is derived per loadout, §11.6.)
+        "Repel" => 'p',
         _ => return None,
     })
 }

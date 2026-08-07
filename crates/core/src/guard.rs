@@ -693,9 +693,15 @@ impl Guard {
     }
 
     /// The cell this guard is currently walking to, if any (§7.4) — the seam the
-    /// loop-level tests read a dispatch's target through, since they sit outside
-    /// this module and the field is private.
-    #[cfg(test)]
+    /// loop-level tests read a dispatch's target through, since they sit outside this
+    /// module and the field is private.
+    ///
+    /// It is also what a **cordon** is aimed at (§8.3/#554): a guard the Repel field has
+    /// cut off entirely closes on the boundary between it and where it was going, and the
+    /// movement pass needs to know where that was ([`repel_approach_step`]). That is a
+    /// read, never a write — nothing outside this module sets a guard's destination.
+    ///
+    /// [`repel_approach_step`]: crate::State::repel_approach_step
     pub(crate) fn destination(&self) -> Option<Cell> {
         self.destination
     }
@@ -1383,7 +1389,21 @@ impl Guard {
             .destination
             .is_none_or(|d| d == self.pos || !facility.can_enter(d, ACTOR_FILL));
         if need_target {
-            let area = path::reachable_within(focus, SEARCH_RADIUS, |c| patrollable(facility, c));
+            // The sweep is picked out of the ground the guard can **actually reach**, so
+            // `blocked` narrows the area as well as the route (§7.5/#554). Without it the
+            // farthest cell of the neighbourhood could be one nothing may walk to — a
+            // colleague's cell, a sealed doorway (§8.3/#242), a cell inside a Repel field
+            // (§8.3/#554) — and a target with no route reads to the loop below as *"nothing
+            // left to poke at"*, which **ends the search**. A player could then call a
+            // sweep off by putting a wall over the corner of it, which is a §7.6 pressure
+            // release nobody asked for and the opposite of what a wall is supposed to cost.
+            //
+            // A flood fill from the focus, so the narrowing is honest in the other
+            // direction too: the guard sweeps the side of the obstruction it is on and
+            // does not plan across one.
+            let area = path::reachable_within(focus, SEARCH_RADIUS, |c| {
+                patrollable(facility, c) && !blocked.contains(&c)
+            });
             // Farthest from the guard's current cell (no inspected filter): a plain
             // paced sweep across the neighbourhood, deterministic (§12.4).
             self.destination = pick_farthest(&area, &VisibleSet::default(), self.pos);

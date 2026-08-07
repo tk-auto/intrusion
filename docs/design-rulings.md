@@ -5003,3 +5003,140 @@ first suggestion after this ships will be *"stars should give something else too
 #573 will **narrow** it to exactly one reader (the archive gate) and must not delete it.
 Inside a run, a second consumer would make the score a resource the player plays toward
 rather than a verdict on how they played — which is the thing §4.6 exists to not be.
+
+---
+
+## Appendix 62 — Repel: a wall in the open, and what a guard does about ground it will not stand in
+
+*(§7.6, §8.3, §10.4, §4.5 — the #554 ruling.)*
+
+**Repel** stamps a disc of ground no guard will stand in, on the cell it was fired from, for
+eight turns. Mechanically it is [Lockdown](#appendix-24)'s ability with the brush widened
+from a doorway to open floor, and most of it needed no argument: the snapshot, the total
+release, the player's exemption and the refusal to conceal anything are all Lockdown's
+answers, restated over ground. What did need one was the guard behaviour, which went
+through two versions — and the second is the one that shipped, after the first was played.
+
+### 1. The open question, answered twice
+
+The ticket named it: what does a guard do when its only route crosses the field? It offered
+two answers.
+
+1. **Impassable to everyone; a guard with no route holds** where it stands.
+2. **Impassable, but a guard with no alternative waits *at the boundary*, facing in.**
+
+The first shipped, on precedent: a Lockdown seal can cut a corridor for the same eight turns
+and the design accepted that, and option 2 needs the guard to be asked for a *second* route
+in the same turn — [`Guard::decide`] is not a query, it spends the dwell counter, absorbs the
+cone into the inspected memory and commits a facing, so calling it twice steps those clocks
+twice.
+
+**Playing it settled it the other way in one sentence: the hunt froze mid-corridor.** The
+two options are identical in the rules — nothing crosses the line either way, and the window
+is the only clock in both — and completely different on the screen. A chase that stops dead
+two rooms back reads as the game having given up on you, which is the §7.6 failure the design
+keeps warning about wearing a different hat. A guard that walks up to the edge of the wall
+and stands there looking in reads as what it actually is: a cordon, waiting for a window it
+can count as well as you can.
+
+The second-route problem is sidestepped rather than solved. The cordon step is computed
+**outside** the guard, in the movement pass ([`repel_approach_step`]), and only after the
+guard's own decision has already come back empty: the ordinary route (field blocked) is tried
+first, so a guard that can go the long way round still does — that detour is what the ability
+buys and nothing shortcuts it — and what is left when it fails is a destination the field is
+standing in front of. The loose route toward that destination is walked one step per turn and
+stopped at the edge by the boundary rule itself, so nothing counts distance and there is no
+second stopping condition to keep in step. The cost of computing it outside the guard is that
+the cordon step skips [`commit_step`], so it pays no §7.5 turn-in-place tax; that is a fair
+trade for a step that only ever happens when the alternative was standing still, and the
+guard's facing still follows its walk — which is why it ends up looking into the field.
+
+### 2. A guard caught inside leaves, and the rule it turned into
+
+The ticket asked only that the stamp move nobody and that a guard inside be free to leave.
+That is what shipped first, and it produced the same class of oddity as the frozen chase:
+guards standing *in* a wall, milling about on their own errands, in the one patch of floor
+the ability is supposed to have cleared. **A guard already in the zone should head out by the
+shortest path** — and with that, the ability's rule stops being a boundary condition and
+becomes a sentence about ground:
+
+> **No guard stands in the field.** Nobody gets in, and anybody it lands around walks out.
+
+Both halves are one step per turn, spent by the guard, with its mood, lead and errand
+untouched — nothing is teleported and nothing is frozen. The property the ticket asked for
+("it cannot come back once it has left") still needs nothing remembered: a guard that has
+left is simply outside, and outside is what the boundary refuses.
+
+### 3. What that costs, and the number that has to be watched
+
+The exit rule **removes the ability's stated failure case**, and this is the one place where
+following the design note would have been the wrong call, so it is recorded plainly.
+
+Under the shipped-first rule, a chaser inside the disc was unconstrained: firing with a hunter
+at arm's length built a wall with the hunter on the inside, spent the turn and the 40-turn
+lockout, and you were taken. That was the §2.3 answer to *"when would a good player not press
+this"* — **do not press it late** — and the exit rule deletes it. A chaser caught inside is
+now put out and held out, so firing at the last moment is not merely legal but *good*, and
+§4.5's capture-is-contact is negotiable for eight turns in a way it was not.
+
+What stops that being the panic button §8.3 warns about (Confusion's *"a no-guard-may-act
+field you carry"*) is the other half of the same change: **the cordon is the counterweight.**
+Guards no longer scatter or freeze at a distance — they queue at the perimeter, one step from
+the disc, for the whole window, and the window is short. The escape buys you eight turns and
+hands them back your position with the hunt already adjacent.
+
+The sim says the two roughly cancel and then some. Holding the cue the ability shipped with —
+which declined precisely the late press — the rules change moved `balanced` from 0.42 to 0.36
+and left `cautious` at 0.62: the cordon costs the bot slightly more than the ejection gains
+it. Letting the cue use the new rule (the gate it carried checked for a mistake the game no
+longer has, so it went) puts the win rate up in **all eight** profile-blocks, +0.05 to +0.17,
+on about twice as many presses. That is the largest uniform lift of any cued verb, and the
+number to watch rather than to celebrate.
+
+**If it proves too strong, the lever is stated before the measurement rather than after:**
+exempt from the exit rule a guard that currently **has** the player — Chasing — so the field
+still clears patrols out of itself but never rescues you from a hunt that has already
+arrived. That restores the old trade without touching the radius, the clocks, or the cordon,
+and it is one condition in [`repel_exit_step`]. `docs/stats/abilities/repel.md` carries the
+kill-thresholds.
+
+### 4. The §7.5 trap the ticket predicted: a wall must not call a search off
+
+The ticket's §7.5 note — *"a field over that cell must not strand the sweep"* — named a real
+defect, and one that would have been silent.
+
+A searching guard picks the farthest patrollable cell within `SEARCH_RADIUS` of its focus and
+walks to it. If that cell has no route, [`Guard::decide`] reads the missing step as *"nothing
+left to poke at in the area"* and **ends the search**. So a player could have called a §7.6
+sweep off by laying a field over the corner of it: a pressure release nobody asked for,
+arriving through the one ability whose whole premise is that it releases no pressure at all.
+
+The fix is at the source rather than in the ability: the sweep area is now flooded across the
+cells the guard can **actually reach**, so a blocked cell is never chosen as a target. It is
+stated over the whole blocked set rather than over Repel's cells, because the same bug was
+already reachable through a colleague standing on the far corner of a search area, or a
+Lockdown seal cutting one — the field is only the third way in.
+
+**One case survives it, deliberately.** A search whose *focus itself* is inside the field has
+no reachable area at all and still releases early. That is a search whose entire subject is
+inside a wall, and ending it is defensible — but it does mean a player who is seen, breaks
+contact, and then stamps the field over the cell they were last seen in can still buy a
+called-off sweep. Watch for it in play; the repair, if it is one, is for a search with no
+reachable ground to *hold* rather than release, which is a §7.6 change and not this ticket's.
+
+**It moves ordinary play, slightly, and the movement is measured.** The 48-run cue-seam pin
+moved exactly two rows, both wins, both *shorter* runs: a search that finishes its business
+releases its guard back to the beat instead of leaving the player waiting out a facility that
+keeps re-opening one. The dispatch-expiry gate needed its sample widened rather than its
+threshold moved, and the refreshed baseline puts the four win rates within a point or two of
+where they were.
+
+### 5. Why the numbers are Lockdown's, and what to move if the pair is one press
+
+Repel ships on **8 turns / 40 lockout**, which is Lockdown's row exactly, and the radius is
+**3** against Lockdown's 4. Two abilities that buy the same thing — a pursuer's detour —
+should be told apart by *where they work*, not by a clock nobody can feel: Lockdown is refused
+where there is no door and is the tool for a built-up wing; Repel works precisely where
+Lockdown is inert. §2.3's warning is that if one of them is always the better press, one of
+them is dead weight — and the answer then is `REPEL_RADIUS`, not the clocks, because the
+radius is the only knob that changes *which rooms* each is for.

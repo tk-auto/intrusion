@@ -207,9 +207,20 @@ fn every_near_line_message_fits() {
         },
         // Four refusals that were never in this list, added while the dart's absence
         // from it was being fixed: the list is hand-maintained, so an event added
-        // without a line here is measured by nothing (§11.7). `FalseCallFired` still is
-        // not here — it carries an `EffectArea` this module cannot build — so it remains
-        // measured by nothing, which is worth someone's ticket rather than a workaround.
+        // without a line here is measured by nothing (§11.7).
+        //
+        // The two area events join them since #554, and the workaround the Dart's note
+        // asked for turned out to be a one-line constructor: [`EffectArea::at`] builds a
+        // footprint outside a firing, so an event carrying one can be measured here like
+        // any other. `RepelFired` is in the list from the day it shipped, and
+        // `FalseCallFired` — measured by nothing since #504 — is in it at last.
+        Event::RepelFired {
+            field: crate::EffectArea::at(at, 3),
+        },
+        Event::FalseCallFired {
+            reach: crate::EffectArea::at(at, 10),
+            answered: 3,
+        },
         Event::FalseCallDead,
         Event::LockdownRefused,
         Event::ConfusionMissed,

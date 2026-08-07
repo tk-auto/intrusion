@@ -33,6 +33,11 @@ fn the_catalog_matches_the_design_activated() {
         // runs on the responders' legs. 30 rather than the blast's 45 because it buys
         // less: the guards keep walking, keep looking, and arrive.
         (AbilityId::FalseCall, 1, 0, 30, Effect::FakeCall),
+        // Lockdown's own numbers, deliberately (§8.3/#554): the same trade over open
+        // ground, and two abilities that buy a detour should be told apart by where they
+        // work rather than by a clock. If they play as one press, the row to move is
+        // `REPEL_RADIUS` — not this pair.
+        (AbilityId::Repel, 1, 8, 40, Effect::Repel),
     ] {
         let def = id.def();
         let economy = def
@@ -189,7 +194,7 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
 
 /// The data-driven rows [`the_catalog_matches_the_design_activated`] walks — kept
 /// beside it so the completeness check above reads off the same list.
-const PINNED_ACTIVATED: [AbilityId; 8] = [
+const PINNED_ACTIVATED: [AbilityId; 9] = [
     AbilityId::Run,
     AbilityId::Camouflage,
     AbilityId::Decoy,
@@ -198,6 +203,7 @@ const PINNED_ACTIVATED: [AbilityId; 8] = [
     AbilityId::Confusion,
     AbilityId::Lockdown,
     AbilityId::FalseCall,
+    AbilityId::Repel,
 ];
 
 /// The **passive** catalogue (#264/#265), pinned: Vision is the one passive, it

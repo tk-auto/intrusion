@@ -333,6 +333,16 @@ fn the_balanced_profile_is_the_default_bot() {
 /// goes **20 wins to 17**, which is not a difficulty finding — the refreshed baseline
 /// in the same PR is what judges that, and it puts the win rates flat.
 ///
+/// **#554 moved exactly two rows, and neither is a re-carve.** Repel's own arrival
+/// changes nothing here — the bot is dealt Camouflage and the Decoy, so the field is
+/// never in its hand — but the ticket's §7.5 fix is a change to the *game*: a searching
+/// guard now picks its sweep target out of the ground it can actually reach, so a target
+/// standing behind a colleague no longer reads as *"nothing left to poke at"* and ends the
+/// search. `balanced 1` (100 → 145 turns) and `cautious 3` (314 → 316) are the two seeds
+/// where a sweep that used to be called off early now runs its course; both still win, and
+/// no other row moves at all. That narrowness is the finding: the fix bites only where a
+/// search was being cut short, which is exactly what it was for.
+///
 /// This list is the bot's play against a fixed game, so a change to the *game*
 /// moves it exactly as a change to the cue seam would — which is why the refresh
 /// belongs in the PR that changed the game, with the deltas read rather than waved
@@ -342,7 +352,7 @@ fn the_balanced_profile_is_the_default_bot() {
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
         "balanced 0 lost 26 rc",
-        "balanced 1 won 145 rr",
+        "balanced 1 won 100 rr",
         "balanced 2 lost 95 rrdr",
         "balanced 3 won 202 rrcd",
         "balanced 4 lost 197 crdrdcr",
@@ -356,7 +366,7 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "cautious 0 lost 29 c",
         "cautious 1 won 118 ",
         "cautious 2 won 268 r",
-        "cautious 3 won 316 rrrd",
+        "cautious 3 won 314 rrrd",
         "cautious 4 lost 609 ccrdrdrddrdrdrr",
         "cautious 5 won 251 rcdcrrc",
         "cautious 6 lost 65 rr",

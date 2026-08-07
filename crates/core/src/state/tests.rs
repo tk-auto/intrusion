@@ -44,6 +44,7 @@ mod lockdown;
 mod minimum_haul;
 mod narrowed_cones;
 mod reinforcements;
+mod repel;
 mod saver;
 mod sense_suppressed;
 mod traversal;

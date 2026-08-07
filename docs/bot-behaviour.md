@@ -341,6 +341,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
 | **Dart** | the watcher on your line you could not have walked up to | **the temperament's takedown appetite**, core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
+| **Repel** | a hunt closing across ground a Lockdown cannot touch | intent is `Flee`, somebody in reach, and a route to spend the turns it buys on |
 | **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
@@ -420,6 +421,30 @@ Three of these are worth reading twice, because they are the seam's own rules bi
   stepped and there is no turn-in-place action (§5), so the line has to *happen* to be
   right; the bot cannot arrange the shot the way a player can. Read the small numbers on
   `docs/stats/abilities/dart.md` as a floor on the ability rather than a measure of it.
+
+- **Repel's cue is Lockdown's, plus the one gate a wall in the open needs.** The two
+  abilities buy the same thing, so the two cues are written to ask the same questions —
+  a cue that graded them differently would make the histogram's comparison of the pair
+  (the #554 risk: one of them is dead weight, §2.3) a comparison of two cue authors
+  instead. What Repel adds is the gate Lockdown has no need of: **the field is void
+  around whatever is already standing in it.** A guard inside the disc is bound by
+  nothing, so pressing with a hunter at arm's length spends the turn and the 40-turn
+  lockout building a wall with the hunter on the inside — the worst press in the
+  ability, and the one a cue keyed on "is something close?" would make constantly. So it
+  is measured against the radius the field will actually have (`State::repel_area`),
+  not against a cell of elbow room, and it declines outright when anything the bot can
+  perceive is inside.
+
+  It reads the guards through the player's own channels like every other cue, which
+  means a guard the bot cannot perceive can still end up inside the field. That is
+  honest rather than a gap: the player firing it is guessing about exactly the same
+  dark, and a cue that peeked would be measuring a bot the game does not have.
+
+  The second gate is `route`: a wall buys *turns*, and turns are only worth something to
+  somebody who is going to spend them walking. Pressed while cornered with nowhere to
+  step, the field holds the hunt off for eight turns and then hands the bot back the
+  same cell with a ring of guards around it — which is the §8.3 row's own warning about
+  what the ability costs, written as a predicate.
 
 **The Guide's zero is a third kind, and it is the interesting one.** Vision and the
 Saver have no cue because there is no key; the Guide has no key *either*, but unlike

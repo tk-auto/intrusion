@@ -166,7 +166,11 @@ pub const fn remote_kind(id: AbilityId) -> Option<RemoteKind> {
         // The dart is a projectile and not a machine (§8.3/#239): it resolves on the turn
         // it is fired and there is nothing left in the world to fly, so nothing changes
         // hands.
-        | AbilityId::Dart => None,
+        | AbilityId::Dart
+        // The field is ground, not a machine (§8.3/#554): it is laid on the floor and left
+        // there, and there is nothing to drive — the player's keys stay their own for its
+        // whole window.
+        | AbilityId::Repel => None,
     }
 }
 

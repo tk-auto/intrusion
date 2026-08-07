@@ -134,6 +134,39 @@ pub const LOCKDOWN_RADIUS: u32 = 4;
 /// wall they had no way to read. Pinned at compile time.
 const _: () = assert!(LOCKDOWN_RADIUS <= PLAYER_SENSE_RANGE);
 
+/// The **Repel** field radius (§7.6/§8.3/#554 **[START]**): activating Repel stamps the
+/// Chebyshev box of this radius around the cell it fired on as ground no guard may step
+/// into — measured the same way as the guard sense, Confusion's blast and Lockdown's
+/// seal (§6.1 box metric) and, like them, reaching **through walls**.
+///
+/// **Three, and smaller than every other area in the catalogue**, which is the whole of
+/// what keeps a wall you can put down anywhere from being the wall that ends the game. A
+/// 7×7 disc is a hub room's middle or the width of a corridor and its two lanes: enough
+/// that a pursuit has to go round it, nowhere near enough to seal a wing. Every cell of
+/// radius past that grows the area quadratically, and past about five the field stops
+/// being a detour and starts being a region of the map deleted for eight turns — the
+/// failure §8.3 names for Confusion (*"a no-guard-may-act field you carry"*) arriving by
+/// the other door.
+///
+/// **Deliberately not clamped to the guard sense**, unlike Confusion's blast: this is
+/// terrain rather than perception, and a cell a guard will not walk into is still a cell
+/// it will not walk into when the player cannot see it — Lockdown's answer
+/// ([`lockdown_area`](State::lockdown_area)) rather than
+/// [`confusion_blast`](State::confusion_blast)'s. The assertion below is what makes that
+/// harmless in practice: at three the whole field fits inside even a crawler's degraded
+/// sense (§10.7), so there is no reach here for a clamp to take away.
+///
+/// It is the ability's main power lever, so it is pinned by a test and expected to move
+/// in playtest (§13.2) — and it is the first lever to reach for if Repel and Lockdown
+/// prove to be the same press (§8.3/#554).
+pub const REPEL_RADIUS: u32 = 3;
+
+/// The field fits inside the **narrowest** sense the game has (§9/§10.7/#554), not merely
+/// inside the open-floor one — so a player who fires it from a duct can perceive every
+/// cell of what they just stamped. Pinned at compile time, and it is what lets the radius
+/// go unclamped where Confusion's cannot.
+const _: () = assert!(REPEL_RADIUS <= DUCT_SENSE_RANGE);
+
 /// How often the **Guide's** bearing shows (§8.3/#505 **[START]**): the compass lights
 /// on one turn in this many and is dark on the rest — a needle that **pulses** rather
 /// than one that stands.

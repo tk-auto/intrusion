@@ -116,6 +116,18 @@ pub const FALSE_CALL_CLEARANCE: u32 = 8;
 /// construction. What the ability is for is the ground the bot is *heading for*.
 pub const FALSE_CALL_SCOUT: usize = 6;
 
+/// How close a hunter has to be for a Repel to read as **pressing** rather than merely
+/// available (**[START] = 6**): near enough that the detour the field buys is one the
+/// guard was actually about to not take.
+///
+/// It sits above [`REPEL_RADIUS`](intrusion_core::REPEL_RADIUS) with daylight to spare, and
+/// the gap between the two is the whole cue: inside the radius the ability is *void* (the
+/// guard would be walled in with you), and just outside it the ability is at its best. Six
+/// is roughly a guard's certain zone — the range at which something is genuinely bearing
+/// down — and it is a keenness knob, not a rule: getting it wrong makes the cue shy or
+/// eager, never wrong.
+const REPEL_PRESSING: u32 = 6;
+
 /// **A faint fit**: it might help. A step is probably worth more, and by default
 /// the bot takes the step (the floor sits above this).
 pub const URGE_FAINT: u8 = 25;
@@ -261,6 +273,7 @@ impl Moment<'_> {
             AbilityId::Lockdown => self.lockdown(status),
             AbilityId::FalseCall => self.false_call(status),
             AbilityId::Dart => self.dart(status),
+            AbilityId::Repel => self.repel(status),
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.
@@ -832,6 +845,58 @@ impl Moment<'_> {
             URGE_STRONG,
             "a guard watching the ground ahead, on my line and unaware — spend the dart (§8.3)",
         )
+    }
+
+    /// Repel (§7.6/§8.3/#554): a disc stamped where you fire it that no guard will walk
+    /// into for its window. What it is **for** is the chase across ground a lockdown cannot
+    /// touch — open floor, a hub room, a corridor with nothing to shut — where the only way
+    /// to buy a detour is to put the wall down yourself.
+    ///
+    /// It is written as [`lockdown`](Self::lockdown)'s sibling and reads almost the same,
+    /// which is deliberate: the two abilities buy the same thing, so a cue that asked
+    /// something different of each would make the histogram's comparison of them
+    /// meaningless (§13.3).
+    ///
+    /// **It used to carry a third gate and no longer does**, which is worth recording
+    /// rather than quietly deleting. While a guard inside the disc was unconstrained,
+    /// pressing with a hunter at arm's length built a wall with the hunter on the inside —
+    /// the worst press in the ability — and the cue declined it. Guards now walk out
+    /// (§8.3/#554), so that press is no longer a mistake and the gate would make the cue
+    /// shy in exactly the moment the ability is best. A cue that checks for a rule the
+    /// game has stopped having measures the cue's memory, not the verb.
+    fn repel(&self, status: AbilityStatus) -> Option<Bid> {
+        // Flight, for Lockdown's reason exactly: a wall only means something to somebody
+        // following a route to you, and ground a patrol was walking past anyway costs it
+        // nothing to walk round.
+        if self.intent != Intent::Flee {
+            return None;
+        }
+        // Somebody has to be coming. With nothing perceived at all the bot is fleeing a
+        // lead rather than a hunter, and a wall between it and nobody is a turn and a
+        // lockout spent on the geometry of an empty room.
+        let gap = self.nearest_guard?;
+        // **And there has to be somewhere to be.** A wall buys turns, and turns are only
+        // worth something to a bot that is going to spend them walking: pressed while
+        // cornered with no step to take, the field holds the guards off for eight turns and
+        // then hands the bot back the same cell with a ring around it (§8.3's own warning
+        // about what it costs). `route` is `None` exactly when the plan would hold still.
+        self.route?;
+        // Strong when the hunt is close enough that the detour is a real one, plain when it
+        // is far enough that walking on is probably the better turn anyway. Never decisive:
+        // an escape that actually *moves* — Run — should win the turn against a wall
+        // whenever both speak, and Run claims `URGE_DECISIVE` in its own moment.
+        let (urge, reason) = if gap <= REPEL_PRESSING {
+            (
+                URGE_STRONG,
+                "hunted across open ground with the field still clear — put the wall down (§8.3)",
+            )
+        } else {
+            (
+                URGE_PLAIN,
+                "breaking contact with room to work — stamp the ground they have to go round (§8.3)",
+            )
+        };
+        self.press(status, urge, reason)
     }
 
     /// Whether `cell` holds a door panel, open or closed, **as the player knows it**

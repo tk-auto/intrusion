@@ -380,6 +380,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#239), **on trial**: a dart fired along the cardinal
     /// you face, taking down the first unaware guard on the line.
     Dart,
+    /// Salvaged tech (§8.3/#554): a disc stamped on the cell you fired from that no
+    /// guard may walk into for the window — a wall you can put down in the open.
+    Repel,
 }
 
 impl AbilityId {
@@ -388,7 +391,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 14] = [
+    pub const ALL: [AbilityId; 15] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -403,6 +406,7 @@ impl AbilityId {
         AbilityId::FalseCall,
         AbilityId::Guide,
         AbilityId::Dart,
+        AbilityId::Repel,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -421,7 +425,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 13] = [
+    pub const TECH: [AbilityId; 14] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -435,6 +439,7 @@ impl AbilityId {
         AbilityId::FalseCall,
         AbilityId::Guide,
         AbilityId::Dart,
+        AbilityId::Repel,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -511,6 +516,11 @@ impl AbilityId {
             // frame. The dart is the object you fire; whether it takes anything down is
             // the line's business.
             AbilityId::Dart => "Dart",
+            // One word, and the same word on the bar (§11.8): what the field *does* to a
+            // guard, said as a verb. It is deliberately not a noun for the thing — a
+            // *screen*, a *field*, a *barrier* — because every one of those is a word for
+            // something you stand behind, and this one hides nothing (§8.3).
+            AbilityId::Repel => "Repel",
         }
     }
 
@@ -541,6 +551,7 @@ impl AbilityId {
             AbilityId::FalseCall => "Call",
             AbilityId::Guide => "Guide",
             AbilityId::Dart => "Dart",
+            AbilityId::Repel => "Repel",
         }
     }
 
@@ -622,6 +633,14 @@ impl AbilityId {
                 "Fires the way you face. The first guard on the line drops if it has not \
                  seen you. A shot that finds nobody is spent too."
             }
+            // It states the **shape and the lie it must not tell**, in that order. Where
+            // it lands and that it stays there is the mechanic; *hides nothing* is the
+            // sentence that stops the first firing being read as a cloak, which is the
+            // one thing a player can get badly wrong about it (§8.3).
+            AbilityId::Repel => {
+                "Stamps a disc where you fire it that no guard will walk into. It \
+                 stays put while you do not. Hides nothing."
+            }
         }
     }
 
@@ -659,6 +678,7 @@ impl AbilityId {
             AbilityId::FalseCall => &FALSE_CALL,
             AbilityId::Guide => &GUIDE,
             AbilityId::Dart => &DART,
+            AbilityId::Repel => &REPEL,
         }
     }
 
@@ -679,6 +699,7 @@ impl AbilityId {
             AbilityId::FalseCall => 11,
             AbilityId::Guide => 12,
             AbilityId::Dart => 13,
+            AbilityId::Repel => 14,
         }
     }
 }
@@ -901,6 +922,30 @@ pub enum Effect {
     /// circle. Anything that reveals more belongs to §12.6's `full_layout_known` or to
     /// #215's v3 intel sink, which sells exactly that.
     ObjectiveBearing,
+    /// Repel (§7.6/§8.3/#554): while active, the disc of
+    /// [`REPEL_RADIUS`](crate::REPEL_RADIUS) stamped on the cell the ability fired from
+    /// is ground **no guard may step into**, in any state — Calm, investigating,
+    /// searching or chasing alike. A guard's route treats it as solid and goes the long
+    /// way round (§7.6/§10.4: *"a guard cannot get it open, so its route goes the long
+    /// way round"*, generalised from a door to open floor); a guard with no route at all
+    /// simply holds, exactly as one facing a sealed doorway does, and the window is what
+    /// makes that a wait rather than a deadlock.
+    ///
+    /// **It binds guards and nobody else.** The player walks their own field freely
+    /// (§4.4), and a guard **already standing inside** when the disc lands is not moved
+    /// and not constrained: it may step within the field and out of it, and only once it
+    /// is out does the rule bite. What the field refuses is a crossing of its boundary
+    /// *inward*, which is why "it cannot come back in" needs nothing remembered.
+    ///
+    /// Like [`SealDoors`](Effect::SealDoors) the set is a **snapshot** taken where the
+    /// ability fired — §4.5's capture-is-contact is **[SETTLED]**, and a disc centred on
+    /// a moving player is a disc no guard could ever reach him in, which would repeal
+    /// that rule for the length of the window rather than buy a detour with it.
+    ///
+    /// **It conceals nothing.** A guard that can see through the field sees the player,
+    /// steps §7.3's ladder and calls (§7.7) exactly as it would over open floor. What it
+    /// buys is time and geometry; what it charges is the position it leaves you in.
+    Repel,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -935,7 +980,7 @@ pub enum Behaviour {
 /// it: what a press actually acts on is resolved by the precondition ladder
 /// (`state::activation::Aimed`) from where the player stands and which way they
 /// face, and a second declaration that nothing read was §2.3's stub wearing a
-/// field's name (appendix 60).
+/// field's name (appendix 62).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Economy {
     cost: u32,
@@ -1396,6 +1441,46 @@ const DART: Ability = Ability {
     mode: activated(1, 0, 0),
     uses: Some(DART_USES),
     behaviour: Behaviour::Coded,
+};
+
+// Repel [START] (§7.6/§8.3/#554): stamp a disc no guard may walk into, on the cell you
+// fired it from, and hand every cell of it back when the window closes. **Lockdown's
+// numbers, deliberately** — 8 turns against a 40-turn lockout — because it is Lockdown's
+// trade with the brush widened from a doorway to open ground, and two abilities that buy
+// the same thing should be told apart by *where they work*, not by a clock nobody can
+// feel the difference in. The pair is the thing to watch (§2.3/#554): Lockdown is refused
+// where there is no door and is the tool for a built-up wing; this one works precisely
+// where Lockdown is inert — a hub room, an open floor, a corridor with nothing to shut.
+// If playtest says one of them is always the better press, the answer is to move them
+// apart on radius and window, not to keep both at the same row.
+//
+// **The cost, and when a good player declines it** (§2.3). Three things, and the third is
+// the one that makes it a decision rather than a panic button:
+//
+// - The turn, spent standing still while whatever is chasing you keeps walking (§4.4).
+// - The 40-turn lockout, which is most of a §7.6 chase-and-search cycle.
+// - **The position it leaves you in.** It conceals nothing, so a guard that can see you
+//   through it goes on seeing you, goes on climbing §7.3's ladder and goes on calling
+//   (§7.7) — and what gathers outside a wall nobody may cross is a ring of guards with
+//   nothing else to do, standing exactly where you have to come out. Eight turns later
+//   the wall is gone and they are not.
+//
+// So it is worth its turn when the eight turns buy a *route* — ground crossed, a door
+// reached, a corner turned — and worth nothing at all when they only buy eight turns of
+// standing still, which is the mistake the ability invites. It is also **void against
+// what is already on you**: the disc is stamped around a guard as readily as around
+// empty floor, and a guard inside it is unconstrained, so firing it with a chaser at
+// arm's length spends the turn and the lockout on a wall with the hunter already inside.
+//
+// Data-driven rather than [`Behaviour::Coded`], for Lockdown's and False Call's reason:
+// repelling an area's guards is the same shape as freezing an area's guards and sealing
+// an area's doors, so it is one more row in the vocabulary (§8.1) and not an escape
+// hatch.
+const REPEL: Ability = Ability {
+    id: AbilityId::Repel,
+    mode: activated(1, 8, 40),
+    uses: None,
+    behaviour: Behaviour::Effects(&[Effect::Repel]),
 };
 
 /// How many darts one facility gives you — **[START]** (§7.2/§8.2/§8.3/#239).

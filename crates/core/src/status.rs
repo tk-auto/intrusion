@@ -411,6 +411,20 @@ pub fn message_for(event: Event) -> Option<Message> {
         // box it fired with.
         Event::ConfusionFired { caught: 1, .. } => ("the blast dazes a guard".to_string(), 0),
         Event::ConfusionFired { caught, .. } => (format!("the blast dazes {caught} guards"), 0),
+        // The field, reported (§7.6/§8.3/§11.7/#554) — and reported the same way whether
+        // or not there was anybody to keep out, which is the whole of what this line has
+        // to get right. The press is never refused and never greyed (§8.4), so the one
+        // sentence has to serve a firing into an empty room and a firing in front of a
+        // chase alike; a wording that varied with what was in reach would answer *"is
+        // anyone within three cells of me?"* for the price of a turn the player was
+        // spending anyway (False Call's reasoning, §8.3).
+        //
+        // It says **where** rather than what: *this ground* is the fact the player has to
+        // hold on to, because the field does not follow them (§8.3's snapshot) and the
+        // mistake the ability invites is walking off and expecting the wall to come along.
+        // Ranked at 0 with the other self-narration — the board is already washing the
+        // disc, so this is the sentence under a picture, not news.
+        Event::RepelFired { .. } => ("the field holds this ground".to_string(), 0),
         // The refusal (§8.3/#325): free, changed nothing, and — like the refused bore
         // beside it — has to say why, because a press that silently did nothing reads
         // as a dropped key. It names the rule the player is learning: the blast only

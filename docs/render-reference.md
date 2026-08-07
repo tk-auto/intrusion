@@ -739,7 +739,7 @@ mark) > investigation area > Effect wash.**
 > fairness floor this modifier is bounded by (§2.2) rather than part of the channel it
 > switches off.
 | **Warning** (orange) | The area a §7.6 search is sweeping — the `SEARCH_RADIUS` box around a searching guard's focus. Only with the `show_search_areas` modifier on (§12.6); baseline the board draws no investigation area at all |
-| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over, **the line a Dart flew** (§8.3/#239) — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
+| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over, **the line a Dart flew** (§8.3/#239), **the disc a Repel is holding** (§8.3/#554) — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
 
 **The Guide's cell is the one Effect cue that is not about a thing** (#505), and it is
 worth flagging because cyan is already busy: it marks a held guard, a live decoy, your
@@ -843,6 +843,20 @@ Lockdown's radius — and then goes. The **marks** are what carry the state for 
 of the window and cost almost no ink: a frozen guard recoloured cyan (§8.3 Confusion)
 and every cell of a **sealed door** while Lockdown holds it (#242). A mark says *this
 one*, where the footprint said *this far*.
+
+**The Repel field is the one wash that is itself a rule** (§8.3/#554), and it is worth
+saying plainly because every other cue in this column *reports* something. A blast's box says
+where a thing happened; a Dart's line says where a thing went. This one is the wall: the cells
+drawn cyan are exactly the cells no guard may step into, read from the same [`EffectArea`] the
+movement pass enforces, so there is no second derivation that could disagree. It is
+**standing**, not a flash — it is up for the whole window and gone the frame it ends — and it
+is the reason the precedence below is not a detail here but the whole of the cue's honesty:
+this wash sits over ground guards are walking *beside*, so it and the danger overlay share
+cells constantly. **Danger wins every one of them.** A wall drawn over the thing that can kill
+you would read as *safe here* on the cell you are about to be taken on, which is the one thing
+§11.5's **[SETTLED]** ordering exists to forbid — and it is a real risk for this ability
+rather than a theoretical one, because the field does not conceal you and a guard with a line
+into it goes on watching you the whole time.
 
 **The Dart's wash is a line rather than an area** (§8.3/#239), and it is the only one: the ray it flew, cell by cell, for the firing frame alone. It answers the question a projectile raises that a radius does not — *how far did it get* — since a dart that stopped short stopped **on** something, and where it stopped is the whole report. It is safe to paint through the fog for the same reason the boxes are (your own gadget's reach is your own knowledge), plus one specific to a line: the flight is clamped inside the guard sense, so a short wash can only ever end on a cell already drawn (appendix 54).
 
