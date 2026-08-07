@@ -47,3 +47,19 @@ python3 -m http.server -d dist 8099   # then open http://localhost:8099/
 
 Right now this draws the current slice: the facility as a walled rectangle. The
 generator, guards, vision and input land in their own tickets.
+
+## Publish to itch.io
+
+Pages is the canonical deploy; itch.io is a second home for the same static
+build. [`scripts/publish-itch.sh`](scripts/publish-itch.sh) runs the pipeline
+above and hands the assembled directory to
+[butler](https://itch.io/docs/butler/):
+
+```sh
+scripts/publish-itch.sh --dry-run   # build and assemble only, no upload
+scripts/publish-itch.sh             # …then push it to thunderk/intrusion:web
+```
+
+It needs `butler` on `PATH`, authenticated once with `butler login` (or
+`BUTLER_API_KEY` in the environment). Run the gate first — the script publishes
+the working tree as it stands, tagging a dirty build's version accordingly.

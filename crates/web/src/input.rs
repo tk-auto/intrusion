@@ -1088,6 +1088,18 @@ impl GesturePump {
         if e.button() != 0 {
             return; // secondary mouse buttons keep their browser meaning
         }
+        // Take keyboard focus for the page (§11.6). Normally the browser does this
+        // itself as `pointerdown`'s default action — but this handler cancels that
+        // default (below) so the press cannot also become a zoom or a synthetic
+        // click, and the focus transfer goes with it. On a top-level page that costs
+        // nothing, since the window is already focused; **embedded in an iframe it
+        // costs every keypress**, because the keydown pump listens on the frame's own
+        // document and the frame is never given focus. That is the itch.io embed, and
+        // it is why this is asked for on the press rather than at boot: a focus grab
+        // is only reliable — and only welcome — inside a user gesture.
+        if let Some(win) = web_sys::window() {
+            let _ = win.focus();
+        }
         // A finger on the glass says the player is on touch (§11.6/#323) — noted
         // before the press resolves, so the hint is already in the gesture
         // vocabulary on the frame this press draws.
