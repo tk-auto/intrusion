@@ -61,6 +61,58 @@ pub(crate) fn first_step_toward(
     None
 }
 
+/// The first step of the shortest path from `from` to the **nearest cell `arrived`
+/// accepts**, across cells where `passable` holds — the goal stated as a predicate
+/// rather than as a place.
+///
+/// [`first_step_toward`] answers *"which way is that cell"*; this answers *"which way is
+/// the nearest cell like this"*, which is the question you have when the destination is a
+/// **condition** and not a location — walking out of a Repel field (§8.3/#554), where what
+/// the guard wants is simply *anywhere that is not in it* and the nearest such cell is not
+/// known until the search finds it.
+///
+/// `from` itself is not tested and never `passable`-checked: the mover is standing there,
+/// and the whole point is that it may be somewhere it would rather not be. It *is* tested
+/// against `arrived` — a mover already somewhere acceptable gets `None`, the same "nothing
+/// to do" answer [`first_step_toward`] gives for a destination underfoot. Neighbours are
+/// visited in [`Direction::ALL`] order, so the pick among equally-near goals is fixed and
+/// a replay walks the same way out (§12.4).
+pub(crate) fn first_step_to_nearest(
+    from: Cell,
+    passable: impl Fn(Cell) -> bool,
+    arrived: impl Fn(Cell) -> bool,
+) -> Option<Direction> {
+    if arrived(from) {
+        return None;
+    }
+    let mut came_from: HashMap<Cell, Cell> = HashMap::new();
+    came_from.insert(from, from);
+    let mut frontier = VecDeque::new();
+    frontier.push_back(from);
+    while let Some(cell) = frontier.pop_front() {
+        if arrived(cell) {
+            let mut step = cell;
+            while came_from[&step] != from {
+                step = came_from[&step];
+            }
+            return Direction::between(from, step);
+        }
+        for dir in Direction::ALL {
+            let Some(next) = cell.step(dir) else {
+                continue;
+            };
+            if !passable(next) {
+                continue;
+            }
+            if let Entry::Vacant(slot) = came_from.entry(next) {
+                slot.insert(cell);
+                frontier.push_back(next);
+            }
+        }
+    }
+    None
+}
+
 /// The cells reachable from `origin` across `passable` cells without leaving the
 /// `radius` Manhattan disc — a bounded flood fill, returned in breadth-first order.
 /// `origin` is included when it is itself passable; an impassable origin yields an

@@ -855,35 +855,20 @@ impl Moment<'_> {
     /// It is written as [`lockdown`](Self::lockdown)'s sibling and reads almost the same,
     /// which is deliberate: the two abilities buy the same thing, so a cue that asked
     /// something different of each would make the histogram's comparison of them
-    /// meaningless (§13.3). What differs is the one gate below that Lockdown has no need
-    /// of — the field is void around anything already standing in it.
+    /// meaningless (§13.3).
+    ///
+    /// **It used to carry a third gate and no longer does**, which is worth recording
+    /// rather than quietly deleting. While a guard inside the disc was unconstrained,
+    /// pressing with a hunter at arm's length built a wall with the hunter on the inside —
+    /// the worst press in the ability — and the cue declined it. Guards now walk out
+    /// (§8.3/#554), so that press is no longer a mistake and the gate would make the cue
+    /// shy in exactly the moment the ability is best. A cue that checks for a rule the
+    /// game has stopped having measures the cue's memory, not the verb.
     fn repel(&self, status: AbilityStatus) -> Option<Bid> {
         // Flight, for Lockdown's reason exactly: a wall only means something to somebody
         // following a route to you, and ground a patrol was walking past anyway costs it
         // nothing to walk round.
         if self.intent != Intent::Flee {
-            return None;
-        }
-        // **The field is void against what is already inside it**, and this is the gate the
-        // whole cue turns on. The disc is stamped around a guard as readily as around empty
-        // floor, and a guard inside is bound by nothing (§8.3) — so pressing this with a
-        // hunter at arm's length spends the turn *and* the 40-turn lockout building a wall
-        // with the hunter on the inside, which is the single worst press in the ability.
-        // Measured against the radius the field will actually have and not against a cell
-        // of elbow room, because that is the shape of the mistake: everything within
-        // `REPEL_RADIUS` is on the wrong side of the wall.
-        //
-        // It reads the guards through the player's own channels (§11.5a's no-cheat gate),
-        // so a guard the bot cannot perceive can still end up inside — which is honest
-        // rather than a gap: the player firing it is guessing about exactly the same dark.
-        let field = self.state.repel_area();
-        if self
-            .state
-            .guards()
-            .iter()
-            .filter(|guard| self.state.perceive_guard(guard).is_some())
-            .any(|guard| field.contains(guard.pos()))
-        {
             return None;
         }
         // Somebody has to be coming. With nothing perceived at all the bot is fleeing a

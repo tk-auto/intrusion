@@ -279,61 +279,65 @@ fn a_route_across_the_field_goes_the_long_way_round() {
     );
 }
 
-/// **The ticket's open question, pinned** (#554): a guard whose *only* destination is
-/// inside the field — a chaser, whose destination is the player standing in the middle
-/// of it — has no route at all, and **holds**. That is Lockdown's own answer (a sealed
-/// door cuts a corridor for its window and the design accepted it), and what makes it a
-/// wait rather than the soft-lock §2.2 forbids is the clock: the window ends, and the
-/// guard walks in on the very next turn.
+/// **The ticket's open question, pinned** (#554), and settled the *second* way it offered:
+/// a guard whose only route runs through the field — a chaser, whose destination is the
+/// player standing in the middle of it — **closes on the boundary and waits there**,
+/// rather than holding wherever the failed route left it.
 ///
-/// The alternative — walk up and wait *at* the boundary, facing in — reads better as a
-/// cordon and is the recorded fallback (appendix 60); it is not what shipped.
+/// Both answers are the same hold: nothing crosses the line either way, and the window is
+/// the only clock in both. What the cordon buys is that it *reads* as the hunt still
+/// happening — a chase that stops dead two rooms away looks like the game giving up on
+/// you, where a guard standing at the edge of the wall looking in is the ability's own
+/// price made visible. It is also exactly where the player has to come out (appendix 60).
 #[test]
-fn a_guard_with_no_route_holds_and_comes_on_when_the_window_ends() {
+fn a_guard_with_no_route_closes_to_the_boundary_and_waits() {
     let fired_at = Cell::new(15, 15);
-    // Due **north**, five cells up: guards spawn facing south (§7.1), so this one is
-    // looking straight down the column at a player it can see the whole time — the field
-    // conceals nothing, and the chase this starts is genuinely live.
-    let post = Cell::new(15, 15 - REPEL_RADIUS - 2);
+    // Nine cells due north and looking south (§7.1's spawn facing), so it has the player
+    // the whole time and has real ground to cover before it reaches the wall.
     let mut s = fielder(
         fired_at,
-        vec![Guard::patrolling(post).with_beat(open_beat(30, 30))],
+        vec![Guard::patrolling(Cell::new(15, 6)).with_beat(open_beat(30, 30))],
     );
-    // The §4.2 startup look has already happened, so the chase is live on the very turn
-    // the field goes down — and the guard is one cell outside the disc, which is the
-    // arrangement the ability is actually for.
     let field = fire(&mut s);
-    let held_at = s.guards()[0].pos();
-    assert!(!field.contains(held_at), "precondition: it is outside");
+    let opened_at = s.guards()[0].pos();
+    assert!(
+        !field.contains(opened_at) && opened_at.sight_distance(fired_at) > REPEL_RADIUS + 1,
+        "precondition: it starts outside the field and not already against it",
+    );
+
+    // It walks in, and stops on the last cell that is not the field's.
+    let mut walked = Vec::new();
+    for _ in 0..window() - 1 {
+        s.step(Input::Wait);
+        let at = s.guards()[0].pos();
+        walked.push(at);
+        assert!(!field.contains(at), "never across the line: {walked:?}");
+    }
+    let cordon = *walked.last().expect("the window is more than a turn");
+    assert!(
+        cordon.sight_distance(fired_at) == REPEL_RADIUS + 1,
+        "it closed to the boundary and stopped on it: {walked:?}",
+    );
+    assert!(
+        walked.iter().filter(|&&at| at == cordon).count() > 1,
+        "…and waited there rather than milling about: {walked:?}",
+    );
     assert_eq!(
         s.guards()[0].state(),
         GuardState::Chasing,
-        "precondition: it has the player",
+        "still a chase — the wall hides nobody",
     );
-    for _ in 0..window() - 1 {
-        s.step(Input::Wait);
-        assert_eq!(
-            s.guards()[0].pos(),
-            held_at,
-            "with no route in, the chase holds where it stood",
-        );
-        assert_eq!(
-            s.guards()[0].state(),
-            GuardState::Chasing,
-            "and it is still a chase — the wall hides nobody",
-        );
-    }
 
-    // The window closes at the end of this turn, and the very next one has the guard
-    // walking again. **No permanent stall**: the field is released, not held open by
-    // whatever the guard did or did not manage while it was up.
+    // And the moment the window closes it comes straight on, from a cell one step from
+    // the disc rather than from wherever it happened to be standing. **No permanent
+    // stall** — and the cordon is the ability's cost, not a reprieve.
     s.step(Input::Wait);
     assert!(s.repel_field().is_none(), "the window is over");
     s.step(Input::Wait);
     let now = s.guards()[0].pos();
     assert!(
-        now != held_at && field.contains(now),
-        "and it comes straight on, over the ground the field held: {now:?}",
+        field.contains(now),
+        "it walks straight over the ground the field held: {now:?}",
     );
 }
 
@@ -341,55 +345,65 @@ fn a_guard_with_no_route_holds_and_comes_on_when_the_window_ends() {
 // The boundary, from the inside
 // ---------------------------------------------------------------------------
 
-/// §8.3: a guard **already standing inside** when the disc lands is not moved and not
-/// held. The field refuses a crossing *inward*, so this guard is bound by nothing: it
-/// walks about inside and out — and only once it is out does the rule start to apply to
-/// it.
+/// §8.3 (#554, amended): a guard **caught inside** when the disc lands **walks out, by
+/// the shortest way**, and cannot come back.
 ///
-/// All three halves of the ticket's row are one scene, because they are one rule read
-/// three ways.
+/// The ticket asked only that the stamp not move anybody and that a guard inside be free
+/// to leave; what shipped is stronger, because "free to leave" left guards milling about
+/// inside a wall, which reads as the field not working at all. The field is ground guards
+/// will not stand in: the boundary keeps them out, and anybody it lands *around* leaves.
+///
+/// It is a step, not a shove. The guard spends its own turn, keeps its mood, its lead and
+/// its errand — and picks that errand straight back up on the outside, which is what the
+/// tail of this test watches.
 #[test]
-fn a_guard_inside_is_left_alone_may_leave_and_cannot_come_back() {
+fn a_guard_inside_walks_out_by_the_shortest_way_and_cannot_come_back() {
     let fired_at = Cell::new(15, 15);
-    // Two cells **south** of the player — inside the disc when it lands, looking away
-    // (§7.1's spawn facing), with its errand due east along that row. So it crosses
-    // several cells of field before it is out, which is the half of the rule that would
-    // be invisible from a cell on the boundary; and its lane never runs through the
-    // player's own cell, which would be §4.5 contact rather than anything this is about.
+    // Two cells south of the player and looking away (§7.1's spawn facing), with its
+    // errand due east: inside when the field lands, and its own plan would have carried
+    // it *along* the disc rather than out of it — so what this measures is the exit rule
+    // and not the guard's own route.
     let inside = Cell::new(15, 17);
     let beyond = Cell::new(25, 17);
-    // Ghosted (see [`ghosted`]) so the guard keeps the errand that walks it out of the
-    // field rather than turning on the player standing two cells away.
     let mut s = ghosted(fielder(
         fired_at,
         vec![Guard::patrolling_to(inside, beyond).with_beat(open_beat(30, 30))],
     ));
     let field = fire(&mut s);
+    let caught = s.guards()[0].pos();
     assert!(
-        field.contains(s.guards()[0].pos()),
-        "the stamp moves nobody — it is ground, and ground does not push: the guard is \
-         still in the disc that landed on it, walking its own errand",
+        field.contains(caught),
+        "the stamp moves nobody — it is ground, and ground does not push",
     );
 
-    // It walks **within** the field and then out of it, unrefused throughout.
+    // The shortest way out of a box you are one cell inside is one step, and that is the
+    // step it takes — not the two or three its errand would have cost.
+    let out_in = 1 + fired_at.y + REPEL_RADIUS - caught.y;
     let mut walked = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..out_in {
         s.step(Input::Wait);
         walked.push(s.guards()[0].pos());
     }
     assert!(
-        walked.iter().any(|c| field.contains(*c)),
-        "it stepped inside the field on its way out: {walked:?}",
+        walked.last().is_some_and(|at| !field.contains(*at)),
+        "out in {out_in}, the shortest way: {walked:?}",
     );
+    // …and then it is about its own business again, unchanged by the detour — one turn to
+    // swing back onto its eastward heading (§7.5's turn in place, which the exit walk does
+    // not pay but ordinary patrol does), then away.
+    for _ in 0..2 {
+        s.step(Input::Wait);
+    }
     assert!(
-        walked.last().is_some_and(|c| !field.contains(*c)),
-        "and it is out: {walked:?}",
+        s.guards()[0].pos().x > caught.x,
+        "the errand was waiting for it outside: {:?}",
+        s.guards()[0].pos(),
     );
 
-    // …and now it is one of the guards the field refuses — with nothing remembered about
+    // Now it is one of the guards the boundary refuses — with nothing remembered about
     // where it has been, because *outside* is the whole of what the rule reads. Sent back
     // to the cell it started in, it never reaches it while the window holds.
-    s.call_guards_to_for_test(inside, 1);
+    s.call_guards_to_for_test(caught, 1);
     for _ in 0..3 {
         s.step(Input::Wait);
         assert!(
@@ -428,23 +442,27 @@ fn the_player_walks_their_own_field() {
     );
 }
 
-/// §2.3/§4.5: **the field is void against what is already on you.** The disc is stamped
-/// around a guard as readily as around empty floor, and a guard inside it is bound by
-/// nothing — so a player who waits until a chaser is at arm's length has spent the turn
-/// and the whole lockout building a wall with the hunter on the inside, and is taken
-/// exactly as §4.5 **[SETTLED]** says.
+/// §2.3/§4.5 (#554, amended — **and this is the ability's balance question**): a chaser
+/// that the disc lands *around* is **put out of it and then held out**, so firing at the
+/// last moment now works.
 ///
-/// This is the ability's real "when would a good player not press this", so it is pinned
-/// rather than left to be discovered: the press is never refused (§8.4 — refusing it
-/// would make the key a proximity detector), which means the *only* thing standing
-/// between the player and this mistake is knowing the rule.
+/// This is the consequence of the exit rule above, and it is the opposite of what the
+/// ticket specified: there, a guard inside was unconstrained and a field stamped around a
+/// hunter at arm's length spent the turn and the lockout on nothing — the ability's stated
+/// "when would a good player not press this". With guards walking out, the answer is
+/// *"there is no such moment"*, and Repel becomes an escape from a capture that was
+/// already happening.
+///
+/// It is pinned here rather than left to be discovered, because a rule that quietly makes
+/// §4.5 negotiable for eight turns is the thing §8.3 warns about by name (Confusion's *"a
+/// no-guard-may-act field you carry"*), and the number that decides whether it has gone
+/// too far is on `docs/stats/abilities/repel.md`. If it has, the lever is this test: an
+/// exit rule that exempts a guard which currently **has** the player restores the old
+/// trade without touching anything else.
 #[test]
-fn the_field_is_void_around_a_guard_already_inside_it() {
+fn a_chaser_caught_inside_is_put_out_and_held_out() {
     let fired_at = Cell::new(15, 15);
-    // Three cells north and looking south: well inside the disc when it lands, and close
-    // enough that it is on the player in a couple of turns. (Any nearer and the §4.2
-    // startup phase would take the player before the ability could be pressed at all,
-    // which is a different lesson.)
+    // Three cells north, looking south: chasing, and inside the disc when it lands.
     let mut s = fielder(
         fired_at,
         vec![Guard::patrolling(Cell::new(15, 12)).with_beat(open_beat(30, 30))],
@@ -452,19 +470,27 @@ fn the_field_is_void_around_a_guard_already_inside_it() {
     let field = fire(&mut s);
     assert!(
         field.contains(s.guards()[0].pos()),
-        "precondition: the wall went up around it",
+        "precondition: the wall went up around the hunter",
     );
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
 
-    for _ in 0..window() {
-        if s.outcome() != Outcome::Playing {
-            break;
-        }
+    for _ in 0..window() - 1 {
         s.step(Input::Wait);
+        assert_eq!(
+            s.outcome(),
+            Outcome::Playing,
+            "the chase that was one step from taking you does not arrive",
+        );
     }
+    let cordoned = s.guards()[0].pos();
+    assert!(
+        !field.contains(cordoned) && cordoned.sight_distance(fired_at) == REPEL_RADIUS + 1,
+        "it left and is now waiting at the edge: {cordoned:?}",
+    );
     assert_eq!(
-        s.outcome(),
-        Outcome::Lost,
-        "the wall it is standing inside stops it from nothing (§4.5)",
+        s.guards()[0].state(),
+        GuardState::Chasing,
+        "…still chasing, and eight turns is all it has to wait",
     );
 }
 

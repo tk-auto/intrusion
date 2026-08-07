@@ -693,9 +693,15 @@ impl Guard {
     }
 
     /// The cell this guard is currently walking to, if any (§7.4) — the seam the
-    /// loop-level tests read a dispatch's target through, since they sit outside
-    /// this module and the field is private.
-    #[cfg(test)]
+    /// loop-level tests read a dispatch's target through, since they sit outside this
+    /// module and the field is private.
+    ///
+    /// It is also what a **cordon** is aimed at (§8.3/#554): a guard the Repel field has
+    /// cut off entirely closes on the boundary between it and where it was going, and the
+    /// movement pass needs to know where that was ([`repel_approach_step`]). That is a
+    /// read, never a write — nothing outside this module sets a guard's destination.
+    ///
+    /// [`repel_approach_step`]: crate::State::repel_approach_step
     pub(crate) fn destination(&self) -> Option<Cell> {
         self.destination
     }

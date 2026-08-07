@@ -597,10 +597,18 @@ impl State {
             // open ground, so a pursuit plans the long way round instead of walking into
             // ground that will refuse it. Read **per guard**, unlike the seal above,
             // because the rule is about crossing the boundary rather than about the cells:
-            // a guard already standing inside is bound by nothing and is handed no blocks
-            // at all ([`repel_route_blocks`](State::repel_route_blocks)). Empty on every
-            // turn no field is up, which is nearly all of them.
-            blocked.extend(self.repel_route_blocks(self.guards[i].pos()));
+            // a guard already standing inside is not routing at all, it is leaving
+            // ([`repel_route_blocks`](State::repel_route_blocks) hands it nothing).
+            //
+            // It is kept in a **second** set rather than folded into `blocked`, and that
+            // is what makes the cordon possible: the field is the one obstruction a guard
+            // plans around *if it can* and walks up to *if it cannot*, so the two answers
+            // need the two sets. `blocked` stays the hard one — colleagues and seals,
+            // which nothing may plan through under any circumstances — and
+            // [`repel_step`](State::repel_step) below asks the softer question with it.
+            // Both are empty on every turn no field is up, which is nearly all of them.
+            let mut planning = blocked.clone();
+            planning.extend(self.repel_route_blocks(self.guards[i].pos()));
             // §7.7: a chase that ends *this turn* is what calls it in, so the state
             // is read either side of the decision. Chasing is exactly the certain
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
@@ -625,18 +633,23 @@ impl State {
                 self.guards[i].decide_planned(
                     plan,
                     facility,
-                    &blocked,
+                    &planning,
                     &mut self.rng,
                     dwell,
                     style,
                     sight,
                 )
             } else {
-                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, sight)
+                self.guards[i].decide(facility, &planning, &mut self.rng, dwell, style, sight)
             };
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
             }
+            // **The two things a Repel field does to a guard's own step** (§7.6/§8.3/#554),
+            // both applied after the decision rather than inside it: the guard's mood, lead
+            // and destination are its own, and what the field changes is where its feet go
+            // this turn. Inert on every turn no field is up, which is nearly all of them.
+            let step = self.repel_step(i, step, &blocked);
             let Some(dir) = step else {
                 continue;
             };

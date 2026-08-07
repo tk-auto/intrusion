@@ -341,7 +341,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
 | **Dart** | the watcher on your line you could not have walked up to | **the temperament's takedown appetite**, core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
-| **Repel** | a hunt closing across ground a Lockdown cannot touch | intent is `Flee`, **no perceived guard already inside the disc-to-be**, somebody in reach, and a route to spend the turns it buys on |
+| **Repel** | a hunt closing across ground a Lockdown cannot touch | intent is `Flee`, somebody in reach, and a route to spend the turns it buys on |
 | **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |

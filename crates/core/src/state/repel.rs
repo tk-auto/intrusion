@@ -33,34 +33,38 @@
 //! asymmetry a lockdown is made of, and it settles the same way: an ability that could box
 //! its own owner in is one that ends runs by geometry rather than by decision (§2.2).
 //!
-//! # What the guard does about it, and the one rule that resolves the rest
+//! # What the guard does about it: ground it will not stand in
 //!
-//! **The field refuses a crossing of its boundary inward, and nothing else.** Say it that
-//! way and every case the ticket asks for falls out of the one sentence rather than being
-//! a list of exceptions:
+//! One sentence, and everything else here is that sentence meeting a particular
+//! geometry: **no guard stands in the field.** Two halves follow from it, and the second
+//! is what makes the first read as a wall rather than as a glitch.
 //!
-//! - A guard **outside** may not step in — Calm, investigating, searching or chasing, since
-//!   the rule never asks what state it is in ([`repels`](State::repels)).
-//! - A guard **inside** when the disc lands is not moved and not held: it may step within
-//!   the field and out of it, because neither of those is a crossing inward.
-//! - A guard that has **left** cannot come back, with nothing remembered — it is outside
-//!   now, and the first clause is all it takes.
+//! **Nobody gets in.** The boundary refuses a crossing *inward*
+//! ([`repels`](State::repels)) — Calm, investigating, searching or chasing alike, since
+//! the rule never asks what mood a guard is in. A route plans around the disc
+//! ([`repel_route_blocks`](State::repel_route_blocks)) so a pursuit takes the long way
+//! (§7.6/§10.4) and loses the turns that costs; and a guard the field has cut off
+//! **entirely** closes on the boundary and waits there, facing in
+//! ([`repel_approach_step`](State::repel_approach_step)) — a cordon, not a stall. That is
+//! the ticket's open question settled the *second* way it offered (appendix 60): the two
+//! answers are the same hold mechanically, and only one of them looks like the hunt is
+//! still happening.
 //!
-//! Two halves, as with the seal. Its **route** treats the field as solid, so it plans the
-//! long way round instead of walking into ground that will refuse it
-//! ([`repel_route_blocks`](State::repel_route_blocks)); and should it arrive at the edge
-//! anyway — a destination inside the disc, a field stamped under its feet — its step is
-//! simply declined and it holds that turn.
+//! **Anybody inside walks out**, by the shortest way
+//! ([`repel_exit_step`](State::repel_exit_step)), the turn after the disc lands around
+//! them and every turn until they are clear. Nothing is moved by the stamp itself — a
+//! guard spends its own turn leaving, keeps its mood and its lead, and picks its errand
+//! back up outside — and once out it is one of the guards the boundary refuses, so it
+//! cannot come back. That last part needs nothing remembered.
 //!
-//! **A guard with no route at all holds where it stands**, which is the ticket's open
-//! question answered the way Lockdown already answers it: a sealed door can cut a corridor
-//! for eight turns and the design accepted that. The alternative — walk up and wait *at*
-//! the boundary, facing in — reads better as a cordon, and it is the recorded fallback if
-//! the hold plays as a stall (appendix 60); it is not what shipped, because a guard that
-//! failed to route would have to be asked for a second route in the same turn, and
-//! [`Guard::decide`](crate::Guard::decide) spends dwell, memory and facing on the asking.
-//! What makes the hold safe either way is the clock: the window ends, and everything the
-//! guard was going to do it does then.
+//! The pair is what the ability is *called*: the field does not hide you and does not
+//! freeze anybody, it makes a patch of floor something guards will not occupy. What
+//! gathers around it is the cost (below).
+//!
+//! **It never deadlocks, and the guarantee is the clock rather than care**: the window
+//! ends, the field is released whole, and everything a cordoned guard was going to do it
+//! does then — one turn later, from a cell much closer to the player than the one it was
+//! standing in when the wall went up.
 //!
 //! # It conceals nothing
 //!
@@ -72,6 +76,8 @@
 
 use super::effects::area_radius;
 use super::*;
+use crate::guard::routable;
+use crate::path;
 
 impl State {
     /// The field **a Repel fired from where the player stands would stamp** (§8.3/#554):
@@ -126,10 +132,10 @@ impl State {
     /// movement pass read.
     ///
     /// A crossing of the boundary **inward**, and nothing else: the target is in the field
-    /// and the guard is not already in it. Every case the design asks for is this sentence
-    /// read in a different direction (see the module header) — including the two that would
-    /// otherwise need memory: a guard inside may walk about and out, and a guard that has
-    /// left cannot return, because by then it is one of the guards this refuses.
+    /// and the guard is not already in it. It is the "nobody gets in" half of the rule; the
+    /// other half is [`repel_exit_step`](Self::repel_exit_step), and between them a guard
+    /// that has left cannot return with nothing remembered, because by then it is simply
+    /// one of the guards this refuses.
     ///
     /// It never asks what state the guard is in. That is deliberate rather than an
     /// omission: a rule that enumerated moods is a rule a later mood can be quietly left
@@ -149,10 +155,10 @@ impl State {
     /// the whole thing the ability buys.
     ///
     /// **Per guard, unlike the seal's**, because the rule is about a crossing rather than
-    /// about the ground: a guard already inside is bound by nothing, so it is handed no
-    /// blocks at all and routes through its own neighbourhood normally. That is the one
-    /// place this differs from a lock, and it differs because a locked door is a fact about
-    /// the door while this is a fact about the boundary.
+    /// about the ground: a guard already inside is handed no blocks at all — it is not
+    /// routing anywhere, it is [leaving](Self::repel_exit_step). That is the one place this
+    /// differs from a lock, and it differs because a locked door is a fact about the door
+    /// while this is a fact about the boundary.
     ///
     /// Handed to the router as blocked cells rather than stamped into terrain, for the
     /// seal's reason exactly: the field is live state on the ability (§11.3) and the
@@ -163,6 +169,126 @@ impl State {
             Some(field) if !field.contains(from) => field.cells(self.layout.facility()),
             _ => Vec::new(),
         }
+    }
+
+    /// The step a guard **standing inside the field** takes to get out of it
+    /// (§7.6/§8.3/#554): the first step of the shortest walk to the nearest cell that is
+    /// not in the disc, or `None` when the guard is not inside one — or is, and is walled
+    /// in with no way out at all.
+    ///
+    /// **A guard caught inside leaves, and leaving is all it does that turn.** The field
+    /// is ground guards will not stand in, so the rule has two halves and this is the
+    /// second: the boundary refuses everyone outside ([`repels`](Self::repels)), and
+    /// anybody the disc lands *around* walks out by the shortest way rather than carrying
+    /// on with its errand in the middle of it. It is a step, never a shove: nothing is
+    /// teleported, the guard spends its own turn, and it keeps its mood, its lead and its
+    /// destination — which is waiting for it the moment it is out.
+    ///
+    /// **It routes over ordinary ground and takes the ordinary consequences.** Other
+    /// guards are solid to it (§7.8); the *player* is not, so a guard whose shortest way
+    /// out runs over the cell the player is standing on takes that step and captures them
+    /// (§4.5 **[SETTLED]** — contact is contact, and a wall the guard is already inside
+    /// stops it from nothing). The way out points away from the disc's middle, which is
+    /// where the player usually is, so this is rare rather than routine — but it is the
+    /// rule, and it is why firing this with a guard on top of you is not a way to be rid
+    /// of it.
+    ///
+    /// The blocked set is passed in rather than read here because the movement pass
+    /// already has it: it is the same colleagues-and-seals set the guard's own routing
+    /// uses that turn, so a guard leaves *around* its colleagues rather than through them.
+    pub(super) fn repel_exit_step(&self, from: Cell, blocked: &[Cell]) -> Option<Direction> {
+        let field = self.repel?;
+        if !field.contains(from) {
+            return None;
+        }
+        let facility = self.layout.facility();
+        path::first_step_to_nearest(
+            from,
+            |cell| routable(facility, cell) && !blocked.contains(&cell),
+            |cell| !field.contains(cell),
+        )
+    }
+
+    /// The step a guard whose route the field has **cut off entirely** takes toward it
+    /// (§7.6/§8.3/#554): the first step of the shortest walk to its destination *as if the
+    /// field were not there*, which the boundary rule then stops at the edge.
+    ///
+    /// # Why a guard walks up to a wall it cannot cross
+    ///
+    /// This is the ticket's open question, and it is settled the second way it offered
+    /// (appendix 60): **a guard with no route waits at the boundary, facing in**, rather
+    /// than holding wherever it happened to be standing. Both are the same hold —
+    /// mechanically nothing crosses the line either way — but a hunt that stops dead in a
+    /// corridor two rooms away reads as the game giving up on you, where a hunt that walks
+    /// up to the edge of the wall and stands there reads as what it is: a cordon, waiting
+    /// for the window to close, in exactly the cells you have to come out through.
+    ///
+    /// It is asked **only when the ordinary route has already failed**, so a guard that
+    /// can go the long way round still does — that detour is what the ability buys
+    /// (§7.6/§10.4) and nothing here is allowed to shortcut it. What is left when the
+    /// strict route fails is a destination the field is standing in front of, and the
+    /// honest thing to do about it is to close.
+    ///
+    /// The guard walks the loose route one step per turn and is refused at the edge by the
+    /// boundary rule itself, so there is no separate stopping condition to keep in step
+    /// with it: the cordon forms because the route runs out of legal steps, not because
+    /// anything counted the distance. Its facing follows its walk, so a guard that arrives
+    /// at the edge is looking into the field — which is where the player is.
+    pub(super) fn repel_approach_step(
+        &self,
+        from: Cell,
+        to: Cell,
+        blocked: &[Cell],
+    ) -> Option<Direction> {
+        self.repel?;
+        let facility = self.layout.facility();
+        path::first_step_toward(from, to, |cell| {
+            routable(facility, cell) && !blocked.contains(&cell)
+        })
+    }
+
+    /// What the field does to guard `index`'s step this turn (§7.6/§8.3/#554) — the one
+    /// seam the movement pass calls, so the two overrides are read in one place and in a
+    /// fixed order, and `chose` passes straight through on every turn no field is up.
+    ///
+    /// Two cases, and neither is a plan: both leave the guard's mood, lead and destination
+    /// exactly as [`decide`](crate::Guard::decide) left them, and both are spent on the
+    /// guard's own turn.
+    ///
+    /// 1. **Inside the disc** → it leaves, by the shortest way out
+    ///    ([`repel_exit_step`](Self::repel_exit_step)), whatever it had been about to do.
+    ///    Its errand is still there when it is out.
+    /// 2. **Outside, and cut off** → it closes to the boundary
+    ///    ([`repel_approach_step`](Self::repel_approach_step)) instead of standing wherever
+    ///    the failed route left it. Asked only when the guard found no step at all *and*
+    ///    has somewhere to be, so a guard that is dwelling (§7.5), rotating in place, or
+    ///    simply arrived is never marched anywhere by this.
+    ///
+    /// The step it hands back is walked by the pass without going through
+    /// [`commit_step`](crate::Guard), so neither override pays §7.5's turn-in-place cost.
+    /// That is deliberate in both cases and for the same reason: each fires only where the
+    /// guard would otherwise spend the turn achieving nothing, and a rotation tax on
+    /// getting out of the way — or on closing the last cell of a cordon — would read as
+    /// the guard being slow rather than as the wall being firm.
+    pub(super) fn repel_step(
+        &self,
+        index: usize,
+        chose: Option<Direction>,
+        blocked: &[Cell],
+    ) -> Option<Direction> {
+        if self.repel.is_none() {
+            return chose;
+        }
+        let guard = &self.guards[index];
+        if self.repelled(guard.pos()) {
+            // The way out, or — walled in with nowhere to go — whatever it had planned.
+            return self.repel_exit_step(guard.pos(), blocked).or(chose);
+        }
+        if chose.is_some() {
+            return chose;
+        }
+        let destination = guard.destination()?;
+        self.repel_approach_step(guard.pos(), destination, blocked)
     }
 
     /// Stamp the field `area` (§8.3/#554) — the whole world change the activation makes,
