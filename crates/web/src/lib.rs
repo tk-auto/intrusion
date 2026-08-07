@@ -246,7 +246,7 @@ pub fn start() -> Result<(), JsValue> {
     } else {
         input::install_input(&document, &game)?;
         input::install_gestures(&document, &game)?;
-        menu::install(&document, &game)?;
+        menu::publish_screen(&game);
         // The page-hide flush (§12.5/#514) — live play only: a replay has no run of its
         // own to write.
         save::install(&document, &game)?;

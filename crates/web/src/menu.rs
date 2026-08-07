@@ -26,14 +26,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::{seed, Game};
 use intrusion_core::{
     Difficulty, LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, OptionsControl,
     RunMode, RunOptions, ScreenUi,
 };
-use wasm_bindgen::prelude::*;
-use web_sys::Document;
-
-use crate::{seed, Game};
 
 /// What `<body data-screen>` reads on each of the shell's surfaces — the one signal
 /// outside the canvas that says which surface is up, which is what lets the headless
@@ -320,27 +317,28 @@ impl Game {
     }
 }
 
-/// Wire the menu's DOM — which since #572 is **nothing but one attribute**: publish
-/// which surface the shell opened on, and stop. The box, its buttons and their three
-/// event fences are gone with the seed prompt (§13.1), so there is no element to look
-/// up, no listener to install and no press to keep away from the game's pumps.
+/// Publish the surface the shell opened on — the menu's whole remaining business with
+/// the page (§11.4/#268).
 ///
-/// It stays a `install`-shaped function rather than collapsing into the boot because
-/// the surface it publishes is the boot's own answer to *menu or run*, and
-/// `data-screen` is read from outside the wasm (the artifact-build skill's smoke
-/// check). `document` is taken for the same reason every sibling pump takes it: the
-/// caller has already resolved it, and a shell reach that quietly found its own would
-/// be the one place the boot's document and the module's could differ.
+/// It was `install` until #572, and it wired real markup: the seed box, its two
+/// buttons and the three event fences that kept the panel's own keystrokes and presses
+/// away from the document-level pumps (§11.6). All of that went with the prompt, and
+/// what is left is not an installation at all — no element is looked up, no listener
+/// added, nothing that can fail — so it is named for the one thing it does and takes
+/// neither a `Document` nor a `Result` it would always answer `Ok` to.
+///
+/// The attribute stays because it is read from *outside* the wasm: `data-screen` is
+/// how the headless smoke check (the artifact-build skill's `verify.mjs`) tells a title
+/// screen from a live run.
 ///
 /// Called in live play only, never in the replay viewer (a replay has no menu: it
 /// was told exactly which run to show).
-pub(crate) fn install(_document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
+pub(crate) fn publish_screen(game: &Rc<RefCell<Game>>) {
     set_screen(if game.borrow().menu().is_some() {
         SCREEN_MENU
     } else {
         SCREEN_PLAY
     });
-    Ok(())
 }
 
 #[cfg(test)]
