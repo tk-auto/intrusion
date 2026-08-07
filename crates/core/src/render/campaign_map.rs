@@ -49,6 +49,10 @@
 use super::alert::condition_line;
 use super::help::{right_aligned_start, FOOTER_INDENT, THEME_KEY};
 use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
+// The **same** §11.2 cue the cards give a bent rule (§12.6/#248), read from their own
+// derivation rather than restated here: the colour a player learns on the Level info tab
+// or the level-start splash reads the same on the map.
+use super::modifier_rows::direction_category;
 use super::{blank_grid, draw, Grid};
 use crate::alert::TOP_RUNG;
 use crate::campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
@@ -747,16 +751,6 @@ fn suffix(direction: ModifierDirection) -> &'static str {
     match direction {
         ModifierDirection::Harder => ALERTED,
         ModifierDirection::Easier => OFF_GUARD,
-    }
-}
-
-/// The §11.2 meaning a bent rule carries — the **same** cue the help card gives the same
-/// modifier (§12.6/#248), so the colour a player learns on one screen reads the same on
-/// the other: Warning for a threat that is hunting, Owned for a rule bent your way.
-fn direction_category(direction: ModifierDirection) -> Category {
-    match direction {
-        ModifierDirection::Harder => Category::Warning,
-        ModifierDirection::Easier => Category::Owned,
     }
 }
 

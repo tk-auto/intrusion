@@ -4,7 +4,7 @@ use crate::ability::Loadout;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
 use crate::modifiers::{
     ActiveModifier, CacheCount, Composite, DebugModifiers, GuardCount, IntelCount, IntelGate,
-    LayoutKnowledge,
+    LayoutKnowledge, ModifierDirection, CAPTIONS, CAPTION_SEPARATOR,
 };
 
 /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough

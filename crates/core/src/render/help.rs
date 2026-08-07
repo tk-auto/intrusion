@@ -61,6 +61,7 @@
 
 mod abilities;
 
+use super::modifier_rows::modifier_rows;
 use super::settings::{self, SettingsRow};
 use super::{
     blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
@@ -71,10 +72,7 @@ use crate::alert::AlertReadout;
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
-use crate::modifiers::{
-    ActiveModifier, Composite, DebugModifiers, LevelModifiers, ModifierDirection, CAPTIONS,
-    CAPTION_SEPARATOR,
-};
+use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::place::LevelConfig;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
@@ -320,46 +318,6 @@ const SEED_TOKEN_ROW: u32 = CONTENT_TOP + 3;
 /// the tab itself gave way to the options screen in #513 — the row keeps the spacer it
 /// always was, so the modifier list below it never moved for either.
 const SEED_ACK_ROW: u32 = SEED_TOKEN_ROW + 1;
-
-/// **The modifier caption width bound** (#248). The panel fills the board, so the
-/// narrowest screen a real run ever renders on is the v1 board
-/// ([`LevelConfig::V1`], 40 wide — §10.2); a caption starts at
-/// [`CONTENT_INDENT`] and leaves one column of right margin, the same margin the
-/// `[x]` control keeps. Anything longer is silently clipped by [`draw`], which is
-/// how "Sightings called in: one guard converges" reached a screenshot as
-/// `…one guard conver`.
-///
-/// So it is checked **at compile time** against [`CAPTIONS`] — the whole set of
-/// captions the card can draw — and a caption that would not fit fails the build
-/// instead of the eye. Derived from the board width rather than written as a
-/// number, so retuning §10.2 moves the bound with it.
-const CAPTION_MAX: usize = (LevelConfig::V1.width - CONTENT_INDENT - 1) as usize;
-
-// The bound bites here, over the complete caption set (§2.3 — a check that cannot
-// be bypassed by adding a modifier, because `active` may only draw from `CAPTIONS`).
-const _: () = {
-    let mut i = 0;
-    while i < CAPTIONS.len() {
-        assert!(
-            CAPTIONS[i].caption_len() <= CAPTION_MAX,
-            "a level-modifier caption is too long for the Level info panel — \
-             shorten its name or detail (see CAPTION_MAX in render::help)",
-        );
-        i += 1;
-    }
-    // …and over the **attributed** rows a composite draws (§12.6/#565), which are the
-    // longest the tab can produce: a composite's name, the separator, and the rule's own
-    // short phrasing. Bounded conservatively by the longest label against the longest
-    // phrase — a pair no composite actually draws, so a row that fits this fits every real
-    // one. It is what makes *"the tab grows downward"* a guarantee rather than a hope: one
-    // row per active rule, and no row wide enough to wrap.
-    assert!(
-        Composite::max_label_len() + CAPTION_SEPARATOR.len() + ActiveModifier::max_short_len()
-            <= CAPTION_MAX,
-        "a composite's attributed row is too long for the Level info panel — \
-         shorten a composite label or a caption's short phrasing (see CAPTION_MAX)",
-    );
-};
 
 /// **The panel's one right-alignment rule**: where a control `len` cells wide starts
 /// on a screen `width` wide, with the one-cell right margin every column of the card
@@ -654,38 +612,13 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
     draw(grid, 2, y, "MODIFIERS", Category::System);
     y += 1;
 
-    let active = modifiers.active();
-    if active.is_empty() {
-        // Baseline quick play: legible as "none active", not blank or absent (#248).
-        draw(
-            grid,
-            CONTENT_INDENT,
-            y,
-            "none active — baseline rules",
-            Category::Ground,
-        );
-        y += 1;
-    }
-    for m in active {
-        // The modifier's own name carries the direction as a **colour cue** (§11.2):
-        // the whole caption is drawn in Warning (orange) for a harder rule, Owned
-        // (blue) for an easier one — pulled from the standing categories, not ad-hoc
-        // styling. A bounded knob appends its value (`name: value`).
-        let text = match m.detail {
-            Some(detail) => format!("{}{CAPTION_SEPARATOR}{detail}", m.name),
-            None => m.name.to_string(),
-        };
-        debug_assert!(
-            text.chars().count() == m.caption_len(),
-            "the drawn caption and the measured one must agree",
-        );
-        draw(
-            grid,
-            CONTENT_INDENT,
-            y,
-            &text,
-            direction_category(m.direction),
-        );
+    // The list itself is [`modifier_rows`](super::modifier_rows) — the one derivation
+    // the level-start splash draws from too (#497), so the two views of a run's rules
+    // cannot drift: each row carries its own §11.2 direction colour (Warning for a
+    // harder rule, Owned for an easier one), a bounded knob appends its value, and a
+    // baseline run is one legible *none active* row rather than a blank.
+    for (text, category) in modifier_rows(modifiers) {
+        draw(grid, CONTENT_INDENT, y, &text, category);
         y += 1;
     }
 
@@ -696,17 +629,6 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
     // under it to be pushed around.
     y += 1;
     super::alert::draw_alert(grid, y, alert, CONTENT_INDENT);
-}
-
-/// The §11.2 category a direction reads in — the colour cue the caption is drawn
-/// in: Warning (a hunting threat's orange) for *harder*, Owned (yours, calm blue)
-/// for *easier*. Pulled from the standing categories, never new ad-hoc styling
-/// (§11.2/#248).
-fn direction_category(direction: ModifierDirection) -> Category {
-    match direction {
-        ModifierDirection::Harder => Category::Warning,
-        ModifierDirection::Easier => Category::Owned,
-    }
 }
 
 /// The **Help** tab (#139/#296): the glyph legend, the colour key, and the
