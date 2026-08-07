@@ -41,9 +41,10 @@ use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 use crate::difficulty::Difficulty;
 
-/// The entries on the main menu, top to bottom. Three start a run today — the
-/// interrupted one, quick play, and the campaign — and [`Options`](Self::Options)
-/// opens the §14 v2 settings screen.
+/// The entries on the main menu, top to bottom: **the rows that start a run first,
+/// then the one that does not**. Three start a run today — the interrupted one, quick
+/// play, and the campaign — and [`Options`](Self::Options) opens the §14 v2 settings
+/// screen from the bottom of the list.
 ///
 /// [`ContinueRun`](Self::ContinueRun) is the one entry that is not always *listed*:
 /// it appears only when the shell found a save to resume ([`MenuUi::continue_run`]),
@@ -59,15 +60,23 @@ pub enum MenuEntry {
     /// selection, so the common case is one keypress (or one tap) from a load.
     #[default]
     QuickPlay,
+    /// **The campaign** (§14 v3/#208): a run as a forward walk through the facility
+    /// map. Opens the map screen, which is where a campaign is played from.
+    ///
+    /// It sits directly under quick play because **the two ways to play belong
+    /// together**: they are the same kind of choice — which game am I starting — and
+    /// the settings screen below them is a different kind entirely. Listing Options
+    /// between them separated the pair with the one row that starts nothing.
+    StoryMode,
     /// The **global settings screen** (§14 v2/#513, [`super::settings`]): the colour
     /// theme (#189), the renderer (#460), and — in a debug session — the §12.6
     /// switches. Deliberately *not* the level-options dialog
     /// ([`MenuScreen::LevelOptions`]) that *Quick play* opens: that one asks about the
     /// run you are starting, this one about the game.
+    ///
+    /// **Last of the always-listed rows**, under both ways to play: it is the only
+    /// entry that starts no run.
     Options,
-    /// **The campaign** (§14 v3/#208): a run as a forward walk through the facility
-    /// map. Opens the map screen, which is where a campaign is played from.
-    StoryMode,
 }
 
 impl MenuEntry {
@@ -80,8 +89,8 @@ impl MenuEntry {
     pub const ALL: [MenuEntry; 4] = [
         MenuEntry::ContinueRun,
         MenuEntry::QuickPlay,
-        MenuEntry::Options,
         MenuEntry::StoryMode,
+        MenuEntry::Options,
     ];
 
     /// The entry's label as drawn.
@@ -760,6 +769,41 @@ mod tests {
         }
     }
 
+    /// **The rows that start a run come first, and the one that does not comes last.**
+    /// Quick play and Story mode are the same kind of choice — *which game am I
+    /// starting* — so they sit together; Options opens a screen and starts nothing, so
+    /// it goes under both. Listing it between them split the pair with the one row that
+    /// plays nothing, which is what made the list read as three unrelated things.
+    ///
+    /// Pinned as an ordered list rather than left to the walk tests, because the order
+    /// **is** the decision here: the marker's ring, the drawn rows and the tap targets
+    /// all derive from it, so a reorder should fail here first and by name.
+    #[test]
+    fn the_entries_that_start_a_run_are_listed_before_the_one_that_does_not() {
+        assert_eq!(
+            MenuEntry::ALL,
+            [
+                MenuEntry::ContinueRun,
+                MenuEntry::QuickPlay,
+                MenuEntry::StoryMode,
+                MenuEntry::Options,
+            ],
+        );
+        // Said as the rule rather than as the list: Options is last, and every row
+        // above it is a way into a run.
+        assert_eq!(MenuEntry::ALL.last(), Some(&MenuEntry::Options));
+        // …and the screen draws them in that order, top to bottom.
+        let ui = resumable();
+        let rows = render_menu(W, H, ui).to_text();
+        for (i, entry) in ui.entries().iter().enumerate() {
+            assert!(
+                rows[entry_row(ui, H, i) as usize].contains(entry.label()),
+                "{entry:?} is not the {i}th row drawn:\n{}",
+                rows.join("\n"),
+            );
+        }
+    }
+
     /// **The continue entry is listed only when there is a run to continue**
     /// (§12.5/#514) — the one conditional row on the screen. Without a save the menu
     /// is the one it always was; with one, *Continue run* joins it at the top and
@@ -905,19 +949,23 @@ mod tests {
         let at = |selected| menu(selected);
         assert_eq!(
             at(MenuEntry::QuickPlay).next_entry(),
+            MenuEntry::StoryMode,
+            "the two ways to play are adjacent — nothing sits between them",
+        );
+        assert_eq!(
+            at(MenuEntry::StoryMode).next_entry(),
             MenuEntry::Options,
             "the Options entry is walked onto now that it opens a screen",
         );
-        assert_eq!(at(MenuEntry::Options).next_entry(), MenuEntry::StoryMode);
         assert_eq!(
-            at(MenuEntry::StoryMode).next_entry(),
+            at(MenuEntry::Options).next_entry(),
             MenuEntry::QuickPlay,
             "next past the last enabled entry wraps to the first",
         );
-        assert_eq!(at(MenuEntry::Options).prev_entry(), MenuEntry::QuickPlay);
+        assert_eq!(at(MenuEntry::StoryMode).prev_entry(), MenuEntry::QuickPlay);
         assert_eq!(
             at(MenuEntry::QuickPlay).prev_entry(),
-            MenuEntry::StoryMode,
+            MenuEntry::Options,
             "prev past the first wraps to the last enabled entry",
         );
         // A disabled entry can never be reached from either direction.
@@ -965,8 +1013,8 @@ mod tests {
             vec![
                 MenuEntry::ContinueRun,
                 MenuEntry::QuickPlay,
-                MenuEntry::Options,
                 MenuEntry::StoryMode,
+                MenuEntry::Options,
             ],
         );
         assert_eq!(
