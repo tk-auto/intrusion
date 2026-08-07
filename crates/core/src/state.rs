@@ -453,10 +453,21 @@ pub struct State {
     /// [`with_debug`](Self::with_debug) and read in the sight phase
     /// ([`recompute_sight`](Self::recompute_sight)). Deliberately *not* part of the
     /// [`LevelSeed`] above: no generation seam reads them and no shared token can
-    /// carry them, and they never touch the facility or the guards, so a run under one
-    /// plays exactly the run it plays without one. Defaults to all off — the game as
-    /// everybody else gets it.
+    /// carry them. Defaults to all off — the game as everybody else gets it.
     debug: DebugModifiers,
+    /// Whether this run has **ever** had [`DebugModifiers::ghost`] on (§12.6/#507) —
+    /// the latch that refuses its replay export.
+    ///
+    /// It latches on the **run**, not on the switch. Turning ghost back off does not
+    /// restore the export: the inputs already recorded were played under bent rules,
+    /// and no later toggle un-bends them. That mirrors the honesty the omni-vision row
+    /// already shows about tile memory — turning it back off does not restore what was
+    /// already seen, *which is honest rather than surprising: you did see it*.
+    ///
+    /// Set by [`with_debug`](Self::with_debug) and [`toggle_ghost`](Self::toggle_ghost),
+    /// and never cleared. It is on the state rather than on the shell because it is a
+    /// fact about the **run**, so it survives the autosave the same way the run does.
+    ghosted: bool,
     /// The run's reproducible starting config (§12.4/#245), threaded in at boot by
     /// [`with_level`](Self::with_level) — the one handle that reproduces *this* run
     /// exactly, which the help panel shows (#272). `None` for a hand-built state,
@@ -624,6 +635,7 @@ impl State {
             auto_slide: traversal::AUTO_SLIDE_DEFAULT,
             modifiers: LevelModifiers::default(),
             debug: DebugModifiers::default(),
+            ghosted: false,
             level: None,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
@@ -710,20 +722,47 @@ impl State {
     #[must_use]
     pub fn with_debug(mut self, debug: DebugModifiers) -> Self {
         self.debug = debug;
+        // A run that *starts* under the ghost is latched from turn zero (§12.6/#507):
+        // a build baked with the switch on bends the rules for the whole run, so there
+        // was never a stretch of it that could honestly be handed on as a replay.
+        self.ghosted |= debug.ghost;
         // The startup turn (§4.2) has already run its sight phase by the time a
         // builder is called, so re-run it here for the switches that shape sight —
         // otherwise the reveal would only take hold from the player's first action,
         // and the opening frame would still be fogged. Sight is a pure recompute (no
         // RNG, §12.4), so running it twice costs a frame's work and changes nothing.
+        //
+        // **The guards' own startup look is not re-run**, and the ghost therefore takes
+        // hold from the first player turn rather than from turn zero. Re-running it
+        // would step the guards twice, which is a worse bargain than the one thing it
+        // buys — and it buys nothing in a real run: §10.6 guarantees a spawn no cone
+        // eyes, so there is nothing for that look to have found.
         self.recompute_sight();
         self
     }
 
-    /// The debug modifiers in force (§12.6) — read in the sight phase, and nowhere in
-    /// the rules.
+    /// The debug modifiers in force (§12.6) — the sight phase reads the reveal, and
+    /// the §10.3 concealment seam reads the ghost (#507).
     #[must_use]
     pub fn debug(&self) -> DebugModifiers {
         self.debug
+    }
+
+    /// Whether this run has **ever** been played under the ghost (§12.6/#507) — the
+    /// latch, once set never cleared, that refuses the replay export.
+    ///
+    /// The shell asks it before offering the export: a run whose inputs were played
+    /// under bent rules would replay into a desync on the first turn a guard would have
+    /// seen the player, and teaching the link to carry the switch would put a rule-bend
+    /// inside a shareable URL — the exact thing §12.6 keeps out of the token. The
+    /// containment is worth more than the export.
+    ///
+    /// It is a **latch and not a live read** of [`debug`](Self::debug): switching ghost
+    /// back off does not restore the export, because the turns already recorded do not
+    /// un-bend.
+    #[must_use]
+    pub fn ghosted(&self) -> bool {
+        self.ghosted
     }
 
     /// Flip the **omni-vision** switch on a running game (§12.6/#459) — the live half
@@ -743,6 +782,25 @@ impl State {
     pub fn toggle_reveal(&mut self) {
         self.debug.reveal_whole_level = !self.debug.reveal_whole_level;
         self.recompute_sight();
+    }
+
+    /// Flip the debug session's **ghost** switch on a running game (§12.6/#507) — the
+    /// live half of [`with_debug`](Self::with_debug), for the Options tab's `ghost` row.
+    ///
+    /// Unlike [`toggle_reveal`](Self::toggle_reveal) this one **touches the facility**,
+    /// and the whole of what makes that containable is here: switching it on latches
+    /// [`ghosted`](Self::ghosted) for the rest of the run, so the replay export is
+    /// refused from this moment on and stays refused however many times it is toggled
+    /// after.
+    ///
+    /// It costs no turn (§4.4) and consumes nothing from the run's stream (§12.4):
+    /// concealment is derived per query, so there is nothing to recompute and the very
+    /// next guard phase simply reads the player as concealed. Flipped on **mid-chase**,
+    /// the pursuers lose sight through the ordinary §7.6 path — each searches where it
+    /// last had you — rather than through any special case here.
+    pub fn toggle_ghost(&mut self) {
+        self.debug.ghost = !self.debug.ghost;
+        self.ghosted |= self.debug.ghost;
     }
 
     /// Thread the run's whole [`LevelSeed`] into the state (§12.4/#245) — the boot

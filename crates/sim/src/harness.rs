@@ -359,6 +359,31 @@ mod tests {
         assert_eq!(state.player(), bare.player());
     }
 
+    /// **The sim cannot reach the §12.6 debug switches** (§13.2/#507), and the ghost
+    /// above all: a measurement taken through a run where no guard ever detects the
+    /// player would be a measurement of nothing.
+    ///
+    /// The containment is structural — a `RunConfig` carries a
+    /// [`LevelSeed`](intrusion_core::LevelSeed), and the switches are deliberately not
+    /// on it, so there is no `--flag` to add and no field to set. What this pins is
+    /// that the state the sim actually boots comes out with them off, whatever a config
+    /// asks for: the boot path is the assertion's subject, not the type.
+    #[test]
+    fn the_sim_cannot_take_a_measurement_through_a_debug_switch() {
+        let config = RunConfig::sim()
+            .with_modifier("layout-knowledge-full")
+            .expect("a known modifier");
+        let state = intrusion_core::start_level_with(&config.facility, &config.level(7))
+            .expect("generates");
+        assert_eq!(
+            state.debug(),
+            intrusion_core::DebugModifiers::default(),
+            "the sim boots with every debug switch off",
+        );
+        assert!(!state.debug().ghost, "the guards look for the bot");
+        assert!(!state.ghosted(), "…and no run of it is ever latched");
+    }
+
     /// Every cell's terrain, as the fingerprint of a carved facility — `Facility` is
     /// storage rather than a value type, so a comparison is spelled out here.
     fn terrain_of(state: &intrusion_core::State) -> Vec<Option<intrusion_core::Terrain>> {

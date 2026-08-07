@@ -205,9 +205,9 @@ shibboleth, not a documented switch, and the shell strips it from the address ba
 moment it is consumed, so the URL you then copy is a clean shareable level link and
 never an activation (`crates/web/src/debug.rs`).
 
-A build can also be baked with the **debug switches** themselves — playtest-only
-changes to what is *drawn*, which set what the tab's toggle **starts** as. There is one
-so far:
+A build can also be baked with the **debug switches** themselves, which set what the
+tab's toggles **start** as. There are two, and they are different kinds of thing: one
+changes only what is *drawn*, the other bends a rule.
 
 ```
 python3 .claude/skills/artifact-build/assemble.py \
@@ -240,6 +240,31 @@ Name the artifact with a `-reveal` slug (as above) and **say in the handoff that
 fog is lifted** — a revealed frame looks nothing like the shipped game, and a stale
 tab shouldn't be mistaken for one. (Whoever is playing can turn it off from the Debug
 tab, and the run underneath is the same run either way.)
+
+### `--debug ghost` — the one that touches the facility (§12.6/#507)
+
+`ghost` is the **exception** to everything the paragraphs above say about a debug
+switch: while it is on, **no guard ever detects you**. Cones pass through you,
+sightings never fire, chases never start. Where `reveal` lets you *watch* a level you
+cannot see, this lets you *stand in* one — walk to the corner where generation went
+wrong, park in a guard's face to read its cone maths, follow a patrol for twenty turns.
+
+Three things to say in a handoff that bakes it:
+
+- **Contact still captures** (§4.5). A guard that walks into your cell ends the run
+  whether or not it ever saw you coming. Walking a ghost through a patrol route is
+  still a way to lose.
+- **The run cannot be exported.** Once the switch has been on, the `replay` row reads
+  *unavailable* for the rest of the run and says why — the recorded inputs were played
+  under bent rules. It is latched: switching ghost back off does not restore it. So if
+  the run might still be worth handing over, reach for `reveal` and not this.
+- **The danger overlay still paints**, on purpose — red goes back to meaning *this cell
+  is watched* rather than *you are detected*, so a red cell under a ghost is not a bug.
+
+Name the artifact with a `-ghost` slug and say plainly that the guards are blind: a
+ghosted preview cannot be judged for balance or feel at all, and no bug whose trigger
+is *being detected* — a chase, a search, a §7.7 call-in, a rung of the §7.3 ladder —
+can be reproduced through it.
 
 ## 7. Hand off a **bot replay** (§13.3/#197)
 

@@ -2848,6 +2848,7 @@ fn the_debug_reveal_draws_the_whole_level_live() {
 
     let revealed = fogged.with_debug(DebugModifiers {
         reveal_whole_level: true,
+        ..DebugModifiers::default()
     });
     let g = render(&revealed);
     assert_eq!(g.get(10, 14).glyph, '$', "the console shows");

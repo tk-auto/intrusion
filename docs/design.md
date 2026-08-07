@@ -2677,6 +2677,15 @@ rule pushed further, not withdrawn — a board with no dots anywhere is what it 
 written against. Backgrounds are unaffected: they paint per cell whatever the glyph,
 so a watched cell out of your sight still paints red, now with nothing on top of it.
 
+**The one place the picture is allowed to diverge from the rule** is the §12.6 **ghost**
+debug switch (#507, *appendix 57*), and it is written here so it is not discovered as a
+bug. Under it the real detection set is empty, so the overlay would blank — exactly when
+someone is debugging vision. It therefore keeps painting the set that *would* detect a
+detectable player: red goes back to meaning *this cell is watched*. Nothing about the
+**[SETTLED]** contract moves for anybody playing the game; a rule-bending instrument is
+the only thing that can reach this, and it cannot be reached from a link, a token or the
+sim.
+
 > **What each background resolves to, row by row** — which cue means what, and the two
 > guarantees that must not regress (the overlay covers watched cells outside your own
 > FOV; cones of guards you cannot see paint nothing) — is
@@ -3538,10 +3547,14 @@ only in a debug session, so with no session there is no heading and no row to re
 key or by tap. The **rows** themselves read like every other row: they are live
 controls, and dimming them would say *inert* about the section where a press does the
 most, so the gate is the heading's job alone. They are **never persisted**: the preference record beside them
-holds the theme and the renderer and nothing else, because a record that re-armed
-omni-vision on the next visit would outlive the session gate this whole channel rests on.
-Everything else about the gate is unchanged — perception only, never in a level-seed
-token, activation stripped from the URL. Only the surface moved.
+holds the theme and the renderer and nothing else, because a record that re-armed a
+switch on the next visit would outlive the session gate this whole channel rests on —
+and since #507 one of them bends a rule, so it would be re-arming that against the
+facility rather than against the picture. Everything else about the gate is unchanged —
+never in a level-seed token, activation stripped from the URL. Only the surface moved.
+The **ghost** row (#507) is drawn under the same gate and reads like its neighbours;
+what it adds to this screen is that the row it disables — the replay export — reads as
+*unavailable* and answers a press by naming the switch, rather than going quietly dead.
 
 **A modifier is also how an experiment ships, and how one is adopted.**
 `calm_guards_detect_only_their_cone` (#410) bent a **[SETTLED]** sentence —
@@ -3600,33 +3613,87 @@ spec](level-seed-token.md) §3).
 the ~1-in-3,000 rejection that the leftover space provides. Seed space and integrity
 trade one-for-one ([token spec](level-seed-token.md) §8).
 
-**Debug modifiers are not level modifiers.** A separate `DebugModifiers` value
-carries playtest-only switches over **what the player perceives** — today one: *"see
-the whole level"*, which makes the player's §6 field of view the entire facility, so
-a build can be watched rather than played blind. It is stated as *sight* and applied
-in the sight phase, not as a drawing rule, so everything downstream follows without a
-special case: the §11.5a fog lifts into the ordinary live picture, every guard reads
-as seen, and the §11.5 danger overlay paints every cone. It touches nothing else —
-guards look with their own cones and walk the same beats, so the run plays identically
-(seeing everything is not being everywhere). It is **never encoded into a level-seed
-string**, so no shared level can arrive with the fog lifted, and no generation seam
-sees it. The line is worth keeping sharp:
-**a level modifier changes the game, a debug modifier changes only what you get to see
-of it** — anything that bends a rule is a level modifier and belongs in the token with
-the rest of the run's identity.
+**Debug modifiers are not level modifiers.** A separate `DebugModifiers` value carries
+playtest-only **instruments**. It is **never encoded into a level-seed string**, so no
+shared level can arrive with one on, and no generation seam sees it. There are two:
+
+**Omni-vision** — *"see the whole level"*, which makes the player's §6 field of view the
+entire facility, so a build can be watched rather than played blind. It is stated as
+*sight* and applied in the sight phase, not as a drawing rule, so everything downstream
+follows without a special case: the §11.5a fog lifts into the ordinary live picture,
+every guard reads as seen, and the §11.5 danger overlay paints every cone. It touches
+nothing else — guards look with their own cones and walk the same beats, so the run
+plays identically (seeing everything is not being everywhere).
+
+**Ghost** (#507, *appendix 57*) — while it is on, **no guard ever detects the player**:
+cones pass through you, sightings never fire, chases never start. It is one clause on
+the §10.3 concealment path Camouflage already goes through — *camouflage that never
+lapses* — so the guard sense pass, the §7.6 transitions and the §7.3 rung-1 trigger all
+follow from the one seam rather than from a bend sprinkled through guard AI. It shares
+Camouflage's consequences, the §7.2 front takedown included. **Contact still captures**
+(§4.5): a guard that walks into your cell ends the run whether or not it ever saw you
+coming, which is §8.3's own sentence about this state — *invisible is not safe*. Where
+omni lets you watch a level you cannot see, this lets you **stand in one**: walk to the
+corner where generation went wrong, park in a guard's face to read its cone maths,
+follow a patrol for twenty turns, without the facility ending the run before you get
+there. What it cannot show you is the threat model — no chase, search, §7.7 call-in or
+rung escalation can be reproduced through it.
+
+**Ghost is the exception this section is now stated with.** The rule used to be
+absolute — *a level modifier changes the game, a debug modifier changes only what you
+get to see of it* — and this switch breaks it: guards behave differently and the run's
+outcome changes. The distinction is kept rather than deleted, because it is what decides
+what a switch costs. A **perception** switch costs nothing: it can be flipped mid-run,
+watched under, and exported from, because the run underneath it is unchanged. A
+**rule-bending** switch costs the run's reproducibility, and is admitted only with all
+four of these:
+
+- **Never in the token.** A level-seed token copied from a ghost run boots an ordinary
+  run. The token stays honest about the *facility*; what it stops being is a full
+  account of what happened. Stated plainly rather than buried: **a ghost run is not
+  reproducible from its token**, and that is the accepted price of not putting it in
+  there.
+- **Never in a replay.** Once the switch has been on, the run cannot be exported at all
+  — the control goes inert and says why. It latches on the **run**, not on the switch:
+  turning ghost back off does not restore the export, because the inputs already
+  recorded were played under bent rules and no later toggle un-bends them. The
+  alternative — teaching the replay link to carry the debug flags — would put a
+  rule-bend inside a shareable link, which is the exact thing this section keeps out of
+  the token; the containment is worth more than the export.
+- **Never in the sim.** `crates/sim` cannot set it, so no §13.2 measurement can be
+  taken through it.
+- **Visibly on**, on the Options tab's own row, read live off the run.
+
+The unchanged half of the rule is the load-bearing one: **anything that bends a rule and
+is meant to be *played* is a level modifier and belongs in the token** with the rest of
+the run's identity. Ghost is an instrument, not a way to play. If it ever wants to be
+playable — an easier-direction *"unseen"* modifier — that is a different thing with a
+token slot, a Level info caption, a §2.3 directional assertion and a place in the
+difficulty pool, never this field wearing a second hat.
+
+**The danger overlay keeps painting under a ghost, on purpose.** §11.5 is **[SETTLED]**
+that the overlay is the *literal* detection set; under ghost that set is **empty**, so a
+literal reading would blank the board exactly when someone is debugging vision — the
+likeliest reason to have flipped the switch at all. So it carries on painting the set
+that *would* detect a detectable player: red stops meaning *you are detected* and goes
+back to meaning *this cell is watched*. That is a lie by §11.5's standard and it is the
+right one here, because the alternative is an instrument that goes blank when you use
+it.
 
 **Debug mode ships hidden in every build** (#459, *appendix 35*). The switches used to
 be reachable only by rebuilding, which meant a run that misbehaved on the deployed page
-could not be looked at at all. So there is a **debug session**: the help panel grows a
-fourth **Debug** tab carrying the switches — omni-vision, flippable mid-run — and the
-replay export, and it is present when the build stamped it (every artifact preview) or
+could not be looked at at all. So there is a **debug session**: the help panel carries
+the switches — omni-vision and the ghost, both flippable mid-run — and the replay
+export, and it is present when the build stamped it (every artifact preview) or
 when the page was opened with `?debug=intruded`. The parameter is a **shibboleth**, not
 a documented switch, and it is **stripped from the URL the moment it is consumed**, so
 the address bar goes straight back to the shareable `#seed=` link: activation is a
 thing you *do*, never a thing a link carries. That the gate is a convention rather than
 a mechanism — anyone reading the shipped wasm can find the string — is exactly why the
-rule above is load-bearing: **nothing behind it may ever touch the facility**, only the
-picture. A switch that bent a rule would be a level modifier, and belongs in the token.
+rule above is load-bearing. It used to read *nothing behind it may ever touch the
+facility, only the picture*; since #507 what carries that weight is the containment
+above, and the promise the gate makes is the one that survives being guessed: **nothing
+behind it can produce a run that passes for a real one.**
 
 **Constraints.** The *"full layout known"* modifier reveals the **architecture and
 nothing else**: contents stay fogged (§11.5a), so it never shortcuts the scouting
