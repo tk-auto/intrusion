@@ -387,6 +387,9 @@ impl crate::Game {
         });
         // Nothing is outstanding: what is in the slot *is* the world now on screen.
         self.autosave.reset();
+        // And nothing is popped in over it (§11.7/#576): a resumed run is one already
+        // underway, whose loud messages were read hours ago.
+        self.reset_pop_in();
         seed::reflect_level(&self.level);
         crate::menu::set_screen(if self.map_open() {
             SCREEN_MAP

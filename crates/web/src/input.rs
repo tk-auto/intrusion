@@ -285,8 +285,21 @@ impl Game {
         // message list is folded away as the loop stops, so what reads behind the
         // panel is the board the capture has to be traced on — and not a list left
         // hanging over it that the end screen's keys can no longer close.
+        //
+        // The pop-in goes with it, and for exactly that reason (§11.7/#576): it is the
+        // other transient laid over the board, and *the run is won* is the one thing the
+        // card already says in full. So the ending turn takes the box down rather than
+        // raising one — the surface folds, while the ladder that fills it is untouched.
         if self.run_over() {
             self.ui.message_log_open = false;
+            self.reset_pop_in();
+        } else {
+            // Otherwise the loudest rung leaves the near line as well as filling it
+            // (§11.7/#576): objective feedback also raises the box over the board, on
+            // its own couple of seconds. Read before the frame is painted, so the box is
+            // on the very frame the turn produced — and raised *only* here, so a turn
+            // that says nothing loud leaves whatever is up to ride its clock out.
+            self.raise_pop_in();
         }
         self.draw();
         // The **campaign** hears the verdict last (§12.7/#208), after the frame the raid
