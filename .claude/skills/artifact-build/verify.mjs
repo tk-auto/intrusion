@@ -88,11 +88,15 @@ const replayPos = await page.$("#replaybar.on #replay-pos");
 // dismisses — including the arrows the movement check below presses. Left up, it
 // would swallow the first arrow and the frame would change because the *card* went
 // away, so the check would pass on a build whose input was broken. So it is shot for
-// the record and then dismissed with `Escape`, which is bound to nothing on the board
-// (§11.6): on a build with no card up this is an exact no-op.
+// the record and then dismissed with `q` — a key the game owns nowhere (§11.6), so on
+// a build with no card up this is an exact no-op.
+//
+// It was `Escape` until #551 gave that key the help panel. A dismissal that opened a
+// modal panel on any build whose card was already down would have swallowed every
+// arrow below it, and this check would have failed with the input working fine.
 if (!replayPos) {
   await page.screenshot({ path: resolve(shotsDir, "level-start.png") });
-  await page.keyboard.press("Escape");
+  await page.keyboard.press("q");
   await page.waitForTimeout(200);
 }
 
