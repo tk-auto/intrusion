@@ -4729,3 +4729,95 @@ If play shows it producing unwinnable-but-not-yet-dead states, the hatch to cons
 state where the building has genuinely closed around you. Not softening the gate, which
 would put the revolving door straight back. That hatch is [OPEN] until a played run asks
 for it.
+
+---
+
+## Appendix 60 — Aiming is where you stand, and the cursor was never the safeguard
+
+*(§8.4, whose **[SETTLED]** *"build targeting up front… tile within range (with a cursor)"*
+this reverses in half; §8.1's record; §8.3's rows; §2.3 on stubs; appendix 1, whose
+sentence it keeps; appendix 44 on one selection seam; appendix 54 on the Dart.
+The ticket is #556, on the system #149 shipped.)*
+
+`crates/core/src/targeting.rs` was 356 lines resolving a `TargetingMode` to a validated
+target: a `Target` for effects to consume, a `Targeting` session the shell would drive, and
+a `TileCursor` the player would steer inside a §6.1 range box. It was careful work and it
+was correct. It was also **used by nothing**. No ability in the catalogue declared
+`TargetingMode::Tile` — the enum arm said so itself (*"No v1 ability uses it; it is here so
+the vocabulary is complete"*) — and `State::begin_ability_targeting` had no caller outside
+the two tests written to exercise it. Nine months of catalogue growth, and the ability space
+went the other way.
+
+### 1. What §8.4 was actually for
+
+Appendix 1's audit of the old game lists, among the smaller faults, *no targeting system at
+all — every ability was self-targeted or auto-targeted at the nearest valid thing*, and
+names it **the direct cause** of the free unlimited-range neutralise: auto-target-nearest-
+visible was the path of least resistance. §8.4 was written to close that door.
+
+The door it closes is **auto-target-nearest**. The cursor was one proposal for what to put
+there instead — and, being the proposal that was in the sentence, it got built. Cutting the
+cursor and keeping the ban is not a softening of §8.4; it is §8.4 with the mechanism it
+turned out not to need removed from in front of the rule it exists to state.
+
+### 2. The abilities had already answered the question
+
+The §8.3 set aims three ways, and every one of them was arrived at by the ability's own
+ticket without reaching for a cursor:
+
+- **Itself** — Run, Camouflage, Dephase, Autodoors. Nothing to point at.
+- **The facing cardinal** — Decoy's faced cell; the Dart's ray along it (appendix 54).
+- **An area around the cell fired from** — Confusion's blast, Lockdown's door set, False
+  Call's reach, each a **snapshot** taken at the press.
+
+Pierce Wall is the sharpest case: its precondition is *exactly one* adjacent wall, so the
+target is unique by construction and its §8.3 row already says *there is nothing to aim
+(§8.4)*. Not one of these wanted a cell-picker, and the reason is not laziness. **Aiming
+by position and facing is paid for on the board.** Lining a dart up costs being in the
+corridor, on the line, pointing the right way, unseen — movement, exposure and turns the
+guards can punish. A cursor costs two keypresses inside a modal step the guards cannot
+see, and it would have been the *cheapest* aiming in the game while looking like the
+strictest.
+
+### 3. The declared mode went with it, because nothing read it
+
+`Economy` carried a `targeting: TargetingMode` field. With `begin_ability_targeting` gone,
+its only reader was the catalogue test asserting the value it stored — a field pinned by a
+test and consulted by no rule, which is §2.3's *don't ship a stub that looks like a feature*
+applied to the code rather than to a system.
+
+What resolves an aim, and always did, is the precondition ladder (`state::activation`,
+#345). `Aimed` hands the committing press the concrete thing it acts on — `Decoy(Cell)` from
+the facing, `Blast`/`Call(EffectArea)` from the fired cell, `Dart(DartShot)` down the line —
+so the world change acts on exactly what the precondition approved. That is one seam every
+ability resolves through, which is the part of §8.4 worth keeping under appendix 44's
+principle: *every ability that grew its own way of picking a thing grew its own way of
+picking the wrong thing*. The ladder is that one way. The declared mode was a second,
+weaker description of it that no code consulted.
+
+Range left with the same argument. It only ever existed as `TargetingMode::Tile { range }`,
+so with `Tile` gone the record has never held a reach; `CONFUSION_RADIUS`, `LOCKDOWN_RADIUS`
+and `DART_RANGE` are each their effect's own constant, and each is clamped to what the
+player can sense at the point it is measured — which a shared field could not have done.
+
+### 4. What is fenced, and what would reopen this
+
+The replacement is **closed on purpose**: self, facing, area-around-the-firing-cell, and a
+fourth is a design conversation rather than a quiet extension — the same fence §8.2 puts
+around the use budget. Two prohibitions stand behind it, and they are the load-bearing part
+of the section:
+
+- **No auto-target-nearest, for anything.** There is no target list in the implementation to
+  snap to; where an ability needs to know what it caught, it measures out from the aim and
+  never scans for a candidate to aim at.
+- **No cursor and no modal picking step.** One keypress answers an ability (§11.4/§11.6).
+
+The tempting simplification after deleting all this is *"abilities just hit the nearest
+valid thing"* — which is precisely the failure appendix 1 records, arrived at by exactly the
+same path of least resistance, and it is why §8.4 was rewritten rather than deleted.
+
+What would genuinely reopen the cursor is an ability whose aim **cannot** be expressed as a
+position and a facing: something thrown over a wall to a cell you choose, or picked out of a
+set with no geometric ordering. None has been proposed in the catalogue's whole growth, and
+if one is, the argument to beat is section 2 — what does aiming it cost the player *on the
+board*, and is that more or less than standing in the right place?

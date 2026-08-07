@@ -1050,10 +1050,17 @@ headless sim (§13.2) can measure what they do to a run.
 
 **Hybrid: data for the common case, code for the weird case.** **[SETTLED]**
 
-Most abilities are a declarative record — cost, range, targeting mode, duration,
-cooldown, and a list of effects drawn from a small vocabulary of primitives.
-Trying "what if there were a smoke grenade" should mean **adding a row**, not
-writing a system.
+Most abilities are a declarative record — turn cost, duration, cooldown, an optional
+per-level use budget (§8.2), and a list of effects drawn from a small vocabulary of
+primitives. Trying "what if there were a smoke grenade" should mean **adding a row**,
+not writing a system.
+
+**How an ability aims is not in the record, and neither is its reach.** Aiming is
+one of the three §8.4 ways, applied by the ability's own precondition where the
+press is resolved; a reach (`CONFUSION_RADIUS`, `DART_RANGE`) is that effect's own
+constant. The record used to declare a targeting mode as a fourth field, and it was
+stored and never read — the aim was always taken at the press — so #556 removed it
+rather than leave the record asserting something nothing checked (§2.3, appendix 60).
 
 When a primitive won't stretch — piloting a drone, rewinding time — there is an
 escape hatch to plain code behind the same interface. Both named cases now have a
@@ -1310,15 +1317,48 @@ Notes carried forward, because they are good and non-obvious:
   > charging the debt on top would charge twice for the same grab. Half speed starts
   > from the first step, which is where §8.3's "one cell per two turns" lives.
 
-### 8.4 Targeting
+### 8.4 Aiming
 
 The old version had **no targeting system at all**, and its absence is the direct
 cause of the free unlimited-range neutralise: auto-target-nearest-visible was the path
-of least resistance (appendix 1).
+of least resistance (appendix 1). Everything below exists because of that sentence.
 
-**Build targeting up front.** **[SETTLED]** At minimum: **self**, **direction**,
-and **tile within range** (with a cursor). It unblocks most of the interesting
-ability space, and its absence actively distorted the design.
+**An ability aims by where you stand and which way you face.** **[SETTLED]** The
+vocabulary is **closed**, and it is these three:
+
+1. **Itself** — the player's own cell. Run, Camouflage, Dephase, Autodoors.
+2. **The facing cardinal** — the cell in front of you (Decoy), or the ray out from
+   it (the Dart, §8.3/appendix 54).
+3. **An area around the cell you fired from** — a radius taken as a **snapshot** at
+   the press. Confusion, Lockdown, False Call. Walking away does not move it.
+
+And the prohibitions, which are the load-bearing half:
+
+- **No auto-target-nearest, ever, for anything.** Not the nearest guard, not the
+  nearest door, not the nearest anything. This is the sentence the section exists
+  for (appendix 1), and there is **no target list anywhere in the implementation**
+  to snap to. Where an ability needs to know what it caught — the blast's guards,
+  the dart's line — it measures from the aim, never the reverse.
+- **No cursor, and no modal picking step.** An ability is answered by **one
+  keypress**, from the bar or its mnemonic (§11.4/§11.6). Aiming is paid for in
+  movement, exposure and turns — on the board, where the guards can punish it —
+  rather than in a UI the guards cannot see.
+- **A fourth way to aim is a design conversation**, not a quiet extension — the
+  same fence §8.2 puts around the use budget.
+
+One seam resolves all three: the press settles what it acts on *before* the ability
+commits (`state::activation`), so no ability grows its own way of picking a thing
+and therefore its own way of picking the wrong one (appendix 44). An aim that comes
+back with nothing to act on refuses the press for **free** — no turn, no cooldown,
+no use spent (§4.4) — and the §11.4 bar greys the entry from the same answer, which
+is why a refusal is never a thing the player discovers by spending a turn. What the
+record holds is the economy; **the aim is not a stored field** — it is the rule each
+ability's own precondition applies.
+
+> **[SETTLED] reversed here.** This section used to read *"build targeting up front
+> — self, direction, and tile within range (with a cursor)"*. The cursor half was
+> built, used by nothing, and cut in #556; the ban on auto-nearest — the part the
+> section was actually written for — stands unchanged. **Appendix 60.**
 
 ---
 
