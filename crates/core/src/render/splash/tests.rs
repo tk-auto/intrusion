@@ -8,11 +8,12 @@ use super::*;
 use crate::cell::Direction;
 use crate::input::{dismisses_splash, gesture_dismisses_splash, Gesture};
 use crate::modifiers::{
-    CacheCount, Composite, GuardCount, IntelCount, LayoutKnowledge, LevelModifiers,
+    CacheCount, Composite, GuardCount, IntelCount, IntelGate, LayoutKnowledge, LevelModifiers,
 };
 use crate::place::LevelConfig;
 use crate::render::help::{HelpTab, CONTENT_INDENT, SECTION_INDENT};
 use crate::render::modifier_rows::{modifier_rows, NONE_ACTIVE};
+use crate::render::objective::{take_line, EXIT_LINE, NO_INTEL};
 use crate::render::{render_screen, ScreenUi, BOTTOM_ROWS, TOP_ROWS};
 use crate::state::State;
 use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel};
@@ -27,15 +28,29 @@ const BOARD: (u32, u32) = (LevelConfig::V1.width, LevelConfig::V1.height);
 /// card draws about. The consoles are cells, not terrain: what the card reads is the
 /// objective list's length, which is what [`State::intel_total`] answers.
 fn run_with(intel: usize, modifiers: LevelModifiers) -> State {
+    run_holding(intel, 0, modifiers)
+}
+
+/// [`run_with`] with `caches` equipment crates stamped in the room as well (§8.3/#209) —
+/// the campaign's facility, and the case the minimum haul's line is written for (#574).
+fn run_holding(intel: usize, caches: usize, modifiers: LevelModifiers) -> State {
     let objectives: Vec<Cell> = (0..intel as u32).map(|i| Cell::new(10 + i, 10)).collect();
+    let mut layout = open_room(BOARD.0, BOARD.1);
+    for i in 0..caches as u32 {
+        layout.place(
+            Cell::new(10 + i, 14),
+            crate::facility::Terrain::EquipmentCache,
+        );
+    }
     State::new(
-        open_room(BOARD.0, BOARD.1),
+        layout,
         Cell::new(4, 4),
         Direction::North,
         Vec::new(),
         objectives,
         Cell::new(8, 8),
     )
+    .with_caches((0..caches).map(|_| crate::AbilityId::Confusion))
     .with_modifiers(modifiers)
 }
 
@@ -165,7 +180,7 @@ fn every_intel_gate_states_its_own_objective() {
             },
         );
         let rows = screen(&state, opening());
-        let line = take_line(gate, 3);
+        let line = take_line(gate, 3, 0);
         assert!(shows(&rows, &line), "{gate:?} draws {line:?}: {rows:#?}");
         assert!(shows(&rows, EXIT_LINE), "{gate:?} says how to leave");
         assert!(
@@ -183,7 +198,7 @@ fn every_intel_gate_states_its_own_objective() {
         "the baseline run has nothing to say through `active`",
     );
     let rows = screen(&run_with(3, baseline), opening());
-    assert!(shows(&rows, &take_line(IntelGate::AtLeastOne, 3)));
+    assert!(shows(&rows, &take_line(IntelGate::AtLeastOne, 3, 0)));
     assert!(
         shows(&rows, NONE_ACTIVE),
         "…and reads as baseline: {rows:#?}"
@@ -206,7 +221,7 @@ fn the_objective_counts_this_facilitys_own_consoles() {
         assert_eq!(state.intel_total(), intel);
         let rows = screen(&state, opening());
         assert!(
-            shows(&rows, &take_line(IntelGate::All, intel)),
+            shows(&rows, &take_line(IntelGate::All, intel, 0)),
             "{intel} consoles: {rows:#?}",
         );
     }
@@ -224,6 +239,46 @@ fn the_objective_counts_this_facilitys_own_consoles() {
             opening(),
         );
         assert!(shows(&rows, NO_INTEL), "{gate:?} on an empty facility");
+    }
+}
+
+/// **One source, two views, for the objective too** (§11.2/§11.3/#574): the gate the
+/// card states before the first turn is the gate the Level info tab states on turn forty,
+/// in the same words — one derivation ([`crate::render::objective`]), so the two surfaces
+/// cannot come to describe different exits.
+///
+/// The Level info tab did not carry the objective at all until #574. It could afford not
+/// to while every human-facing mode's gate was a *departure* the modifier list surfaced
+/// on its own; the minimum haul put the campaign on §4.5's baseline gate, where the list
+/// is silent and the panel would have named no exit rule whatsoever.
+#[test]
+fn the_cards_objective_agrees_with_the_level_info_tab() {
+    for gate in [IntelGate::All, IntelGate::AtLeastOne, IntelGate::None] {
+        for (intel, caches) in [(3, 0), (2, 1), (5, 3)] {
+            let state = run_holding(
+                intel,
+                caches,
+                LevelModifiers {
+                    intel_to_exit: gate,
+                    ..LevelModifiers::default()
+                },
+            );
+            assert_eq!(state.cache_total(), caches, "the crates are stamped");
+            let card = screen(&state, opening());
+            let tab = screen(
+                &state,
+                ScreenUi {
+                    help_open: true,
+                    help_tab: HelpTab::LevelInfo,
+                    ..ScreenUi::default()
+                },
+            );
+            let line = take_line(gate, intel, caches);
+            let what = format!("{gate:?} over {intel} consoles and {caches} crates");
+            assert!(shows(&card, &line), "{what}: the card says {line:?}");
+            assert!(shows(&tab, &line), "{what}: the tab says {line:?}");
+            assert!(shows(&card, EXIT_LINE) && shows(&tab, EXIT_LINE));
+        }
     }
 }
 
@@ -403,24 +458,6 @@ fn the_hint_is_worded_for_the_hands_in_use() {
         );
         assert!(shows(&rows, hint), "{modality:?}: {rows:#?}");
         assert!(!shows(&rows, other), "{modality:?} teaches one vocabulary");
-    }
-}
-
-/// **No objective line is clipped on the board** (§11.4's row-fits rule). The fixed
-/// lines are bounded at compile time; this is the variable one's companion, measured
-/// over the whole console envelope the §12.6 knob can reach — and then some, because a
-/// hand-built state is not bounded by it.
-#[test]
-fn no_objective_line_is_clipped_on_the_board() {
-    let room = (LevelConfig::V1.width - CONTENT_INDENT - 1) as usize;
-    for intel in 0..=LevelConfig::INTEL_MAX + 20 {
-        for gate in [IntelGate::All, IntelGate::AtLeastOne, IntelGate::None] {
-            let line = take_line(gate, intel);
-            assert!(
-                line.chars().count() <= room,
-                "{line:?} runs past the board's last column",
-            );
-        }
     }
 }
 

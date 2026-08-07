@@ -53,6 +53,10 @@ pub(super) fn panel_run<'a>(
     PanelRun {
         level,
         modifiers,
+        // The facility the panel is drawn about: three consoles and no crates, the §10.2
+        // shape a quick-play run raids, so the objective section has a real gate to state.
+        intel: 3,
+        caches: 0,
         alert,
         bar: loadout.iter().collect(),
         debug: DebugModifiers::default(),
@@ -251,6 +255,57 @@ fn the_help_tab_carries_the_glyphs_colours_and_controls() {
         !text.contains("MODIFIERS"),
         "MODIFIERS lives on the other tab"
     );
+}
+
+/// **The Level info tab names the gate, baseline included** (§4.5/#574).
+///
+/// The modifier list is a list of *departures*, so a run on §4.5's baseline gate —
+/// which is every campaign facility since the minimum haul — has nothing in it about how
+/// the run ends. That is right for the list and wrong for the player: the tab exists to
+/// state the rules a run is being held to, and the exit's is the one that ends it. So the
+/// objective is a section of its own, derived from the run's own gate the way the
+/// level-start card's is, and **every** gate gets a positive line.
+#[test]
+fn the_level_info_tab_states_the_objective_under_every_gate() {
+    let mut lines: Vec<String> = Vec::new();
+    for gate in [IntelGate::All, IntelGate::AtLeastOne, IntelGate::None] {
+        let modifiers = LevelModifiers {
+            intel_to_exit: gate,
+            ..LevelModifiers::default()
+        };
+        let text = text_of(&render_help(
+            W,
+            H,
+            show(HelpTab::LevelInfo, SeedCopy::default()),
+            panel_run(None, modifiers, &quiet_alert(), Loadout::innate()),
+        ));
+        let line = crate::render::objective::take_line(gate, 3, 0);
+        assert!(text.contains("OBJECTIVE"), "{gate:?}: the section is there");
+        assert!(text.contains(&line), "{gate:?} draws {line:?}");
+        assert!(
+            !lines.contains(&line),
+            "{gate:?} reuses another gate's line"
+        );
+        lines.push(line);
+    }
+
+    // The baseline is the case this section exists for: the modifier list has nothing to
+    // say about the gate, and the tab still tells the player what the exit will ask.
+    let baseline = LevelModifiers::default();
+    assert_eq!(baseline.intel_to_exit, IntelGate::AtLeastOne);
+    assert!(baseline.active().is_empty());
+    let text = text_of(&render_help(
+        W,
+        H,
+        show(HelpTab::LevelInfo, SeedCopy::default()),
+        panel_run(None, baseline, &quiet_alert(), Loadout::innate()),
+    ));
+    assert!(text.contains("none active"), "…and still reads as baseline");
+    assert!(text.contains(&crate::render::objective::take_line(
+        IntelGate::AtLeastOne,
+        3,
+        0
+    )));
 }
 
 /// The **Level info** tab lists the run's active modifiers by name, and a
@@ -622,7 +677,8 @@ fn the_seed_section_shifts_the_modifier_list_without_changing_it() {
     let text = text_of(&g);
     assert!(text.contains("Guards search hideouts"));
     assert!(!text.contains("none active"));
-    // THIS RUN@2, LEVEL SEED@4, the token@5, MODIFIERS@7, the first row@8.
+    // THIS RUN@2, LEVEL SEED@4, the token@5, the acknowledgement's spacer@6,
+    // OBJECTIVE@7 with its two rows, MODIFIERS@11, the first row@12.
     let token = level.encode().expect("a config a run can hold");
     assert_eq!(
         g.get(3, 5).glyph,
@@ -630,9 +686,9 @@ fn the_seed_section_shifts_the_modifier_list_without_changing_it() {
         "the token sits under its heading",
     );
     assert_eq!(g.get(3, 5).fg, Category::Interest);
-    assert_eq!(g.get(3, 8).glyph, 'G');
+    assert_eq!(g.get(3, 12).glyph, 'G');
     assert_eq!(
-        g.get(3, 8).fg,
+        g.get(3, 12).fg,
         Category::Warning,
         "the caption keeps its direction cue"
     );
@@ -654,11 +710,12 @@ fn the_caption_reads_in_its_direction_cue_colour() {
         show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(None, harder, &quiet_alert(), Loadout::innate()),
     );
-    // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
-    // modifier row at row 5; its caption starts at column 3.
-    assert_eq!(g.get(3, 5).glyph, 'G');
+    // With no token there is no LEVEL SEED section: THIS RUN@2, blank, OBJECTIVE@4
+    // with its two rows, blank, MODIFIERS@8, the first modifier row at 9; its caption
+    // starts at column 3.
+    assert_eq!(g.get(3, 9).glyph, 'G');
     assert_eq!(
-        g.get(3, 5).fg,
+        g.get(3, 9).fg,
         Category::Warning,
         "a harder caption cues in Warning orange"
     );
@@ -674,9 +731,9 @@ fn the_caption_reads_in_its_direction_cue_colour() {
         show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(None, easier, &quiet_alert(), Loadout::innate()),
     );
-    assert_eq!(g.get(3, 5).glyph, 'A');
+    assert_eq!(g.get(3, 9).glyph, 'A');
     assert_eq!(
-        g.get(3, 5).fg,
+        g.get(3, 9).fg,
         Category::Owned,
         "an easier caption cues in Owned blue"
     );
@@ -966,7 +1023,7 @@ fn the_copy_acknowledgement_says_only_what_happened() {
     for copy in [SeedCopy::Idle, SeedCopy::Copied, SeedCopy::Unavailable] {
         let g = level_info(level, copy);
         assert!(text_of(&g).contains(&token), "the token stays readable");
-        assert!(row_text(&g, ack_row + 1).contains("MODIFIERS"));
+        assert!(row_text(&g, ack_row + 1).contains("OBJECTIVE"));
     }
 }
 

@@ -8,6 +8,7 @@
 
 use crate::state::*;
 use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel, solo};
+use crate::IntelGate;
 
 /// The #141 report, pinned: a crouched player must not be seen by a guard
 /// whose sight line crosses *any* table of the bench they are behind. The
@@ -229,7 +230,11 @@ fn events_declare_their_message_category() {
         Category::Interest
     );
     assert_eq!(
-        Event::ExitRefused { still_needed: 1 }.category(),
+        Event::ExitRefused {
+            still_needed: 1,
+            gate: IntelGate::AtLeastOne,
+        }
+        .category(),
         Category::Interest
     );
     assert_eq!(Event::Won.category(), Category::Interest);

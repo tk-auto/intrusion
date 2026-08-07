@@ -41,6 +41,7 @@ mod guards;
 mod guide;
 mod keys;
 mod lockdown;
+mod minimum_haul;
 mod narrowed_cones;
 mod reinforcements;
 mod saver;

@@ -288,6 +288,7 @@ impl State {
             BumpKind::Exit { ready: false } => {
                 events.push(Event::ExitRefused {
                     still_needed: self.intel_needed_to_exit(),
+                    gate: self.modifiers().intel_to_exit,
                 });
                 false
             }
