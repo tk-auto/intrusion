@@ -31,7 +31,7 @@ def replace_once(text: str, old: str, new: str, what: str) -> str:
 # parses out of `window.__intrusionDebug`. Kept here so a typo fails the build where
 # it is typed, rather than silently doing nothing in the browser; add a name here the
 # day the shell learns one.
-DEBUG_FLAGS = ("reveal",)
+DEBUG_FLAGS = ("reveal", "ghost")
 
 
 # The level-seed token's width (crates/core/src/level_seed.rs, TOKEN_LEN).
@@ -99,14 +99,19 @@ def main() -> None:
                          "whole facility: the fog lifts into the ordinary live "
                          "picture, every guard draws, and the danger overlay paints "
                          "every cone — so a playtest can watch patrols it has not "
-                         "met. These change only what the PLAYER PERCEIVES: guards "
+                         "met. It changes only what the PLAYER PERCEIVES: guards "
                          "look with their own cones, so the run plays identically. "
-                         "They are deliberately not part of a level-seed token. "
-                         "Every artifact boots as a DEBUG SESSION regardless (the "
-                         "help panel's Debug tab, #459) — this only sets what the "
-                         "tab's omni-vision switch starts as, and the switch can be "
-                         "flipped from the tab either way. Pass --no-debug-mode for "
-                         "an artifact that behaves exactly like the public deploy.")
+                         "`ghost` (#507) is the one that does NOT: while it is on no "
+                         "guard ever detects you, so a misbehaving run can be stood "
+                         "in rather than only watched. CONTACT STILL CAPTURES (§4.5) "
+                         "— a guard that walks into you still ends the run — and a "
+                         "run that has had it on CANNOT BE EXPORTED as a replay, "
+                         "latched for the rest of the run. Neither is ever part of a "
+                         "level-seed token. Every artifact boots as a DEBUG SESSION "
+                         "regardless (#459) — this only sets what the Options tab's "
+                         "switches start as, and either can be flipped there. Pass "
+                         "--no-debug-mode for an artifact that behaves exactly like "
+                         "the public deploy.")
     ap.add_argument("--no-debug-mode", action="store_true",
                     help="do NOT stamp the debug session global: the artifact boots "
                          "with no Debug tab, exactly as the Pages deploy does (#459). "

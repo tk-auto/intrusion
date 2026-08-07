@@ -56,6 +56,7 @@ pub(super) fn panel_run<'a>(
         alert,
         bar: loadout.iter().collect(),
         debug: DebugModifiers::default(),
+        ghosted: false,
     }
 }
 

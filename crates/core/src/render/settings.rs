@@ -21,8 +21,9 @@
 //! Two **preferences** — the colour theme and the renderer — which are facts about the
 //! person at the screen rather than about the run, so they outlive it and are written
 //! to the shell's own settings record (#513's split: ending a run must never reset a
-//! preference). And, **only in a debug session** (§12.6/#459), the switches that used
-//! to be the help panel's fourth tab: omni-vision and the replay export.
+//! preference). And, **only in a debug session** (§12.6/#459), the instruments that
+//! used to be the help panel's fourth tab: omni-vision, the ghost (#507), and the
+//! replay export.
 //!
 //! It is **not** the pre-run level-options dialog (#298). That one sets the
 //! *difficulty of the run you are about to start* and is asked before there is a run;
@@ -31,15 +32,19 @@
 //!
 //! # The debug section is gated, and gated visibly
 //!
-//! A preference and a playtest switch must never be confusable (§12.6 — "a debug
-//! modifier changes only what you get to see"), so the debug rows sit under their own
-//! heading and in their own colour, after the widest gap on the screen. With no debug
-//! session there is no heading and no row: [`shown_rows`] is what the drawing, the
-//! hit-test and the selection walk all read, so a switch that is not drawn cannot be
-//! reached by key, by tap, or by a stale [`SettingsUi::selected`].
+//! A preference and a playtest instrument must never be confusable (§12.6), so the
+//! debug rows sit under their own heading and in their own colour, after the widest gap
+//! on the screen. With no debug session there is no heading and no row: [`shown_rows`]
+//! is what the drawing, the hit-test and the selection walk all read, so a switch that
+//! is not drawn cannot be reached by key, by tap, or by a stale
+//! [`SettingsUi::selected`].
 //!
-//! Everything the gate promised on the Debug tab is unchanged — perception only, never
-//! persisted, never in a level-seed token. Only the surface moved.
+//! The gate's promises are what they were when the Debug tab held them — never
+//! persisted, never in a level-seed token — with one changed by #507: the section used
+//! to be *perception only*, and [`SettingsRow::Ghost`] is a rule-bend. What contains it
+//! is [`DebugModifiers::ghost`]'s to state; what this screen owes it is that it reads as
+//! **on** while it is on, and that the row it disables — the replay export — says so
+//! rather than going quietly dead.
 //!
 //! # Input
 //!
@@ -122,6 +127,11 @@ pub enum SettingsRow {
     /// Debug sessions only, never persisted, and perception-only by construction: the
     /// core applies it in the sight phase and nowhere else.
     Reveal,
+    /// **Ghost** (§12.6/#507) — no guard ever detects the player. Debug sessions only,
+    /// never persisted, and the one row on this tab that **bends a rule**: it is an
+    /// instrument for standing in a run that misbehaved, not a way to play, and using
+    /// it costs the run its replay export ([`SettingsRow::Replay`]).
+    Ghost,
     /// The **replay export** (§12.4/§13.1/#411) — the whole run as a
     /// `…#seed=<token>&inputs=<script>` link on the clipboard. Debug sessions only,
     /// and only for a run with a token for the link to name (#333).
@@ -136,10 +146,11 @@ impl SettingsRow {
     /// Every row this screen knows, in reading order. A new setting is one entry here,
     /// one arm in [`label`](Self::label), one arm in [`value`], and — if it is
     /// conditional — one arm in [`shown_rows`].
-    pub const ALL: [SettingsRow; 4] = [
+    pub const ALL: [SettingsRow; 5] = [
         SettingsRow::Theme,
         SettingsRow::Renderer,
         SettingsRow::Reveal,
+        SettingsRow::Ghost,
         SettingsRow::Replay,
     ];
 
@@ -153,6 +164,7 @@ impl SettingsRow {
             SettingsRow::Theme => "theme",
             SettingsRow::Renderer => "renderer",
             SettingsRow::Reveal => "omni-vision",
+            SettingsRow::Ghost => "ghost",
             SettingsRow::Replay => "replay",
         }
     }
@@ -160,7 +172,10 @@ impl SettingsRow {
     /// Whether the row belongs to the **debug** section — the gate that decides which
     /// heading it is drawn under and whether it is drawn at all.
     pub fn debug_only(self) -> bool {
-        matches!(self, SettingsRow::Reveal | SettingsRow::Replay)
+        matches!(
+            self,
+            SettingsRow::Reveal | SettingsRow::Ghost | SettingsRow::Replay
+        )
     }
 }
 
@@ -172,7 +187,8 @@ const _: () = assert!(
     matches!(SettingsRow::ALL[0], SettingsRow::Theme)
         && matches!(SettingsRow::ALL[1], SettingsRow::Renderer)
         && matches!(SettingsRow::ALL[2], SettingsRow::Reveal)
-        && matches!(SettingsRow::ALL[3], SettingsRow::Replay),
+        && matches!(SettingsRow::ALL[3], SettingsRow::Ghost)
+        && matches!(SettingsRow::ALL[4], SettingsRow::Replay),
     "the debug rows must stay last in SettingsRow::ALL — the screen draws two \
      contiguous sections from it",
 );
@@ -190,7 +206,7 @@ pub fn shown_rows(debug: bool, replay: bool) -> Vec<SettingsRow> {
     SettingsRow::ALL
         .into_iter()
         .filter(|row| match row {
-            SettingsRow::Reveal => debug,
+            SettingsRow::Reveal | SettingsRow::Ghost => debug,
             SettingsRow::Replay => debug && replay,
             _ => true,
         })
@@ -278,8 +294,9 @@ const DEBUG_HEADING_ROW: u32 = FIRST_DISPLAY_ROW + DISPLAY_ROWS + 1;
 const FIRST_DEBUG_ROW: u32 = DEBUG_HEADING_ROW + 2;
 
 /// The row the copy acknowledgement is printed on — directly under the replay row it
-/// answers, exactly as the help panel prints its own (#353).
-const REPLAY_ACK_ROW: u32 = FIRST_DEBUG_ROW + ENTRY_SPACING + 1;
+/// answers, exactly as the help panel prints its own (#353). The replay row is the
+/// **third** debug row since the ghost switch landed beside omni-vision (#507).
+const REPLAY_ACK_ROW: u32 = FIRST_DEBUG_ROW + 2 * ENTRY_SPACING + 1;
 
 /// The width the label column is padded to, so every value on the screen starts in the
 /// same column and the list reads as a table rather than as a ragged pile of phrases.
@@ -302,6 +319,17 @@ const _: () = {
 /// is a phrase rather than a state, so it is named for the width check below.
 const REPLAY_VALUE: &str = "copy as link";
 
+/// …and what that row says once the run has been **ghosted** (§12.6/#507): the export
+/// is refused for the rest of the run, so the row stops offering it and reads as what
+/// it now is.
+///
+/// It stays **drawn** rather than vanishing, and the difference matters. A row that
+/// disappeared would look like a run with no token — the other reason this row is
+/// absent — and leave the player nothing to press and no way to be told why. Drawn and
+/// unavailable, a press answers ([`SeedCopy::Refused`](super::help::SeedCopy)), and the
+/// answer names the switch that did it.
+const REPLAY_REFUSED: &str = "unavailable";
+
 /// The value column's own bound: the widest value any row can draw. The block is
 /// centred from this plus [`LABEL_WIDTH`], so it is what keeps the widest row inside
 /// the v1 board (§10.2).
@@ -322,7 +350,7 @@ const BLOCK_COLUMN: u32 = CONTENT_INDENT - MARKER.len() as u32;
 // rather than failing the build.
 const _: () = {
     assert!(
-        REPLAY_VALUE.len() <= VALUE_MAX,
+        REPLAY_VALUE.len() <= VALUE_MAX && REPLAY_REFUSED.len() <= VALUE_MAX,
         "a settings value is too long for the value column — shorten it or widen \
          VALUE_MAX (see render::settings)",
     );
@@ -344,28 +372,44 @@ fn row_y(row: SettingsRow) -> u32 {
         SettingsRow::Theme => FIRST_DISPLAY_ROW,
         SettingsRow::Renderer => FIRST_DISPLAY_ROW + ENTRY_SPACING,
         SettingsRow::Reveal => FIRST_DEBUG_ROW,
-        SettingsRow::Replay => FIRST_DEBUG_ROW + ENTRY_SPACING,
+        SettingsRow::Ghost => FIRST_DEBUG_ROW + ENTRY_SPACING,
+        SettingsRow::Replay => FIRST_DEBUG_ROW + 2 * ENTRY_SPACING,
     }
 }
 
 /// What a row's **value** column says, read from the live values every time — never
 /// from a flag this screen keeps of its own, so a row and the thing it names cannot
 /// disagree (the Debug tab's rule, kept).
-fn value(row: SettingsRow, ui: ScreenUi, debug: DebugModifiers) -> &'static str {
+///
+/// `ghosted` is the run's **latch** (§12.6/#507), not the ghost switch: the replay row
+/// answers to *has this run ever been ghosted*, so switching the ghost back off leaves
+/// the export refused exactly as the run's history says it should.
+fn value(row: SettingsRow, ui: ScreenUi, debug: DebugModifiers, ghosted: bool) -> &'static str {
     match row {
         SettingsRow::Theme => match ui.theme {
             Theme::Dark => "dark",
             Theme::Light => "light",
         },
         SettingsRow::Renderer => ui.renderer.label(),
-        SettingsRow::Reveal => {
-            if debug.reveal_whole_level {
-                "on"
+        SettingsRow::Reveal => on_off(debug.reveal_whole_level),
+        SettingsRow::Ghost => on_off(debug.ghost),
+        SettingsRow::Replay => {
+            if ghosted {
+                REPLAY_REFUSED
             } else {
-                "off"
+                REPLAY_VALUE
             }
         }
-        SettingsRow::Replay => REPLAY_VALUE,
+    }
+}
+
+/// A switch's value column: the two words the debug section's switches read by, spelled
+/// once so the two of them cannot drift apart.
+fn on_off(flag: bool) -> &'static str {
+    if flag {
+        "on"
+    } else {
+        "off"
     }
 }
 
@@ -402,7 +446,8 @@ pub(super) fn settings_hit(debug: bool, replay: bool, y: u32) -> Option<Settings
 /// ([`ScreenUi::seed_copy`]). `debug` is the run's **live** switches, so the
 /// omni-vision row says what the sight phase is actually doing, and `level` is the run's
 /// token — the replay row exists on exactly the frames there is something for it to
-/// hand over.
+/// hand over. `ghosted` is the run's ghost **latch** (§12.6/#507), which is what turns
+/// that row from an offer into a refusal.
 ///
 /// Bounds are clamped, never asserted, like the rest of the card: on a board too small
 /// for a row, that row shows what fits and stops.
@@ -411,6 +456,7 @@ pub(super) fn draw_settings(
     ui: ScreenUi,
     debug: DebugModifiers,
     level: Option<LevelSeed>,
+    ghosted: bool,
 ) {
     let replay = level.is_some();
     let here = ui.settings.selection(ui.debug_mode, replay);
@@ -455,7 +501,7 @@ pub(super) fn draw_settings(
             grid,
             BLOCK_COLUMN,
             row_y(row),
-            &row_text(row, value(row, ui, debug), selected),
+            &row_text(row, value(row, ui, debug, ghosted), selected),
             category,
         );
     }

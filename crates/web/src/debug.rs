@@ -3,10 +3,10 @@
 //!
 //! A level is shared: it travels as a level-seed token in a link, a typed token or a
 //! `window.__intrusionSeed` global, and everything it carries is part of what the run
-//! *is* (#245). A [`DebugModifiers`] switch is the opposite of shared — it changes
-//! only what the player perceives for whoever is watching, never the facility or the
-//! guards, and it must never ride along with a level someone hands on. So it has its
-//! own carrier and its own activation, and neither is ever a field of the level.
+//! *is* (#245). A [`DebugModifiers`] switch is the opposite of shared — it is an
+//! instrument for whoever is looking at *this* page, and it must never ride along with
+//! a level someone hands on. So it has its own carrier and its own activation, and
+//! neither is ever a field of the level.
 //!
 //! # Two things, and only one of them is a switch
 //!
@@ -35,11 +35,14 @@
 //!    `…#seed=<token>` link [`seed`](crate::seed) reflects. Activation is a thing you
 //!    *do*, not a thing the page then carries: copy the URL after activating and you
 //!    hand over the run, never the mode.
-//! 3. **Nothing behind the gate may touch the facility.** The parameter is a
+//! 3. **What the gate unlocks cannot masquerade as a real run.** The parameter is a
 //!    convention, not a mechanism — anyone reading the shipped wasm can find the
-//!    string — so what it unlocks has to be things that only alter the picture
-//!    (§12.6). A switch that bent a rule would belong in the level-seed token with the
-//!    rest of the run's identity, not here.
+//!    string — so this used to be stated as *nothing behind it may touch the facility*.
+//!    #507's ghost switch does touch it, and what replaces the absolute is containment
+//!    (§12.6): a rule-bending switch is never in the level-seed token, never settable
+//!    by `crates/sim`, never exportable as a replay, and always visibly on. Anything
+//!    that bends a rule and is meant to be **played** still belongs in the token with
+//!    the rest of the run's identity, not here.
 
 use intrusion_core::DebugModifiers;
 use wasm_bindgen::JsValue;
@@ -48,6 +51,11 @@ use wasm_bindgen::JsValue;
 /// becomes the whole facility. Kept beside the parser so the string the build stamps
 /// and the string the shell reads are one fact.
 const REVEAL: &str = "reveal";
+
+/// The flag name for [`DebugModifiers::ghost`] (#507) — no guard ever detects the
+/// player. Beside its neighbour for the same reason: the string a build stamps and the
+/// string this shell reads are one fact.
+const GHOST: &str = "ghost";
 
 /// The URL field that activates a debug session, and the one value it answers to
 /// (#459). The value is the whole mitigation: `?debug=1` is the parameter a curious
@@ -62,8 +70,8 @@ pub(crate) struct DebugBoot {
     /// Whether the help panel carries its Debug tab
     /// ([`ScreenUi::debug_mode`](intrusion_core::ScreenUi)).
     pub(crate) mode: bool,
-    /// The switches the run starts under — the *initial value* of the panel's
-    /// omni-vision toggle, not a fixed state (#459).
+    /// The switches the run starts under — the *initial value* of the panel's own
+    /// toggles, not a fixed state (#459).
     pub(crate) flags: DebugModifiers,
 }
 
@@ -103,6 +111,7 @@ fn flags_from(list: &str) -> DebugModifiers {
     let named = |name: &str| list.split(',').any(|flag| flag.trim() == name);
     DebugModifiers {
         reveal_whole_level: named(REVEAL),
+        ghost: named(GHOST),
     }
 }
 
@@ -192,6 +201,27 @@ mod tests {
         );
         assert!(!flags_from("something-later").reveal_whole_level);
         assert_eq!(flags_from(""), DebugModifiers::default());
+    }
+
+    /// The **ghost** flag (#507) is read by the same rule as its neighbour, and the two
+    /// are independent: a build can bake either, both, or neither. It is pinned
+    /// separately because this one bends a rule, so "a build asked for the reveal and
+    /// got the ghost as well" is the mistake worth making impossible.
+    #[test]
+    fn the_ghost_flag_is_its_own_switch() {
+        assert!(flags_from(GHOST).ghost);
+        assert!(!flags_from(GHOST).reveal_whole_level);
+        assert!(
+            !flags_from(REVEAL).ghost,
+            "the reveal never brings it along"
+        );
+
+        let both = flags_from("reveal,ghost");
+        assert!(both.ghost && both.reveal_whole_level);
+        assert_eq!(flags_from(" ghost , reveal "), both, "spacing is tolerated");
+
+        assert!(!flags_from("ghostly").ghost, "no prefix match");
+        assert!(!flags_from("").ghost, "and a plain build has none of it");
     }
 
     /// **The parameter is a shibboleth** (#459): only the exact value activates, so a

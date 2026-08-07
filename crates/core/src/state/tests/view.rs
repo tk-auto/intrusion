@@ -927,6 +927,7 @@ fn the_debug_reveal_makes_the_players_sight_the_whole_level() {
 
     let revealed = build().with_debug(DebugModifiers {
         reveal_whole_level: true,
+        ..DebugModifiers::default()
     });
     let facility = revealed.layout().facility();
     for y in 0..facility.height() {
@@ -969,6 +970,7 @@ fn the_debug_reveal_leaves_the_guards_and_the_world_alone() {
     let mut fogged = build();
     let mut revealed = build().with_debug(DebugModifiers {
         reveal_whole_level: true,
+        ..DebugModifiers::default()
     });
     for input in [
         Input::Step(Direction::South),
