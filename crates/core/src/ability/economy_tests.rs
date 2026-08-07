@@ -1,83 +1,38 @@
 use super::*;
 
-/// The §8.3 [START] catalogue, pinned value by value: duration, cooldown,
-/// targeting, and the declared effect. A retune of any number must be a
-/// deliberate edit here, never a silent drift — and a moved number will move
-/// the emergent lockout with it (§8.2).
+/// The §8.3 [START] catalogue, pinned value by value: cost, duration, cooldown
+/// and the declared effect. A retune of any number must be a deliberate edit
+/// here, never a silent drift — and a moved number will move the emergent
+/// lockout with it (§8.2).
+///
+/// **How each ability aims is not pinned here**, because the record no longer
+/// states it (§8.4/#556): aiming is the precondition ladder's to resolve, and it
+/// is pinned where the aim is actually taken — the decoy's faced cell, the
+/// blast's fired-from radius, the dart's line.
 #[test]
 fn the_catalog_matches_the_design_activated() {
-    for (id, cost, targeting, duration, cooldown, effect) in [
-        (
-            AbilityId::Run,
-            1,
-            TargetingMode::Itself,
-            5,
-            12,
-            Effect::ExtraStep,
-        ),
-        (
-            AbilityId::Camouflage,
-            1,
-            TargetingMode::Itself,
-            10,
-            20,
-            Effect::ConcealWhileStill,
-        ),
-        (
-            AbilityId::Decoy,
-            1,
-            TargetingMode::Direction,
-            20,
-            30,
-            Effect::SpawnDecoy,
-        ),
+    for (id, cost, duration, cooldown, effect) in [
+        (AbilityId::Run, 1, 5, 12, Effect::ExtraStep),
+        (AbilityId::Camouflage, 1, 10, 20, Effect::ConcealWhileStill),
+        (AbilityId::Decoy, 1, 20, 30, Effect::SpawnDecoy),
         (
             AbilityId::Dephase,
             1,
-            TargetingMode::Itself,
             // 4 since #449 — three steps into a solid, counting the activation.
             4,
             30,
             Effect::Phase,
         ),
-        (
-            AbilityId::Autodoors,
-            1,
-            TargetingMode::Itself,
-            16,
-            40,
-            Effect::AutoDoors,
-        ),
+        (AbilityId::Autodoors, 1, 16, 40, Effect::AutoDoors),
         // Instant since #325 — the blast fires once and the guards carry the
         // time it bought, so there is no player-side window here to state.
-        (
-            AbilityId::Confusion,
-            1,
-            TargetingMode::Itself,
-            0,
-            45,
-            Effect::Confuse,
-        ),
-        (
-            AbilityId::Lockdown,
-            1,
-            TargetingMode::Itself,
-            8,
-            40,
-            Effect::SealDoors,
-        ),
+        (AbilityId::Confusion, 1, 0, 45, Effect::Confuse),
+        (AbilityId::Lockdown, 1, 8, 40, Effect::SealDoors),
         // Instant, on Confusion's terms and for its reason (#504): a message is over
         // the moment it is sent, so there is no window to switch off — what it bought
         // runs on the responders' legs. 30 rather than the blast's 45 because it buys
         // less: the guards keep walking, keep looking, and arrive.
-        (
-            AbilityId::FalseCall,
-            1,
-            TargetingMode::Itself,
-            0,
-            30,
-            Effect::FakeCall,
-        ),
+        (AbilityId::FalseCall, 1, 0, 30, Effect::FakeCall),
     ] {
         let def = id.def();
         let economy = def
@@ -85,7 +40,6 @@ fn the_catalog_matches_the_design_activated() {
             .unwrap_or_else(|| panic!("{} is an activated ability", id.name()));
         assert_eq!(def.id(), id);
         assert_eq!(economy.cost(), cost, "{}", id.name());
-        assert_eq!(economy.targeting(), targeting, "{}", id.name());
         assert_eq!(economy.duration(), duration, "{}", id.name());
         assert_eq!(economy.cooldown(), cooldown, "{}", id.name());
         match def.behaviour() {
@@ -99,7 +53,7 @@ fn the_catalog_matches_the_design_activated() {
 
 /// The **coded** catalogue (§8.1's escape hatch, #303), pinned separately because
 /// it is the arm the other pin cannot reach: Pierce Wall declares no effects at
-/// all, so its row is `cost 1`, self-targeted, **instant** (`duration: 0`), with
+/// all, so its row is `cost 1`, **instant** (`duration: 0`), with
 /// **no cooldown** and a per-level budget instead — the scarcity is the budget,
 /// not the clock (§8.2/#302). Every number here is [START].
 #[test]
@@ -107,7 +61,6 @@ fn the_catalog_matches_the_design_coded() {
     let def = AbilityId::PierceWall.def();
     let economy = def.economy().expect("Pierce Wall is activated");
     assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
-    assert_eq!(economy.targeting(), TargetingMode::Itself);
     assert_eq!(economy.duration(), 0, "instant — no window to manage");
     assert_eq!(
         economy.cooldown(),
@@ -138,11 +91,6 @@ fn the_catalog_matches_the_design_dart() {
     let def = AbilityId::Dart.def();
     let economy = def.economy().expect("the Dart is activated");
     assert_eq!(economy.cost(), 1, "the full turn (§2.3's safeguard (a))");
-    assert_eq!(
-        economy.targeting(),
-        TargetingMode::Direction,
-        "aimed by facing — the first ability to use the cardinal as a ray (§8.4)",
-    );
     assert_eq!(
         economy.duration(),
         0,
@@ -195,11 +143,6 @@ fn the_catalog_matches_the_design_drone() {
     let def = AbilityId::Drone.def();
     let economy = def.economy().expect("the Drone is activated");
     assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
-    assert_eq!(
-        economy.targeting(),
-        TargetingMode::Itself,
-        "you launch it from your own cell"
-    );
     assert_eq!(economy.duration(), 40, "[START] — flying *and* hovering");
     assert_eq!(economy.cooldown(), 40, "[START]");
     assert_eq!(
@@ -514,7 +457,7 @@ fn the_economy_is_blind_to_behaviour() {
     // A hypothetical coded ability whose behaviour the vocabulary can't express.
     const CODED: Ability = Ability {
         id: AbilityId::Run, // id is irrelevant to the economy; reuse one
-        mode: activated(1, TargetingMode::Itself, 2, 3),
+        mode: activated(1, 2, 3),
         uses: None,
         behaviour: Behaviour::Coded,
     };

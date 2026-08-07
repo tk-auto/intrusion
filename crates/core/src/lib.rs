@@ -86,7 +86,6 @@ mod salvage;
 mod scout;
 mod state;
 mod status;
-mod targeting;
 #[cfg(test)]
 mod test_support;
 mod verdict;
@@ -94,7 +93,7 @@ mod vision;
 
 pub use ability::{
     Ability, AbilityId, AbilityMode, AbilityState, AbilityStatus, Behaviour, Economy, Effect,
-    Loadout, TargetingMode,
+    Loadout,
 };
 pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
@@ -155,7 +154,6 @@ pub use status::{
     live_messages, message_for, near_line, pop_in, Message, MessageHistory, PopIn, HISTORY_ACTIONS,
     POP_IN_PRIORITY,
 };
-pub use targeting::{within_range, Target, Targeting, TileCursor};
 pub use verdict::{EndExit, Ending, RunMode, RunOptions, RunStats, Verdict};
 pub use vision::{
     field_of_view, field_of_view_with_blind_spot, field_of_view_with_peek, BlindPolicy, BlindTier,

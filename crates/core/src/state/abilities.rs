@@ -135,8 +135,8 @@ impl State {
     }
 
     /// Where a decoy activated right now would spawn (§8.3): the faced cell —
-    /// [`TargetingMode::Direction`](crate::TargetingMode) resolved against §5's
-    /// facing — provided it could hold an intruder: terrain that admits an
+    /// §8.4's facing-cardinal aim, taken against §5's facing — provided it could
+    /// hold an intruder: terrain that admits an
     /// actor's fill and no actor already on it. `None` refuses the activation
     /// (a fake standing in a wall or inside a guard would fool no one).
     pub(super) fn decoy_spawn_cell(&self) -> Option<Cell> {

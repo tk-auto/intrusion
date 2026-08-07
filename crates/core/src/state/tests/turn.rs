@@ -8,7 +8,6 @@
 
 use crate::guard::GuardState;
 use crate::state::*;
-use crate::targeting::Target;
 use crate::test_support::{captured_at, leave_by_the_tunnel, open_room, room_with_tunnel, solo};
 use crate::vision::field_of_view;
 use crate::{IntelGate, LevelModifiers, Rng};
@@ -46,34 +45,6 @@ fn bumping_a_wall_is_free_and_does_not_advance_the_turn() {
     assert_eq!(s.player(), Cell::new(2, 1), "no move");
     assert_eq!(s.facing(), Direction::North, "a blocked move keeps facing");
     assert_eq!(s.turn(), 0, "a free action does not spend the turn");
-}
-
-/// The §8.4 seam: opening a targeting session reads the ability's *declared*
-/// mode (§8.1 catalogue) and anchors it on the player's cell and facing (§5) —
-/// Run self-targets, Decoy targets the faced cardinal — and a `Tile` mode hands
-/// back a cursor on the player, never an auto-aim (§8.4's whole reason to exist).
-#[test]
-fn opening_a_targeting_session_reads_the_ability_mode_and_the_player() {
-    // The solo player starts facing north.
-    let s = solo(Cell::new(4, 4));
-    // Run is self-targeted: resolves straight to the player's cell.
-    assert_eq!(
-        s.begin_ability_targeting(AbilityId::Run).unwrap().confirm(),
-        Target::Itself(Cell::new(4, 4)),
-    );
-    // Decoy is direction-targeted: defaults to the player's facing.
-    assert_eq!(
-        s.begin_ability_targeting(AbilityId::Decoy)
-            .unwrap()
-            .confirm(),
-        Target::Direction(Direction::North),
-    );
-    // A tile session (no v1 ability uses one) starts its cursor on the player.
-    assert_eq!(
-        s.begin_targeting(TargetingMode::Tile { range: 5 })
-            .confirm(),
-        Target::Tile(Cell::new(4, 4)),
-    );
 }
 
 /// Waiting is a real action (§5): it spends the turn even though nothing moves.
