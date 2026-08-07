@@ -3698,6 +3698,29 @@ the replay Artifact build (#197 slice C) share so they cannot diverge.
 > that a token's meaning depends on. What follows here is only what the *design* turns
 > on.
 
+**Sharing is the URL** (#572) **[SETTLED]**. A run is handed over as a
+`…#seed=<token>` **link** and by no other route: the Level info tab's `copy [c]` puts
+one on the clipboard, the address bar holds one from a run's first frame, and the
+recipient clicks it. There is nowhere to type a token — the title screen's *Seed play*
+entry, the sub-screen behind it and its DOM text box are all retired — which is what
+makes the second half of the rule true: **the whole game is the character grid**
+(§11.1), with no exception outside the debug session.
+
+The **token stays displayed** on the panel, and that split is the decision rather than
+an inconsistency. Eighteen letters is what a 40-column grid can print and a human can
+read back off a screen; a URL is what the person on the other end can actually open.
+So the *display* is the short form and the *copy* is the link, and when a link arrives
+mangled — a chat client eating the fragment, a line wrap through a paste — reading the
+token off the screen and rebuilding the URL by hand is the recovery path. That is also
+why a clipboard that refuses says so instead of claiming a copy: the token is still
+printed one row above.
+
+A shared link is **the page's origin and path with a fresh fragment, and nothing
+else**. Neither a `?debug=` activation nor the `&inputs=` of a replay the sharer
+happens to be watching rides along — one strip, in one place, rather than a rule each
+copy control remembers separately. And where the sim offers a run to a *person* rather
+than to the playtest skill's parser, it offers a link too.
+
 **A number is not a token** (#333, superseding #328). A bare `?seed=8371` names *this
 build's quick-play preset applied to 8371* — not a run — so a shared link silently
 re-resolves whenever the preset moves, and it did ([token spec](level-seed-token.md)
@@ -3839,8 +3862,8 @@ a campaign of **one** facility is exactly the game v1 ships.
   source (§12.4). A whole run therefore reproduces from `(run seed, [inputs])` exactly
   as one level does, which is what makes bug repro and golden tests possible across a
   2–3 hour run. It is derived **narrowed to the level-seed token's seed field**, so
-  every facility of a campaign is also a *sayable level*: a token you can hand to
-  someone, or to the sim, and play on its own (§13.1).
+  every facility of a campaign is also a *sayable level*: a link you can hand to
+  someone, or the token inside it to the sim's `--config`, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
   (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
   intel is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
