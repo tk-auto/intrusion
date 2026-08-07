@@ -12,9 +12,9 @@
 //! This module builds the link instead.
 //!
 //! It is the sim's **one platform fact**. The web shell composes its links off the
-//! address of the page it is running on ([`crate::…`] has no such thing: a native
-//! binary is nowhere), so the base has to be named, and the only base worth naming is
-//! where the game is actually published. The *format* around the token is still the
+//! address of the page it is running on; a native binary is nowhere, so the base has
+//! to be named, and the only base worth naming is where the game is actually
+//! published. The *format* around the token is still the
 //! core's ([`level_fragment`]), shared with the address bar and the help panel's
 //! `copy [c]`, so there is exactly one spelling of what a shared level looks like.
 
