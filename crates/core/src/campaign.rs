@@ -31,10 +31,15 @@
 //! The wallet's one exit is [`spend`](Campaign::spend), and the sinks that call it live at
 //! the **map between facilities** (§14 v3) — there is no in-level spending, and the stage
 //! check that makes that true is in the campaign rather than in each sink. What a
-//! campaign's intel is *for* is therefore the hub, not the exit: the exit never refuses
-//! ([`IntelGate::None`], §4.5), so a facility's intel, caches and unlockables are all
-//! **surplus** and extraction is voluntary. Appendix 47 records why, and why a raid that
-//! took nothing is left to punish itself.
+//! campaign's intel is *for* is therefore the hub, not the exit: **the exit takes
+//! nothing** (§4.5), so everything a facility holds past the first thing is **surplus**
+//! and how much of it you stay for is yours to choose. Appendix 47 records why.
+//!
+//! The one thing the exit does ask is that the raid happened at all — the **minimum
+//! haul** ([`IntelGate::AtLeastOne`], #574): one objective taken, a console or a crate,
+//! kept in full. That is a check, not a fee, and the distinction is the whole of why it
+//! leaves the currency intact (appendix 59). A run can still walk out of a facility
+//! poorer than it hoped; it can no longer walk out of one it never entered.
 //!
 //! **The alert carries exactly one hop**, which is the whole of what §14 v3 asks for:
 //! *being loud in facility 2 makes facility 3 harder*. It is the §7.3 condition the last
@@ -835,11 +840,15 @@ impl Campaign {
     /// about a facility the run has not walked into yet, with `scouted` standing in for
     /// what it would know when it did (#215).
     ///
-    /// The gate is [`IntelGate::None`] because §4.5 settles it that way for the campaign —
-    /// intel is currency, so the exit never refuses and extraction is voluntary — **except
-    /// at the archive**, which is [`IntelGate::All`] and is the run's one mandatory
-    /// objective (§14 v3/#217): the terminus is the one facility a run cannot leave
-    /// empty-handed, and taking its data out is the run won.
+    /// The gate is [`IntelGate::AtLeastOne`] — the **minimum haul** (#574): a facility
+    /// must be left with at least one objective taken, an intel console or an equipment
+    /// cache. Intel stays a currency and not an exit key, because *nothing is spent* —
+    /// the haul is kept, the wallet never sees the exit, and everything past the first
+    /// thing is still surplus. What closes is only the case of walking out with nothing,
+    /// which made a building something you could stand in the doorway of (appendix 59).
+    /// **Except at the archive**, which is [`IntelGate::All`] and is the run's one
+    /// mandatory *complete* objective (§14 v3/#217): the terminus asks for all of it,
+    /// and taking its data out is the run won.
     ///
     /// **The gate is set here rather than in the archive's composite**, and the line is
     /// worth keeping straight (#565). A composite says what a *facility* is — how many
@@ -869,11 +878,12 @@ impl Campaign {
             seed: facility_seed(self.seed(), node),
             modifiers: ModifierSources {
                 chosen: LevelModifiers {
-                    // Voluntary everywhere but the terminus (§4.5/#211/#217).
+                    // A minimum haul everywhere, the whole set at the terminus
+                    // (§4.5/#211/#217/#574).
                     intel_to_exit: if self.map.is_archive(node) {
                         IntelGate::All
                     } else {
-                        IntelGate::None
+                        IntelGate::AtLeastOne
                     },
                     // What the run **paid to know** about this facility before walking
                     // in (§11.5a/#215). It rides in the chosen set rather than in a

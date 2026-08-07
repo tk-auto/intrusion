@@ -4593,8 +4593,144 @@ produce again — the same staleness `with_modifiers` already re-ran the sight p
 fix, one channel over. The correction is to drop the cues there: this modifier can only
 ever take marks away, so there is nothing to re-stamp.
 
+## Appendix 59 — The minimum haul: why a check at the exit is not a toll
 
-## Appendix 59 — Three stars, one per axis: what the score is for, and the one number that had to be derived
+*(§4.5 the exit gate, §14 v3's voluntary-extraction bullet and its empty-handed [OPEN],
+§2.2 intel as currency, §11.4 the ambient tally and the level-start card, §12.6 the
+modifier seam, §10.2/§10.6 satisfiability. Revises the [SETTLED] rule appendix 47 set.
+The ticket is #574.)*
+
+The campaign's exit gate was `IntelGate::None`, and it followed from a rule worth keeping:
+**a currency you must hand over to get out is a toll, not a currency**. Appendix 47 records
+why that survived, and it is still the right argument. What it also produced, though, was a
+facility that could be entered and left on the next turn having taken nothing — and a
+building you can walk out of immediately is not a raid. The map's whole structure went
+optional with it: the flavours, the alert carried forward (#210), the archive's star gate
+(#573) and the choice of which road to take all assume a facility is something you *go
+into*.
+
+This appendix records the distinction that let the second problem be fixed without
+reopening the first.
+
+### 1. A haul is not a toll, and the difference is the debit
+
+The toll argument is about **spending**. A gate that takes an intel to open is a fee on the
+currency: the wallet is debited, the balance you carry to the hub is smaller than the
+balance you earned, and every exit becomes a transaction. That would put two rules in
+direct contradiction — *intel is currency* and *intel is the exit key* — and appendix 47
+picked the one that survives.
+
+A **minimum haul** is a different shape entirely:
+
+| | toll | minimum haul |
+|---|---|---|
+| What the exit takes | one intel | **nothing** |
+| The wallet (#211) | debited at the mouth | **never involved** |
+| What reaches the hub | the haul, minus the fee | **the whole haul** |
+| What it asks | a payment | that the raid **happened** |
+
+Nothing is spent. The exit checks a predicate and opens; the haul is kept in full, and the
+wallet's one debit path stays where #211 put it, at the map between facilities. So the
+currency argument is untouched — there is no fee for it to be a fee on.
+
+What genuinely changes is the second half of the settled bullet: *"everything in a
+facility is surplus"* becomes **"everything past the first thing is surplus"**. The spirit
+holds. You still choose how deep to go, how long to stay, and when to cut your losses; the
+only thing that closes is *"or nothing at all"*.
+
+### 2. One is the number, and two would be a quota
+
+The bite the rule wants is exactly the removal of the zero case, and nothing more. Two
+objectives would start to read as a quota, and a quota is a toll wearing a different hat —
+it would make the exit a thing you work *towards* rather than a thing that is simply open
+once you have raided the building. The rule is written as *at least one* and the tests pin
+the surplus explicitly: with one thing taken and two still in the building, the gate wants
+nothing further.
+
+### 3. Reusing `AtLeastOne` rather than minting a variant
+
+§4.5 already had `IntelGate::AtLeastOne` for the sim. Widening its meaning from *"one
+console"* to *"one objective"* — a console `$` **or** an equipment cache `¤` — gives the
+campaign exactly the rule it wants and costs the sim nothing, because crates are
+campaign-only (§8.3): `LevelConfig::V1` plants none and no sim preset or `--modifier` name
+asks for any. One objective and one console are the same thing there, so the histogram
+measures the game it measured before. That was checked rather than argued: the committed
+playtest baseline matched byte-for-byte across all four profiles after the change.
+
+The alternative was a fourth enum arm. It would have meant a new token digit, a wider
+`FORMAT_MAJOR` conversation, and two variants that differ only in whether a crate counts —
+in a mode that has crates and a mode that does not. One variant, two modes, no new arm.
+
+The widening is deliberately **`AtLeastOne`'s alone**. `IntelGate::All` is the
+complete-the-set objective — quick play's, and the archive's (#217) — and a crate is no
+part of the set, so it still counts consoles. That is what keeps the terminus's rule its
+own.
+
+### 4. Satisfiability is asserted, not hoped for
+
+A facility the run cannot take one single thing from is a facility it cannot **leave**: a
+softlock, and the one way this rule could ship as a bug. It is impossible by construction
+on two counts, and both are asserted over a seed sweep, per flavour:
+
+- **something is there.** §10.2's console count floors at `LevelConfig::INTEL_MIN`, which
+  is two, whatever the §12.6 intel knob asks of it. That floor is precisely why the gate
+  had to accept a console and not only a crate — an Outpost hides none.
+- **it can be reached.** Placement refuses a carve where any objective is not bump-adjacent
+  to the ground the run can walk from the mouth it climbs out of (§10.6). The sweep floods
+  the board again from outside rather than trusting the generator to have checked itself.
+
+### 5. Two surfaces had to move, and one of them was a latent hole
+
+**The refusal could no longer be a count.** `Event::ExitRefused` carried `still_needed`
+alone, and the near line read *"the exit needs N more intel"*. Under the widened gate that
+number is always 1 and the sentence is half the rule: a player with a crate two cells away
+would be told to go and find a console. So the event carries the gate, and `AtLeastOne`
+gets its own line — *"the exit needs one thing taken"*. `All` keeps its counted line
+verbatim; the two cannot be confused because they are no longer the same sentence.
+
+**The Level info tab named no gate at all.** The modifier list is a list of *departures*
+from baseline, which is right for a list of departures — and §4.5's baseline gate is the
+very rule the campaign now plays under, so the tab would have gone silent about the rule
+that ends the run, at the moment that rule got harder. The fix is not to make a baseline
+knob draw a direction-coloured row (it departs from nothing, and `ModifierDirection` has no
+honest value for it) but to give the tab an **objective section**, sharing the level-start
+card's derivation. The card had needed that derivation since #497 for exactly this reason;
+the tab simply had not been given it. One rule, two surfaces, one source.
+
+### 6. The §11.4 tripwire, and why the tally survived it
+
+§11.4 carried a standing condition on the ambient `objectives: 1/3` row: *"if a
+human-facing mode ever ships on `AtLeastOne`, this line reverts — it is the one thing to
+check before changing a mode's gate."* This change trips it, so it was checked rather than
+waved through.
+
+The rule #310 actually established is that **no row may promise an exit that will refuse**.
+A tally reads as the requirement when it *is* the requirement, which is the `All` case and
+is why `3/3` is a legitimate exit-open signal there. Under the minimum haul the fraction
+states neither the requirement nor its negation: it is a labelled progress count over the
+loot, the requirement is *one* and of either kind, and it is stated outright on the
+level-start card and the Level info tab and answered free at the mouth. A run standing at
+`0/3` is never told the exit is open.
+
+So the line stays and the condition is rewritten to say what it was always for. What would
+break it is a gate whose requirement the fraction could be *mistaken* for — that is the
+thing to check next time, not the name of a particular enum arm.
+
+### 7. It removes the abort, and that is the point
+
+The honest cost is worth stating plainly: a raid that goes wrong in the first ten turns can
+no longer be walked out of, and a run pinned at condition 3 having reached no console has no
+way out but through. That is a real hardening. The counter-argument is that a facility you
+cannot take one single thing from is a raid you were losing anyway, and a permadeath game
+is allowed to say so.
+
+If play shows it producing unwinnable-but-not-yet-dead states, the hatch to consider is
+**opening the exit unconditionally at alert condition 3** — a pressure valve on the one
+state where the building has genuinely closed around you. Not softening the gate, which
+would put the revolving door straight back. That hatch is [OPEN] until a played run asks
+for it.
+
+## Appendix 60 — Three stars, one per axis: what the score is for, and the one number that had to be derived
 
 **Ticket #563.** Closes §15 Q4 and the matching §7.3 `[OPEN]`. The design lives in §4.6;
 this is the reasoning that cost the argument, and the measurements that set the numbers.

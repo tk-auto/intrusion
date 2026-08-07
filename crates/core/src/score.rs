@@ -100,7 +100,10 @@ pub enum Axis {
     ///
     /// Read off the facility's **contents**, never off the win condition: the exit gate
     /// is a level modifier (`intel_to_exit`, §4.5/§12.6), so a campaign facility that
-    /// asks for no intel at all still has intel in it and this still means something.
+    /// opens on the **minimum haul** — one objective, console or crate (#574) — still has
+    /// the rest of its consoles and crates standing in it, and this still means something.
+    /// Reading the star off the gate instead would make it free in every mode that asks
+    /// for less than everything.
     Thoroughness,
 }
 

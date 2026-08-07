@@ -8,6 +8,8 @@
 //! the first.
 
 use super::*;
+use std::collections::HashSet;
+
 use crate::alert::TOP_RUNG;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
@@ -36,6 +38,23 @@ const WANDER: [Direction; 6] = [
     Direction::North,
     Direction::West,
 ];
+
+/// The nearest intel console to the player, by Manhattan distance and then by cell
+/// order so the choice is deterministic (§12.4).
+///
+/// Read off the **terrain** because that is where the objectives are stamped
+/// ([`State::new`](crate::State::new)) and a [`Layout`](crate::generate::Layout) records
+/// only the usables it plants itself. Untaken by construction: this is called before the
+/// raid has bumped anything.
+fn nearest_console(state: &State) -> Cell {
+    let facility = state.layout().facility();
+    let at = state.player();
+    facility
+        .find_all(Terrain::Console)
+        .into_iter()
+        .min_by_key(|&cell| (at.manhattan_distance(cell), cell.y, cell.x))
+        .expect("every facility holds consoles (§10.2's INTEL_MIN)")
+}
 
 /// A finished raid: the inputs it pressed, in order, and the state they left.
 struct Raid {
@@ -74,6 +93,27 @@ fn raid(level: &LevelSeed) -> Raid {
         .expect("the tunnel is contiguous")
         .opposite();
     press(&mut state, Input::Step(out));
+
+    // **Take one thing** (§4.5/#574). The campaign's exit refuses a raid that took
+    // nothing, so a played raid has to actually raid: walk to the nearest console and
+    // bump it. `first_step_toward` reaches a goal it cannot stand on, so the last step
+    // of the walk *is* the bump that takes the intel.
+    let console = nearest_console(&state);
+    for _ in 0..400 {
+        if state.intel_in_hand() > 0 || state.outcome() != Outcome::Playing {
+            break;
+        }
+        let facility = state.layout().facility();
+        let passable = |cell: Cell| facility.terrain(cell).is_some_and(Terrain::routes_player);
+        let Some(dir) = first_step_toward(state.player(), console, passable) else {
+            break;
+        };
+        press(&mut state, Input::Step(dir));
+    }
+    assert!(
+        state.intel_in_hand() > 0,
+        "a played raid must be able to take something (§4.5/#574)",
+    );
 
     for dir in WANDER {
         press(&mut state, Input::Step(dir));
@@ -274,8 +314,8 @@ fn entering_starts_the_raid_and_does_not_start_it_twice() {
     assert_eq!(level.seed, facility_seed(7, node));
     assert_eq!(
         level.modifiers.intel_to_exit,
-        IntelGate::None,
-        "intel is currency in the campaign, not an exit key (§4.5/§2.2)",
+        IntelGate::AtLeastOne,
+        "the campaign asks for a minimum haul, never a toll (§4.5/§2.2/#574)",
     );
     assert_eq!(level.abilities, run.loadout(), "the run's own loadout");
     assert_eq!(
@@ -303,12 +343,12 @@ fn the_facility_is_the_flavour_the_map_offered() {
             let level = run.enter().expect("a facility to raid");
             let expected = ModifierSources {
                 chosen: LevelModifiers {
-                    // The terminus is the one node that asks for something (§4.5/#217);
-                    // everywhere else the campaign's exit never refuses.
+                    // The terminus is the one node that asks for the whole set
+                    // (§4.5/#217); everywhere else it is the minimum haul (#574).
                     intel_to_exit: if flavour == Flavour::Archive {
                         IntelGate::All
                     } else {
-                        IntelGate::None
+                        IntelGate::AtLeastOne
                     },
                     ..LevelModifiers::default()
                 },
@@ -379,7 +419,10 @@ fn every_flavour_carves_the_facility_it_promises() {
     for flavour in Flavour::OFFERED.into_iter().chain([Flavour::Archive]) {
         let modifiers = ModifierSources {
             chosen: LevelModifiers {
-                intel_to_exit: IntelGate::None,
+                // The campaign's own gate (#574). It reaches no generation seam — this is
+                // about what the carve seats — but the config is built the way the
+                // campaign builds it so a reader is not shown a facility no run boots.
+                intel_to_exit: IntelGate::AtLeastOne,
                 ..LevelModifiers::default()
             },
             alert: None,
@@ -405,6 +448,89 @@ fn every_flavour_carves_the_facility_it_promises() {
             );
         }
     }
+}
+
+/// **Every campaign facility can satisfy its own gate** (§4.5/§10.6/#574) — the
+/// softlock check, and the one assertion the minimum haul genuinely rests on.
+///
+/// A facility the run cannot take one single thing from is a facility it cannot *leave*,
+/// which is a run stuck in a building with no ending. That must be impossible by
+/// construction rather than unlikely, so it is asserted over a seed sweep, per flavour,
+/// and in both halves:
+///
+/// - **something is there.** §10.2's console count floors at
+///   [`LevelConfig::INTEL_MIN`] whatever the §12.6 intel knob asks of it, so even an
+///   Outpost — a flavour that hides no crates at all — holds consoles. That floor is why
+///   the gate must accept a console and not only a crate.
+/// - **it can be reached.** Every objective is bump-adjacent to the ground the run can
+///   walk from the mouth it climbs out of. Placement will not accept a carve where that
+///   fails ([`solvable`](super::super::place)), so this floods the board again from the
+///   outside rather than trusting the generator to have checked itself.
+#[test]
+fn every_campaign_facility_can_satisfy_the_minimum_haul() {
+    for flavour in Flavour::OFFERED.into_iter().chain([Flavour::Archive]) {
+        let modifiers = ModifierSources {
+            chosen: LevelModifiers {
+                intel_to_exit: IntelGate::AtLeastOne,
+                ..LevelModifiers::default()
+            },
+            alert: None,
+            flavour: Some(flavour.modifiers()),
+        }
+        .resolve();
+        for seed in 0..12 {
+            let state = start_level(&LevelSeed {
+                seed,
+                modifiers,
+                abilities: Loadout::innate(),
+            })
+            .unwrap_or_else(|e| panic!("a {flavour:?} at seed {seed} must carve: {e:?}"));
+
+            assert!(
+                state.intel_total() >= LevelConfig::INTEL_MIN,
+                "{flavour:?} seed {seed}: nothing to take, and no way to leave",
+            );
+            assert_eq!(
+                state.intel_needed_to_exit(),
+                1,
+                "{flavour:?} seed {seed}: the gate wants one thing, and one is there",
+            );
+
+            // The reachability half, flooded from every cell the run can climb out of
+            // `E` onto: each objective must be *adjacent* to that ground, since taking it
+            // is a bump and the cell it stands on is solid.
+            let facility = state.layout().facility();
+            let (w, h) = (facility.width(), facility.height());
+            let mouth = mouth(&state);
+            let walkable =
+                |c: Cell| c != mouth && facility.terrain(c).is_some_and(Terrain::routes_player);
+            let reached: HashSet<Cell> = facility
+                .neighbours(mouth)
+                .filter(|&c| walkable(c))
+                .flat_map(|foothold| crate::path::flood_from(foothold, w, h, walkable))
+                .collect();
+            for target in facility
+                .find_all(Terrain::Console)
+                .into_iter()
+                .chain(facility.find_all(Terrain::EquipmentCache))
+            {
+                assert!(
+                    facility.neighbours(target).any(|n| reached.contains(&n)),
+                    "{flavour:?} seed {seed}: {target:?} is walled off from the way in",
+                );
+            }
+        }
+    }
+}
+
+/// The exit `E`'s cell — the mouth the run climbs out of, and the one solid usable the
+/// flood above must not walk through.
+fn mouth(state: &State) -> Cell {
+    state
+        .layout()
+        .exit_duct()
+        .expect("a generated facility has the player's own tunnel")
+        .cells()[0]
 }
 
 /// **Completing a raid banks the haul and puts the run at a choice point** — and the
@@ -631,7 +757,14 @@ fn a_louder_raid_makes_the_next_facility_harder() {
             let drawn = Loudness::Hunted
                 .contribution(country, country.start(), offer.node)
                 .expect("condition 3 reaches every open road");
-            for rule in drawn.active() {
+            // A *contribution* is built from [`LevelModifiers::neutral`], whose intel
+            // gate is `None` — the identity union composes from, and the one value that
+            // adds no pressure. `active` reads that as a departure from §4.5's baseline
+            // and draws a row for it, so the phantom row is subtracted here: the alert
+            // never draws the gate (the §12.6 pool holds no entry for it), and the
+            // facility resolves to the campaign's own gate rather than to the identity.
+            let phantom = LevelModifiers::neutral().active();
+            for rule in drawn.active().into_iter().filter(|r| !phantom.contains(r)) {
                 assert!(
                     loud.modifiers.active().contains(&rule),
                     "seed {seed}: the alert drew {} and the facility does not play it",
@@ -1210,31 +1343,50 @@ fn a_run_that_buys_a_route_replays_identically() {
     }
 }
 
-/// **A campaign facility's exit never refuses** (§4.5/§14 v3): intel is currency, so every
-/// console in the building is *surplus* and extraction is voluntary — a run may walk out
-/// of any facility the turn it walked in.
+/// **No campaign facility can be left empty-handed** (§4.5/§14 v3/#574) — the *minimum
+/// haul*: the exit refuses a raid that took nothing, and nothing else.
 ///
-/// The gate is stated on the config every facility boots with, whatever the run is
-/// carrying, so this is the model rather than a property of one lucky seed.
+/// The rule is stated on the config every facility boots with, whatever the run is
+/// carrying, so this is the model rather than a property of one lucky seed. Two halves,
+/// and both matter:
+///
+/// - the gate is [`IntelGate::AtLeastOne`] on every ordinary node, so a facility walked
+///   into and straight back out of refuses at the mouth (§4.4: free);
+/// - **nothing is spent** getting past it. The wallet (#211) is untouched by leaving —
+///   it has no debit path at the exit at all — so what a raid banked is exactly what it
+///   took, which is why the haul is a check and not a toll (appendix 59).
 #[test]
-fn every_campaign_facility_lets_the_run_leave_empty_handed() {
+fn no_campaign_facility_lets_the_run_leave_empty_handed() {
     let mut run = Campaign::to_depth(PLAYED_SEED, 3);
-    // **Every facility but the terminus** (#217). The archive is the campaign's one
-    // mandatory objective and the exception this rule is now stated against, so the walk
-    // stops short of it — `the_archive_refuses_to_be_left_empty_handed` is the other half.
+    let mut banked = 0;
+    // **Every facility but the terminus** (#217). The archive asks for its whole set
+    // rather than one thing, so the walk stops short of it —
+    // `the_archive_refuses_to_be_left_empty_handed` is the other half.
     while !run.map().is_archive(run.node()) {
+        let level = run.next_level();
         assert_eq!(
-            run.next_level().modifiers.intel_to_exit,
-            IntelGate::None,
-            "the campaign exit is not an intel gate (§4.5)",
+            level.modifiers.intel_to_exit,
+            IntelGate::AtLeastOne,
+            "the campaign exit asks for a minimum haul (§4.5/#574)",
         );
+        let state = start_level(&level).expect("a campaign facility carves");
+        assert!(
+            !state.exit_ready(),
+            "a facility that has been taken nothing from will not let the run leave",
+        );
+        assert_eq!(state.intel_needed_to_exit(), 1, "and it wants exactly one");
+
         run.enter();
-        // Nothing taken, and the run still walks on: an empty-handed raid is *allowed*,
-        // and what makes it a bad idea is that the run is now poorer at a facility the
-        // alert may have made harder — not a penalty anyone coded (appendix 47).
-        walk_on(&mut run, 0);
+        // One console taken and banked. The exit takes none of it: the balance after the
+        // raid is the balance the raid earned, every hop.
+        walk_on(&mut run, 1);
+        banked += 1;
+        assert_eq!(
+            run.intel(),
+            banked,
+            "the haul banked is the haul taken — the exit debits nothing (#211)",
+        );
     }
-    assert_eq!(run.intel(), 0, "nothing taken is nothing banked");
 }
 
 /// **The archive is where a run cannot leave empty-handed** (§4.5/§14 v3/#217) — the
@@ -1242,9 +1394,10 @@ fn every_campaign_facility_lets_the_run_leave_empty_handed() {
 /// everywhere else (#211, appendix 47).
 ///
 /// The interesting half is *whose* rule it is. Every other campaign facility boots with
-/// [`IntelGate::None`] because intel is currency (§2.2), and the terminus's gate is set by
-/// the **node** rather than by the composite: what a facility *is* and what the run is
-/// asked for are two different facts, and only the second one ends a run.
+/// [`IntelGate::AtLeastOne`] — one thing is enough, because intel is currency (§2.2) and
+/// the haul is only a check that the raid happened (#574) — and the terminus's gate is
+/// set by the **node** rather than by the composite: what a facility *is* and what the
+/// run is asked for are two different facts, and only the second one ends a run.
 #[test]
 fn the_archive_refuses_to_be_left_empty_handed() {
     let mut run = Campaign::to_depth(PLAYED_SEED, 0);
@@ -1258,15 +1411,18 @@ fn the_archive_refuses_to_be_left_empty_handed() {
         "and it wants every console it holds",
     );
 
-    // The contrast, one facility earlier on the same run seed: an ordinary facility opens
-    // with its exit already willing, which is what makes the refusal the terminus's own
-    // rule rather than the campaign's.
+    // The contrast, one facility earlier on the same run seed: an ordinary facility asks
+    // for **one** thing where the terminus asks for all of them, which is what makes the
+    // difference the terminus's own rule rather than the campaign's.
     let mut ordinary = Campaign::to_depth(PLAYED_SEED, 1);
     let first = ordinary.enter().expect("the first facility");
     assert_ne!(first.modifiers.composite, Composite::Archive);
-    assert!(
-        start_level(&first).expect("it carves").exit_ready(),
-        "an ordinary campaign facility never refuses (§4.5/#211)",
+    assert_eq!(
+        start_level(&first)
+            .expect("it carves")
+            .intel_needed_to_exit(),
+        1,
+        "an ordinary campaign facility asks for a minimum haul, not the set (#574)",
     );
 }
 

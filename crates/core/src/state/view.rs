@@ -678,6 +678,47 @@ impl State {
         self.objectives.len()
     }
 
+    /// How many **equipment caches** the facility holds in all — opened and untouched
+    /// together (§2.2/§8.3/§14 v3/#209), the cache half of [`intel_total`](Self::intel_total).
+    ///
+    /// Zero everywhere the §12.6 [`CacheCount`](crate::CacheCount) knob has not been
+    /// asked for crates, which is quick play and the whole of the sim (§8.3): they are
+    /// a campaign thing.
+    pub fn cache_total(&self) -> usize {
+        self.caches.len()
+    }
+
+    /// How many crates this raid has **opened** — the cache half of
+    /// [`intel_in_hand`](Self::intel_in_hand). What each one held is
+    /// [`salvaged`](Self::salvaged), which is a *set* and would collapse two crates
+    /// holding the same tech; this counts the crates.
+    pub fn caches_opened(&self) -> usize {
+        self.caches.iter().filter(|c| c.taken).count()
+    }
+
+    /// **What this raid has taken, of any kind** — consoles plus crates (§4.5/#574).
+    ///
+    /// The number the minimum haul is about: [`AtLeastOne`](crate::IntelGate::AtLeastOne)
+    /// asks that this be non-zero and asks nothing else of it, because what the rule
+    /// forbids is leaving with *nothing* rather than leaving with the wrong thing. Kept
+    /// as its own question rather than inlined, so the gate, the card and the tests all
+    /// read the same definition of *empty-handed*.
+    pub fn haul_taken(&self) -> usize {
+        self.intel_in_hand() + self.caches_opened()
+    }
+
+    /// **What there is to take, of any kind** — the facility's consoles plus its crates.
+    ///
+    /// The satisfiability of [`AtLeastOne`](crate::IntelGate::AtLeastOne) rests on this
+    /// being non-zero, and generation guarantees it: §10.2's console count floors at
+    /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN), which is two, whatever
+    /// the §12.6 intel knob asks for. A facility with nothing in it at all is reachable
+    /// only by hand-building one, and there the gate is vacuously satisfied rather than
+    /// a softlock.
+    pub fn haul_available(&self) -> usize {
+        self.intel_total() + self.cache_total()
+    }
+
     /// Whether the exit will accept the player — the run's **intel gate**
     /// (§10.2/§4.5), now a level modifier ([`IntelGate`](crate::IntelGate)/#244)
     /// rather than one fixed rule, so the three modes gate the same facility
@@ -685,19 +726,21 @@ impl State {
     ///
     /// - [`All`](crate::IntelGate::All) — quick play (#244): every objective must be
     ///   taken. Gather the intel, then get out (§10.2).
-    /// - [`AtLeastOne`](crate::IntelGate::AtLeastOne) — the §4.5 [START] baseline and
-    ///   the sim (§13.3): one intel in hand is a complete run, which keeps the bot's
-    ///   outcome profile mixed (the all-intel march got it caught nearly every seed).
-    /// - [`None`](crate::IntelGate::None) — campaign (§14 v3): intel is currency
-    ///   (§2.2), not an exit key, so the exit never refuses.
+    /// - [`AtLeastOne`](crate::IntelGate::AtLeastOne) — the §4.5 [START] baseline, the
+    ///   campaign (§14 v3/#574) and the sim (§13.3): **one objective taken** is a
+    ///   complete run, which keeps the bot's outcome profile mixed (the all-intel march
+    ///   got it caught nearly every seed) and stops a campaign facility being a
+    ///   revolving door.
+    /// - [`None`](crate::IntelGate::None) — the exit never refuses. Nothing ships on it
+    ///   since #574; it remains the union identity and a token-carried value.
     ///
-    /// A level with no objectives is winnable at once under every gate (an empty
-    /// `all` is vacuously satisfied).
+    /// A level with nothing in it at all is winnable at once under every gate (an empty
+    /// `all` is vacuously satisfied, and so is a minimum haul with no haul to take).
     pub fn exit_ready(&self) -> bool {
         self.intel_needed_to_exit() == 0
     }
 
-    /// How many **more** consoles the run must take before the exit will open — the
+    /// How many **more** things the run must take before the exit will open — the
     /// gate's own answer, which is not the objective tally
     /// ([`objectives_remaining`](Self::objectives_remaining)): under
     /// [`AtLeastOne`](crate::IntelGate::AtLeastOne) with three consoles out, three
@@ -707,15 +750,22 @@ impl State {
     /// it (#310): every objective line derives from this — or equivalently from
     /// [`exit_ready`](Self::exit_ready), which is just this at zero — rather than from
     /// any fixed intel count, so no message can promise an exit that will refuse.
+    ///
+    /// **Under `AtLeastOne` the unit is an objective, not a console** (#574): a crate
+    /// already opened satisfies the gate exactly as a console does, and on a facility
+    /// with nothing taken the answer is one of *anything*
+    /// ([`haul_taken`](Self::haul_taken)/[`haul_available`](Self::haul_available)).
+    /// Under [`All`](crate::IntelGate::All) it stays consoles, because that gate is the
+    /// complete-the-set objective and a crate is not part of the set.
     pub fn intel_needed_to_exit(&self) -> usize {
         use crate::modifiers::IntelGate;
         let out = self.objectives_remaining();
         match self.modifiers.intel_to_exit {
             IntelGate::None => 0,
-            IntelGate::AtLeastOne if self.intel_in_hand() > 0 => 0,
-            // One console is the whole requirement — and none at all on a facility with
-            // no consoles, which is vacuously satisfied under every gate.
-            IntelGate::AtLeastOne => out.min(1),
+            IntelGate::AtLeastOne if self.haul_taken() > 0 => 0,
+            // One thing is the whole requirement — and none at all on a facility that
+            // holds nothing to take, which is vacuously satisfied under every gate.
+            IntelGate::AtLeastOne => self.haul_available().min(1),
             IntelGate::All => out,
         }
     }

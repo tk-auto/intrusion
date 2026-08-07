@@ -312,12 +312,20 @@ If you are adding an ability and about to make it free, re-read §2.3.
   not one fixed rule, so the modes gate the *same* facility differently:
   - **Quick play — all the intel** (§10.2/#244). Gather the whole set, then get out:
     a complete objective, and v1's default mode.
-  - **The sim — at least one** (§13.2/§13.3). One objective is a complete run for the
-    bot; the all-intel march kept it in the facility long enough to be caught nearly
-    every seed, so the shorter gate keeps the outcome profile mixed. **[START]** on
-    the value.
-  - **Campaign — none** (§14 v3). Intel is currency (§2.2), not an exit key, so the
-    exit never refuses.
+  - **Campaign, and the sim — at least one** (§14 v3/§13.2/§13.3, #574). The
+    **minimum haul**: one **objective** taken — an intel console *or* an equipment
+    cache — and the exit opens. Nothing is spent and nothing is handed over; the gate
+    only checks that the haul is not empty, which is why intel stays a currency (§2.2)
+    rather than becoming a toll (appendix 59). A facility must be *raided*, and how
+    much of it you stay for is still yours. For the sim the two readings coincide —
+    it plants no crates (§8.3) — and the shorter gate is what keeps the bot's outcome
+    profile mixed: the all-intel march kept it in the facility long enough to be caught
+    nearly every seed. **[START]** on the value, and *one is the number*: two would be a
+    quota, and a quota is a toll wearing a different hat.
+    - **The exception is the archive** (#217), whose node sets `IntelGate::All`: the
+      terminus asks for the whole set.
+    - `IntelGate::None` — the exit that never refuses — remains as the union identity
+      (§12.6) and a value the token can carry, but **nothing ships on it** since #574.
 
   Pressing on for more than the gate demands is what an aggressive style trades extra
   exposure for. The gate is part of the run's reproducible config, carried in the
@@ -409,7 +417,7 @@ entire point.
 - **The stealth star is demanding, not impossible.** Rung 1 costs one sighting *or* one
   missed ping and never comes back down (§7.3), so this was the number most likely to be
   unreachable. The sim says otherwise: over 400 bare-bot runs it was earned by **60–75% of
-  winning runs** across all four profiles (appendix 59). The threshold stays at condition
+  winning runs** across all four profiles (appendix 60). The threshold stays at condition
   0; if a played run says otherwise, it moves to ≤ 1 before the design is blamed.
 
 ---
@@ -1243,8 +1251,10 @@ whole reason the architecture looks the way it does.
 > prize). What you find is **usable that turn** and carried by the run for every facility
 > after it (§2.2); nothing carries out of the run. Crates are planted a real detour from
 > the way in and spread across rooms (§10.6), and every one is **optional** — the
-> campaign's exit never asks for them (§4.5), so walking past one is a legal and
-> sometimes correct choice. Quick play plants none: a single facility has no *rest of the
+> campaign's exit never asks for a *crate* (§4.5), so walking past one is a legal and
+> sometimes correct choice — the minimum haul (§4.5/#574) is met by a console just as well,
+> so a crate is a second *way* to satisfy it and never a second thing it asks for. Quick
+> play plants none: a single facility has no *rest of the
 > run* to accumulate into (§2.2).
 >
 > **What a crate holds is a property of the building, not of you.** It is drawn from the
@@ -1815,7 +1825,7 @@ will have neither (§2.2, appendix 31) — the exits belong to the mode.
 | Size | **40 × 40** **[START]** |
 | Guards | **4** **[START]** — a **level modifier** moves it (`guard_count`, §12.6/#232/#565): a signed delta of up to two either way, within **2…6**. The *Archive* names two more on its own (#217) |
 | Intel | **3** **[START]** — the same knob on the reward axis (`intel_count`, §12.6/#207/#565), within **2…5**. The *Archive* names two more (#217), which is what took the ceiling from four to five |
-| Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** — except the **archive**, whose node sets *all of it* and makes the run's one mandatory objective (#217) |
+| Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, campaign and the sim = **at least one objective** — the minimum haul, a console or a crate, nothing spent (#574) — except the **archive**, whose node sets *all of it* and makes the run's one mandatory complete objective (#217) |
 | Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); the sim grants the **innate set only**; campaign accumulates instead (§2.2) |
 
 **The sim plays bare, and that is the point.** The headless baseline (§13.2) holds
@@ -2577,15 +2587,23 @@ help panel carries the effects. What a standing row owes the player is the numbe
 every turn, without spending the row on it.
 
 **Why the bare fraction is honest here, and where it would stop being.** §11.7 forbids
-reporting the tally of consoles still out as if it were the requirement: under
-`IntelGate::AtLeastOne` three can be out while exactly one is needed, so a tally implies
-the wrong goal (#310). That gate is the **sim's** baseline (§13.3), and the sim never
-reads the near line. Quick play sets `IntelGate::All` (§12.6), where the tally and the
-requirement are the same number said differently and `3/3` *is* the exit-open signal;
-the campaign sets `IntelGate::None` (§14 v3), where intel is currency (§2.2) and a
-progress fraction is exactly right. **If a human-facing mode ever ships on
-`AtLeastOne`, this line reverts** — that is the condition under which it stays truthful,
-and it is the one thing to check before changing a mode's gate.
+reporting the tally of consoles still out as if it were the requirement: a tally that
+implies the wrong goal is the #310 bug. The row survives that rule because it is a
+**progress tally over the loot**, labelled as one, and never a statement about the exit:
+
+- quick play sets `IntelGate::All` (§12.6), where the tally and the requirement are the
+  same number said differently and `3/3` *is* the exit-open signal;
+- the campaign sets `IntelGate::AtLeastOne` (§14 v3/#574), where intel is currency (§2.2)
+  and what the exit asks is **one thing, of either kind** — a number the fraction neither
+  states nor contradicts, and which the level-start card and the Level info tab both name
+  outright (the level-start card below, and the Level info tab's own objective section).
+  A run at `0/3` is told at the mouth, free (§4.5).
+
+**The condition it stays truthful under** is that no row may *promise an exit that will
+refuse*. It held when the campaign's gate was `IntelGate::None` and it holds under the
+minimum haul; what would break it is a gate whose requirement the fraction could be
+mistaken for — so that is the thing to check before changing a mode's gate. Appendix 59
+records the check this rule was last put through.
 
 **Neither status row is ever blank.** The near line falls back to ambient status;
 the usable line falls back to **how to move and how to wait** (#323), in the input
@@ -2694,11 +2712,22 @@ shared at leisure from a panel you can call up — and no facility alert, which 
 section of that tab that moves while you play (§7.3) and has nothing to say before the
 first turn. The modifier rows are the tab's own, from the one derivation both draw
 (§12.6), so a rule in force on one is in force on the other. The **objective line is
-derived from the run's own gate and console count**, not from the modifier list: §4.5's
-baseline gate surfaces no row there (§12.6), so a card built from that list alone would
-leave a baseline run with no statement of what it is being asked to do. It names the way
-out as well as the taking, because there is only one way out and it is the tunnel you dug
-(§1/§4.5).
+derived from the run's own gate and its contents** — consoles and crates — and not from
+the modifier list: §4.5's baseline gate surfaces no row there (§12.6), so a card built
+from that list alone would leave a baseline run with no statement of what it is being
+asked to do. It names the way out as well as the taking, because there is only one way
+out and it is the tunnel you dug (§1/§4.5). Under the minimum haul it names the **crate**
+too, where the facility has crates (#574): the gate counts them and nothing on the board
+says so.
+
+**The Level info tab carries the same two lines**, under its own `OBJECTIVE` heading and
+from the same derivation (#574). It went without one while every human-facing gate was a
+*departure* the modifier list surfaced on its own; the minimum haul put the campaign on
+§4.5's baseline gate, where that list is silent — and a panel that exists to state a run's
+rules cannot be the one surface that omits the rule which ends it. It is a section rather
+than a modifier row because the two answer different questions: the list says what
+*departs* from the baseline, and the gate a run is held to is a fact whether or not it
+departs from anything.
 
 **It dismisses on any input, and on nothing else — there is no timeout.** An auto-dismiss
 has a losing race in it: press at roughly the moment it fires and the keypress meant as
@@ -3283,6 +3312,75 @@ system — it is derived from adjacency every frame and carries no state.
   it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
+- **The loud rungs pop in** (#576). Some events are too important to be lost on the
+  near line: the player's eye is on the board — on the guard two rooms over and on the
+  cell they are about to step into — not on the top row of the screen, and a one-row
+  band at the far edge of their attention is exactly what gets missed. The near line is
+  the right home for *what is around you*; it is the wrong home for *the thing you came
+  here for just happened* or *the building just got worse*. So the loud rungs get a
+  **second surface**: a small **pop-in box** drawn over the board next to what it is
+  about, bordered in the message's §11.2 category colour, which appears when the event
+  fires, sits for about **2 s [START]**, and goes. Not a strobe and not a pulse — it
+  appears, it is read, it disappears, with no animation in between. It is transient
+  precisely so it can afford to be over the map.
+  - **Which messages qualify is derived from the ladder, never hand-flagged.** The gate
+    is a threshold on the priority every message already carries — the facility-
+    escalation rung, **5 [START]**. Nothing gets a "loud" bit set at the raise site, so a
+    future loud event inherits the pop-in for free and cannot be forgotten, and the
+    ladder stays the single place importance is decided. That it derives from the ladder
+    is **[SETTLED]**; the threshold is not.
+    - **Where the line falls, and why there.** Below it a message is one guard's
+      business — a look that found you, a radio gone quiet, a body found — and the
+      *board already draws it*: the cone, the §9 sense mark, the watcher line. Those are
+      facts the player reads by looking where they are already looking. At the rung and
+      above, the message is the **facility's** or the **run's** — the §7.3 ladder
+      climbing, a body reported, the phase safety firing, a capture evaded, an ending,
+      an objective — and the board has no way to say any of it. The threshold started at
+      20, objective feedback alone, and came down the first time the ladder was watched
+      climbing in play: *the security condition just changed* is the fact that most
+      changes what the next ten turns should be, and it was arriving on the row the
+      player was not reading.
+  - **The box takes its message; it does not copy it.** While a box is up, the message
+    in it comes **off the near line and out of the live block of the deployed log**. The
+    same words in two places an inch apart is one fact wearing two surfaces, and the row
+    is better spent on the *next* thing the turn had to say — the box carrying *intel in
+    hand* while the row says *a guard has seen you* is two facts on two surfaces. With
+    nothing else live the row falls to the ambient floor, as it always does. Nothing is
+    lost by it: the moment the box goes, the message is back in its expected place on
+    both surfaces, and the history the log stacks under its rule is never touched.
+    - **The block moves whole.** An event's subordinate line travels with its headline
+      into the box, because §11.7 makes the pair inseparable — a reason left behind on
+      the log while its headline is in the box is exactly the separation the rule
+      forbids. The near line still never shows a subordinate: it is one row and speaks
+      the headline alone. The box is not that row.
+  - **It rides out its life.** A message dies on the player's next action; the box does
+    **not**. A player who acts inside two seconds is the very case where the near line
+    lost the message, so a box a quick key-press erases fails at its only job. It
+    outlives the near line's copy and keeps drawing over the following turn — and it is
+    not dismissible, for the same reason.
+  - **It never queues.** A second qualifying message replaces the first and restarts the
+    clock. One box at a time, always the newest fact; a backlog of stale boxes is the
+    opposite of the point. It is not a second message log either — the deployed log
+    already answers *what just happened*, and this surface answers *do not miss this*.
+    The message the replaced box was holding returns to the near line and the log as it
+    would have if the box had simply expired.
+  - **It is anchored, not centred**, because the complaint being fixed is that the eye
+    is on the board: a panel under the top rows would be missed for the same reason the
+    near line is. Every message on the rung today is something the player did to a thing
+    they are standing next to, or to themselves, so the anchor is the **player's cell**
+    and the box is placed clear of that cell *and all eight of its neighbours* — the
+    ring the console, crate or exit being reported is standing in, which is what makes
+    "never covers what it's talking about" true for the whole rung without knowing which
+    message is up. It is clamped to the board, never clipped; and among the legal
+    placements it takes the **cheapest**: fewest *guards* covered, then fewest **§11.5
+    danger cells**. Burying the lose condition is the failure mode every surface drawn
+    over the map is bounded against, and a guard is its worst form — a guard's own cell is
+    never inside its own cone, so counting cone cells alone will happily park the box on
+    the `g` and leave the cone around it perfectly readable.
+  - **The clock is the shell's, never the core's** (§12.1). The rules stay pure and
+    turn-based: the core says what to draw and is told when the box has expired, so no
+    wall clock reaches the rules and a replay of the same seed and inputs is identical
+    whether or not a box was ever drawn.
 - **Objective messaging derives from the gate, never from a fixed intel count**
   (§4.5/#310). Whether the exit is open is `exit_ready()`, and how much it still
   wants is `intel_needed_to_exit()` — which is *not* the tally of consoles still out
@@ -3933,9 +4031,10 @@ a campaign of **one** facility is exactly the game v1 ships.
   someone, or to the sim, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
   (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
-  intel is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
-  (§4.5), extraction is voluntary, and the balance is banked at every completed raid and
-  spent only at the map between facilities (§14 v3, appendix 47) — and the
+  intel is currency in the campaign and never a fee at the exit, which takes nothing
+  (§4.5); the gate is the minimum haul (`IntelGate::AtLeastOne`, #574), a check that the
+  raid happened rather than a debit, and the balance is banked at every completed raid and
+  spent only at the map between facilities (§14 v3, appendices 47 and 59) — and the
   **campaign alert**, the run-level layer
   above the per-facility §7.3 ladder. A campaign is persisted in exactly one place and
   for exactly one purpose — the run's autosave slot (§12.5/#514), so an interrupted
@@ -4152,9 +4251,10 @@ bullet below fills one of its seams.
     curve rising after the last thing it could be spent on. It reaches placement and the
     lock's pass, never the carve — so the terminus is the same building its seed always
     carved, with more in it and one room shut.
-  - **The archive is the campaign's one mandatory objective** [SETTLED], and the single
-    exception to §4.5's voluntary extraction (#211/#217). Everywhere else the exit never
-    refuses because intel is currency; here it wants every console. **That gate is the
+  - **The archive is the campaign's one mandatory *complete* objective** [SETTLED], and
+    the single exception to §4.5's minimum haul (#211/#217/#574). Everywhere else one
+    thing is enough because intel is currency and the exit takes none of it; here it
+    wants every console. **That gate is the
     node's, not the composite's**: a composite says what a *facility* is, and a gate says
     what the **run** is asked for — the end of this map, with nothing past it to spend a
     surplus in. Because one console is behind the lock and all five are required, a won
@@ -4213,12 +4313,28 @@ bullet below fills one of its seams.
   alternative route, lower the alert, upgrade an ability. The wallet and the seam every
   sink spends through are #211; the sinks themselves are its sub-tickets. Appendix 47
   records the model.
-  - **Extraction is voluntary, and everything in a facility is surplus** [SETTLED]. The
-    campaign's exit gate is `IntelGate::None` (§4.5), so you may bump the exit and leave
-    any facility at any time: intel, caches and unlockables are all things you *chose* to
-    stay for. A currency you must hand over to get out is a toll, not a currency — the
-    two rules cannot both hold, and this is the one that survives. (v1 quick play keeps
-    *objectives required, early exit refused*: it has no hub to spend at.)
+  - **Nothing is handed over to leave, and everything past the first thing is surplus**
+    [SETTLED]. A currency you must hand over to get out is a toll, not a currency — the
+    two rules cannot both hold, and this is the one that survives. So the campaign's exit
+    **takes nothing**: intel, caches and unlockables are all things you *chose* to stay
+    for, and how deep you go is your call. (v1 quick play keeps *objectives required,
+    early exit refused*: it has no hub to spend at.)
+    - **The one thing it asks is that the raid happened**: the **minimum haul**
+      (`IntelGate::AtLeastOne`, §4.5/#574) — at least one objective taken from this
+      facility, a console `$` or a crate `¤`. Nothing is debited, the wallet never sees
+      the exit, and the haul is kept in full, so this is a *check* and not a fee; the
+      currency argument above is untouched. What closes is the case of walking out with
+      nothing, which made a facility something you could stand in the doorway of and made
+      the map's whole structure optional. **One is the number and stays one** — two would
+      be a quota, and a quota is a toll wearing a different hat. Appendix 59.
+    - **It removes the abort**, deliberately. A raid that goes wrong in the first ten
+      turns can no longer be walked out of, and a run pinned at condition 3 with no
+      console reached has no way out but through. The counter-argument is that a facility
+      you cannot take one single thing from is a raid you were losing anyway, and
+      permadeath games are allowed to say so. If play shows it produces
+      unwinnable-but-not-yet-dead states, the escape hatch to consider is **opening the
+      exit unconditionally at alert condition 3** — not softening the gate, which would
+      put the revolving door back. [OPEN on that hatch, until a played run asks for it.]
   - **One spend context: the map between facilities** [SETTLED]. There is no in-level
     spending, so the map screen (#208) is also the **hub** — the balance is a line on it
     and the prices are rows of it, read in one glance. A wallet you could dip into
@@ -4308,10 +4424,14 @@ bullet below fills one of its seams.
       priced row becomes the heading of a short list of the tech itself. A third screen for
       at most three names would put the fact one press further from the two decisions it
       informs — walk the detour, and raid this facility at all.
-  - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
-    away for a wasted raid; the run is simply poorer at a facility the alert may have
-    made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
-    is deferred until a played run says the emergent cost is too soft.
+  - **Walking out empty-handed is not a state that exists** [SETTLED, #574]. It was
+    [OPEN on the tuning] while it was possible — *nothing is taken away for a wasted
+    raid, and an explicit nudge is deferred until a played run says the emergent cost is
+    too soft* — and the minimum haul closes the question rather than tuning it: the exit
+    refuses an empty haul, so there is no empty-handed departure left to punish. A **thin**
+    raid is still unpunished and still a real cost: one console taken and the rest left
+    behind leaves the run poorer at a facility the alert may have made harder (#210), and
+    caches are one-shot.
 - Difficulty that scales with the alert level, driven through the level-modifier
   seam (§12.6) rather than a private knob set. **The whole point of the alert
   system is that being loud in facility 2 makes facility 3 harder.** Until that

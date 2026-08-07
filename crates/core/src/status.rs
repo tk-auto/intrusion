@@ -17,6 +17,13 @@
 //! under a separator rule (#300). The clear-on-action rule is the near line's, not
 //! the panel's.
 //!
+//! The loud rungs leave the row altogether rather than filling it: a message at
+//! [`POP_IN_PRIORITY`] raises a [`PopIn`] — the box drawn over the board beside the
+//! player for a couple of seconds (§11.7/#576) — which is *derived from the ladder*
+//! rather than flagged at the raise site, which outlives the near line's clear-on-action
+//! rule, and which **takes** its message rather than copying it: while the box is up,
+//! the near line and the log speak what is left ([`live_messages_beside`]).
+//!
 //! The **usable line** below it is deliberately *not* here: it is no message at
 //! all but a pure derived view of adjacency
 //! ([`State::affordances`](crate::State::affordances)), recomputed every frame
@@ -26,10 +33,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::category::Category;
 use crate::control::transfers_control;
+use crate::modifiers::IntelGate;
 use crate::state::{Event, State};
 
 mod history;
 pub use history::{MessageHistory, HISTORY_ACTIONS};
+
+mod pop_in;
+pub use pop_in::{live_messages_beside, near_line_beside, pop_in, PopIn, POP_IN_PRIORITY};
 
 /// One §11.7 message: what the near line says, the §11.2 category that colours
 /// its band, and its rung on the priority ladder. (A source cell joins when
@@ -146,9 +157,19 @@ pub fn message_for(event: Event) -> Option<Message> {
             (format!("intel in hand — {still_needed} more to go"), 20)
         }
         // The refusal names the requirement it enforces, so it can never contradict a
-        // take message from the same run: under `All` that is the rest of the set,
-        // under `AtLeastOne` the single console the player has yet to reach.
-        Event::ExitRefused { still_needed } => {
+        // take message from the same run: under `All` that is the rest of the set.
+        //
+        // **`AtLeastOne` gets its own sentence** (#574), because the count alone would
+        // be a lie there: the minimum haul is met by an intel console *or* an equipment
+        // cache, so "one more intel" would name half the rule and send a player who has
+        // a crate in reach walking past it. The number is always 1 under that gate and
+        // saying so adds nothing — what the line owes the player is *what kind of
+        // thing*, which is: any.
+        Event::ExitRefused {
+            gate: IntelGate::AtLeastOne,
+            ..
+        } => ("the exit needs one thing taken".to_string(), 20),
+        Event::ExitRefused { still_needed, .. } => {
             (format!("the exit needs {still_needed} more intel"), 20)
         }
         // The §7.7 counterplay landing (§7.3): the whole net is down for the rest of

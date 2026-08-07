@@ -303,7 +303,7 @@ impl Game {
         if is_help_button(col, row) {
             return Some(Control::HelpToggle);
         }
-        if is_message_button(&self.state, col, row) {
+        if is_message_button(&self.state, self.ui, col, row) {
             return Some(Control::MessageLog);
         }
         ability_at(&self.state, col, row).map(Control::Ability)

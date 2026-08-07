@@ -156,7 +156,10 @@ pub use state::{
     GUARD_CUE_DECAY_TURNS, LOCKDOWN_RADIUS, PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE,
     PLAYER_SENSE_RANGE_WAITING,
 };
-pub use status::{live_messages, message_for, near_line, Message, MessageHistory, HISTORY_ACTIONS};
+pub use status::{
+    live_messages, message_for, near_line, pop_in, Message, MessageHistory, PopIn, HISTORY_ACTIONS,
+    POP_IN_PRIORITY,
+};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
 pub use verdict::{EndExit, Ending, RunMode, RunOptions, RunStats, Verdict};
 pub use vision::{
