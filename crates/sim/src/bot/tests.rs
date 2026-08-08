@@ -994,7 +994,7 @@ fn the_striking_profiles_work_the_body_chain() {
 /// Before this, `crouched_behind` was `None` for every turn of every run under
 /// every profile — so §10.1a's benches and the exact run geometry `cover.rs`
 /// computes for them were **inert in the harness**: a regression in
-/// core's `cover::run_conceals` or `cover::run_hugs` would have moved no metric at
+/// core's `crouch::run_conceals` or `crouch::run_hugs` would have moved no metric at
 /// all. This is the test that stops that being true again, and it asserts three
 /// things a false zero could not fake:
 ///
@@ -1121,7 +1121,7 @@ fn every_profile_ducks_behind_a_bench() {
 /// The bench geometry is **genuinely entered**, not merely brushed past (#379).
 ///
 /// The acceptance criterion in its own words: a test that fails if
-/// `cover::run_conceals` regressed. It asserts the payoff rather than the call —
+/// `crouch::run_conceals` regressed. It asserts the payoff rather than the call —
 /// over a batch there are crouched turns where the player stands **inside a
 /// guard's live cone** and is concealed from it anyway, which is exactly what the
 /// run geometry is for and what nothing in the harness could previously produce.
@@ -1223,7 +1223,7 @@ fn the_bot_crouch_walks_along_the_bench() {
 /// the viewer on the far side of the furniture, which puts it at least two cells
 /// away, while a takedown needs it orthogonally adjacent. The two conditions
 /// cannot both hold — proven exhaustively in core's
-/// `cover::an_adjacent_viewer_is_never_concealed_by_a_bench` — so there is no
+/// `crouch::an_adjacent_viewer_is_never_concealed_by_a_bench` — so there is no
 /// crouch strike here to assert legal, and a batch reporting zero of them is the
 /// right answer rather than a gap to close.
 #[test]

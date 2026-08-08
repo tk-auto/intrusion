@@ -56,7 +56,7 @@ pub enum Terrain {
     /// counterplay is behavioural, not optical: a player who **bumps** one crouches
     /// behind its whole run and is concealed from any viewer on the far side of the
     /// furniture ([`provides_cover`](Self::provides_cover); the crouch itself lives
-    /// on the turn loop, its geometry in [`cover`](crate::cover)). Renders `π`
+    /// on the turn loop, its geometry in [`crouch`](crate::crouch)). Renders `π`
     /// (§10.3).
     PartialCover,
     /// A duct entry: the mouth-bearing end of a player-only crawlspace threaded

@@ -59,7 +59,7 @@ use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::control::{transfers_control, Remote};
-use crate::cover;
+use crate::crouch;
 use crate::duct::Duct;
 use crate::exchange::{Choice, Exchange};
 use crate::facility::{Facility, Terrain};
@@ -1402,7 +1402,7 @@ impl State {
     /// pose survives only plain movement — the turn's events carry a
     /// [`Event::Moved`], so an interaction that spends the turn in place (a
     /// door, a grab, a haul-debt payment) still stands the player up — that
-    /// lands still hugging the anchored run ([`cover::run_hugs`]: within one
+    /// lands still hugging the anchored run ([`crouch::run_hugs`]: within one
     /// cell of any of its tables, the diagonal past a bench's end included, so
     /// the walk can round the corner). A sprinting step (§8.3 Run) is judged
     /// where it *ends*, like every other consequence of the two-cell move.
@@ -1411,8 +1411,8 @@ impl State {
             return false;
         };
         events.iter().any(|e| matches!(e, Event::Moved { .. }))
-            && cover::run_hugs(
-                &cover::cover_run(self.layout.facility(), anchor),
+            && crouch::run_hugs(
+                &crouch::cover_run(self.layout.facility(), anchor),
                 self.player,
             )
     }
@@ -1421,8 +1421,9 @@ impl State {
     /// behind (§10.3) — the "is this bump the pose I already hold" question the
     /// interaction ladder asks to keep a held re-bump free (§4.4).
     fn crouch_covers(&self, table: Cell) -> bool {
-        self.crouched_behind
-            .is_some_and(|anchor| cover::cover_run(self.layout.facility(), anchor).contains(&table))
+        self.crouched_behind.is_some_and(|anchor| {
+            crouch::cover_run(self.layout.facility(), anchor).contains(&table)
+        })
     }
 
     /// Phases 2 and 3 (§4.2): recompute sight, run the radio net, then let the

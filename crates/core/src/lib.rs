@@ -63,7 +63,7 @@ mod campaign;
 mod category;
 mod cell;
 mod control;
-mod cover;
+mod crouch;
 mod difficulty;
 mod door;
 mod duct;
