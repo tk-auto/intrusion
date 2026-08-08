@@ -178,7 +178,7 @@ fn the_catalog_matches_the_design_drone() {
 /// pace concealed only from the far side.
 ///
 /// It has **no use budget**: the window is the whole economy. A budget as well would have
-/// been a second number to manage for an ability whose scarcity is already the twelve
+/// been a second number to manage for an ability whose scarcity is already the eighteen
 /// turns it lasts (§8.2 — Pierce Wall's row makes the same argument the other way round).
 #[test]
 fn the_catalog_matches_the_design_cover() {
@@ -187,7 +187,7 @@ fn the_catalog_matches_the_design_cover() {
     assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
     assert_eq!(
         economy.duration(),
-        12,
+        18,
         "[START] — long enough to cross a room at a cell a turn",
     );
     assert_eq!(economy.cooldown(), 35, "[START]");

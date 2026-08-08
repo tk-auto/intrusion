@@ -81,7 +81,7 @@
 //!
 //! The deploy does **not** move the cell out of its §10.5 region, and the release does not
 //! put it back. Generation drops a stamped table from its region because the building has
-//! changed shape; a table somebody puts down for twelve turns has not changed the
+//! changed shape; a table somebody puts down for eighteen turns has not changed the
 //! building. The machinery for exactly this already exists and predates the ability: a
 //! guard's patrol sweep draws its candidates through its own `walkable_ground` flood
 //! precisely because *"the region graph does not know about the
@@ -208,7 +208,7 @@ impl State {
     /// It writes terrain and nothing else. In particular it does **not** duck the player
     /// behind what it just put down: the deploy is a turn spent standing in the open with
     /// a table in front of you, and getting behind it is the bump on the turn after. That
-    /// exposed turn is the ability's entry price (§2.3) and the reason twelve turns of
+    /// exposed turn is the ability's entry price (§2.3) and the reason eighteen turns of
     /// window is worth its lockout.
     ///
     /// **It raises no event of its own** (§11.7). A `π` appearing in the cell the player

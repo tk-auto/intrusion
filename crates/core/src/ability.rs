@@ -1512,7 +1512,7 @@ const REPEL: Ability = Ability {
 // into every over-long straight (§2.3: two tools that buy the same thing on the same
 // ground are one tool and a dead slot).
 //
-// **12 against 35, and the pair is one number.** The window is measured against the
+// **18 against 35, and the pair is one number.** The window is measured against the
 // *room*, not the corridor: what it has to buy is a crossing of the open ground a §10.1/
 // §10.2 facility actually has, at the one cell a turn a push moves you. Too short and it
 // is a crouch with an activation bolted on; too long and it is a portable bench with a
@@ -1520,6 +1520,17 @@ const REPEL: Ability = Ability {
 // shorter than Lockdown's 40 because what this buys is smaller and more local — one
 // crossing, at walking pace, concealed only from the far side — and because a tool for
 // getting across rooms is one a run needs more than once.
+//
+// **18 rather than the 12 it opened at**, retuned on the first play-through. The arithmetic
+// is what settles it: the deploy costs a turn of the window before the piece has covered
+// anybody, so the crossing a run actually gets is `duration − 1` cells. At 12 that is
+// eleven, against a §10.2 board 40 wide where the open ground worth crossing is most of a
+// room plus the approach to it — enough to reach the middle and be standing in it when the
+// window went. Eighteen buys seventeen cells, which crosses the room and leaves something
+// over for the arrival, and it moves the failure from *"it never quite gets there"* to a
+// mistimed press, which is the one the player can learn. The lockout absorbs the extra
+// turns whole: the *decision* the row sells is where to spend the crossing, not whether
+// there is enough of one to spend.
 //
 // **It is [`Behaviour::Coded`]**, the fourth, on Pierce Wall's own grounds rather than as
 // a shortcut: writing terrain is not a primitive the effect vocabulary has (§8.1), and
@@ -1531,22 +1542,22 @@ const REPEL: Ability = Ability {
 // - **A turn spent standing in the open**, which is the entry price and cannot be
 //   avoided: the deploy puts the table down in front of you and does *not* duck you
 //   behind it. You are behind it on the turn after, having bumped it — so the ability
-//   asks you to be exposed for one turn in order to be concealed for the next eleven.
+//   asks you to be exposed for one turn in order to be concealed for the next seventeen.
 // - **A cell a turn, and only forwards.** A push moves the cover directly away from you,
 //   so the crossing you get is the straight line you started on. Cover that has to turn a
 //   corner is cover you stand up from.
 // - **The window ending where it leaves you.** Expiry hands back plain floor and takes the
-//   pose with it (§8.2), so a run that spends the last of its twelve turns halfway across
+//   pose with it (§8.2), so a run that spends the last of its eighteen turns halfway across
 //   a room is a standing figure in the open at the exact moment its concealment
 //   evaporates. There is no grace turn, deliberately: that moment *is* the ability.
 //
 // So a good player declines it whenever the crossing is short enough to walk, whenever
 // the ground already has a bench (§10.1a stamps one into every over-long straight), and
-// whenever twelve turns is not enough to reach the far side — the last being the mistake
+// whenever eighteen turns is not enough to reach the far side — the last being the mistake
 // it invites.
 const COVER: Ability = Ability {
     id: AbilityId::Cover,
-    mode: activated(1, 12, 35),
+    mode: activated(1, 18, 35),
     uses: None,
     behaviour: Behaviour::Coded,
 };

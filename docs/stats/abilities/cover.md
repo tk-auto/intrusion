@@ -1,6 +1,6 @@
 # Cover
 
-**Salvaged tech (§8.3/§10.3/#562)** — 1 turn to press, duration **12**, cooldown **35**,
+**Salvaged tech (§8.3/§10.3/#562)** — 1 turn to press, duration **18**, cooldown **35**,
 `Behaviour::Coded` (§8.1's escape hatch, on Pierce Wall's grounds: writing, moving and
 unwriting terrain is not a primitive the effect vocabulary has). Firing puts a §10.3
 **partial-cover table** in the cell you face — the *same* terrain kind the §10.1a sightline
@@ -27,7 +27,7 @@ it can*.
 duck you behind what it puts down — that is the bump, on the turn after. Then a cell a
 turn, forwards only, so cover that has to turn a corner is cover you stand up from. Then
 the window: expiry hands back plain floor and takes the pose with it, so a run halfway
-across a room on turn twelve is a standing figure in the open at the moment its
+across a room on turn eighteen is a standing figure in the open at the moment its
 concealment evaporates. There is no grace turn; that moment is the ability.
 
 **Deliberately no §10.6 severance check.** A solid that expires on its own clock, can be
@@ -101,7 +101,7 @@ blocks**.
 **So the balance question is open and belongs to a human.** The thing to watch is the one
 §8.3 and appendix 14 both name: the **crouch-walk**. §10.3 already lets a crouched player
 move at full speed while hugging a run, and this ability makes that pose available on bare
-ground for twelve turns at a time. If it plays too strong the levers are the turn it costs,
+ground for eighteen turns at a time. If it plays too strong the levers are the turn it costs,
 contact-vulnerability, the requirement to keep hugging, and this row's own duration —
 **not** re-narrowing the geometry the player has to read.
 
@@ -110,3 +110,10 @@ contact-vulnerability, the requirement to keep hugging, and this row's own durat
 - `#562` — page created with the ability. Records the two cue shapes that were built and
   measured, why neither ships, and what a real cue would need (a crossing mode, and a
   router that plans through a pushable solid). Appendix 63.
+- `#562` — duration **12 → 18** on the first play-through, before merge. The deploy spends
+  a turn of the window before the piece has covered anybody, so the crossing a run gets is
+  `duration − 1` cells: eleven was not enough to cross the open ground a §10.2 board
+  actually has and get out the far side, so the window kept ending mid-room. Seventeen
+  does, and it moves the failure from *"it never quite gets there"* to a mistimed press.
+  The lockout is unchanged — the numbers here are untouched either way, since the bot
+  never presses the key.

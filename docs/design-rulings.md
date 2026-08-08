@@ -5228,12 +5228,12 @@ geometry rather than by decision (§2.2).
 
 And the tactic it enables is one the design has already accepted: a Lockdown seals a
 doorway and a pursuit routes the long way round for eight turns. This is that, over open
-floor, for twelve. Restoring the check would delete the tactic and leave the ability a
+floor, for eighteen. Restoring the check would delete the tactic and leave the ability a
 crouch with an activation bolted onto it.
 
 The corollary, stated here so it is not "fixed" later: **the region graph is not told
 either.** Generation drops a stamped table out of its §10.5 region because the building
-changed shape; a table somebody puts down for twelve turns has not changed the building.
+changed shape; a table somebody puts down for eighteen turns has not changed the building.
 The machinery that copes with a solid the region graph does not know about already exists
 and predates the ability — a guard's patrol sweep filters its candidates through
 `walkable_ground`, added in #477 for exactly the solid usables stamped in after the
