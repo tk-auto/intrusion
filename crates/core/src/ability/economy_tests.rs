@@ -169,6 +169,46 @@ fn the_catalog_matches_the_design_drone() {
     assert_eq!(AbilityId::Drone.script_letter(), 'o');
 }
 
+/// **Cover**'s row (§8.3/§10.3/#562), the fourth coded ability. Every number is [START].
+///
+/// The pair is one decision, so both are pinned with the reasoning attached: **12** turns
+/// is measured against the *room* — the open ground a §10.1/§10.2 facility actually has,
+/// crossed at the one cell a turn a push moves — and **35** is a lockout shorter than
+/// Lockdown's 40 because what this buys is smaller and more local, one crossing at walking
+/// pace concealed only from the far side.
+///
+/// It has **no use budget**: the window is the whole economy. A budget as well would have
+/// been a second number to manage for an ability whose scarcity is already the twelve
+/// turns it lasts (§8.2 — Pierce Wall's row makes the same argument the other way round).
+#[test]
+fn the_catalog_matches_the_design_cover() {
+    let def = AbilityId::Cover.def();
+    let economy = def.economy().expect("Cover is activated");
+    assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
+    assert_eq!(
+        economy.duration(),
+        12,
+        "[START] — long enough to cross a room at a cell a turn",
+    );
+    assert_eq!(economy.cooldown(), 35, "[START]");
+    assert!(
+        economy.cooldown() < AbilityId::Lockdown.def().economy().unwrap().cooldown(),
+        "a local crossing is a smaller thing to buy than a pursuit's detour (§8.3)",
+    );
+    assert_eq!(
+        def.uses_per_level(),
+        None,
+        "the clock is the whole economy here (§8.2)",
+    );
+    assert!(
+        matches!(def.behaviour(), Behaviour::Coded),
+        "writing, moving and unwriting terrain is not a primitive the vocabulary has (§8.1)",
+    );
+    assert_eq!(AbilityId::Cover.name(), "Cover");
+    assert_eq!(AbilityId::Cover.bar_name(), "Cover", "§11.4 fits 5 cells");
+    assert_eq!(AbilityId::Cover.script_letter(), 'h');
+}
+
 /// **Every** activated ability is pinned by one of the catalogue tests — the
 /// guard against a row being added and quietly escaping the value-by-value pin,
 /// which a hand-written list of tuples otherwise invites.
@@ -184,7 +224,7 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
             Behaviour::Coded => {
                 matches!(
                     id,
-                    AbilityId::PierceWall | AbilityId::Drone | AbilityId::Dart
+                    AbilityId::PierceWall | AbilityId::Drone | AbilityId::Dart | AbilityId::Cover
                 )
             }
         };

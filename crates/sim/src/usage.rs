@@ -162,13 +162,25 @@ pub enum Verb {
     /// **not** a cloak, so a share that climbs while captures climb with it is the bot
     /// telling us the field reads as safety it does not provide.
     Repel,
+    /// Put down a piece of **Cover** (§8.3/§10.3/#562) —
+    /// [`Event::AbilityActivated`](intrusion_core::Event::AbilityActivated), like every
+    /// other activation, so it counts the **press** and not the crossing that follows.
+    ///
+    /// That gap is the thing to watch here, and it is why the row is worth reading beside
+    /// [`Crouch`](Verb::Crouch) rather than on its own. The deploy is only the entry
+    /// price: what the ability actually sells is the *pushes* after it, each of which
+    /// lands in the crouch row like any other duck. So a healthy Cover run shows one press
+    /// here and several crouches beside it, and a share that climbs while the crouch row
+    /// stays flat is a bot putting tables down and walking away from them — a press that
+    /// bought a turn and a 35-turn lockout for nothing (§13.3).
+    Cover,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 18] = [
+    pub const ALL: [Verb; 19] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -187,6 +199,7 @@ impl Verb {
         Verb::FalseCall,
         Verb::Dart,
         Verb::Repel,
+        Verb::Cover,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -216,6 +229,7 @@ impl Verb {
             AbilityId::FalseCall => Verb::FalseCall,
             AbilityId::Dart => Verb::Dart,
             AbilityId::Repel => Verb::Repel,
+            AbilityId::Cover => Verb::Cover,
             AbilityId::Vision | AbilityId::Saver | AbilityId::Guide => return None,
         })
     }
@@ -277,6 +291,7 @@ impl Verb {
             Verb::FalseCall => "false_call",
             Verb::Dart => "dart",
             Verb::Repel => "repel",
+            Verb::Cover => "cover",
         }
     }
 
@@ -404,7 +419,8 @@ mod tests {
                 "drone",
                 "false_call",
                 "dart",
-                "repel"
+                "repel",
+                "cover"
             ]
         );
         // Each ability activation lands in its own slot.

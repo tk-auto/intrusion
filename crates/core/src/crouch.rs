@@ -70,11 +70,15 @@ pub(crate) fn run_hugs(run: &[Cell], pos: Cell) -> bool {
 ///   the player reads at a glance: *which side of the bench is he on?* It holds
 ///   however far past the arm's ends the viewer stands, which is the whole point
 ///   — the old per-ray wedge was the part nobody could predict (#377).
+/// - **Across a lone piece** ([`lone_separates`]) — the one-cell run's degenerate
+///   arm (§10.3/#562). A single covering cell has no arm at all, so it borrows the
+///   line **perpendicular to the direction the player is covering from**.
 /// - **Through the furniture** ([`ray_crosses_run`]) — the straight sight line
 ///   between the two cell centres crosses a table of the run, corner grazes
 ///   included. Kept because a half-plane has nothing to say when the player
 ///   stands *in* the arm's own line — rounding the end of a bench, or a lone
-///   table with no arm at all — and looking down the bench must still be blocked.
+///   table caught exactly on the diagonal — and looking down the bench must still
+///   be blocked.
 ///
 /// This is deliberately *not* the vision system's shadowcast: a table does not
 /// block sight (§10.3 — a guard sees straight over it). It is the crouch's own
@@ -83,7 +87,44 @@ pub(crate) fn run_conceals(run: &[Cell], player: Cell, viewer: Cell) -> bool {
     if player == viewer {
         return false;
     }
-    arm_separates(run, player, viewer) || ray_crosses_run(run, player, viewer)
+    arm_separates(run, player, viewer)
+        || lone_separates(run, player, viewer)
+        || ray_crosses_run(run, player, viewer)
+}
+
+/// The **one-cell run's** half-plane (§10.3/#562) — the degenerate case of
+/// [`arm_separates`], and the only geometry the deployable Cover adds to §10.3.
+///
+/// §10.1a stamps benches of two or more cells, so until Cover a single covering cell
+/// could not exist and the rule had nothing to say about one: [`arm_separates`] wants
+/// two adjacent tables to draw a line through, and a lone piece has no second table.
+/// What was left was the ray test alone — the quarter-plane straight across the table
+/// — which is the pre-#377 rule the half-plane replaced everywhere else *because a
+/// player cannot compute a wedge at a glance*. Leaving a lone piece on it would have
+/// made the one cover a player places themselves the one cover they cannot read.
+///
+/// So the lone piece borrows the arm a bench would have had: the line **perpendicular
+/// to the direction the player is covering from**, through the table's own cell. Push
+/// a table east and stand behind it, and you are hidden from everything east of it —
+/// which is exactly the *"push it ahead of you across the room"* play the ability is
+/// for, and it is the same half-plane, read the same way, as the bench beside it.
+///
+/// **Which perpendicular** is decided by the *dominant* axis of the offset from player
+/// to table, so it survives the crouch-walk: flush behind the table the answer is the
+/// obvious one, and a step along it keeps the same line while the offset stays
+/// dominant on that axis. On the **exact diagonal** — the corner hug, where neither
+/// axis dominates — there is no honest answer, so this says nothing and the ray test
+/// grants the quarter-plane it always did.
+///
+/// Integer arithmetic and a strict comparison, like everything else here (§12.4).
+fn lone_separates(run: &[Cell], player: Cell, viewer: Cell) -> bool {
+    let [table] = run else {
+        return false;
+    };
+    let dx = player.x.abs_diff(table.x);
+    let dy = player.y.abs_diff(table.y);
+    (dx > dy && opposite_sides(player.x, viewer.x, table.x))
+        || (dy > dx && opposite_sides(player.y, viewer.y, table.y))
 }
 
 /// Whether any straight arm of the run has the player and the viewer strictly on
@@ -95,8 +136,8 @@ pub(crate) fn run_conceals(run: &[Cell], player: Cell, viewer: Cell) -> bool {
 /// which keeps [`cover_run`]'s flood-fill definition of a run intact rather than
 /// asking a bent run for a single axis it does not have.
 ///
-/// A lone table has no arm and so hides nobody this way; it falls back to the ray
-/// test, which is exactly the quarter-plane it always granted.
+/// A lone table has no arm and so hides nobody *this* way; its degenerate arm is
+/// [`lone_separates`]'s (§10.3/#562), and past that it falls back to the ray test.
 fn arm_separates(run: &[Cell], player: Cell, viewer: Cell) -> bool {
     run.iter().any(|&table| {
         (has_table_south_of(run, table) && opposite_sides(player.x, viewer.x, table.x))
@@ -255,6 +296,81 @@ mod tests {
         assert!(!run_conceals(&run, player, Cell::new(5, 2)));
         assert!(!run_conceals(&run, player, Cell::new(4, 2)));
         assert!(!run_conceals(&run, player, Cell::new(2, 4)));
+    }
+
+    /// **The one-cell run** (§10.3/#562), which is the geometry the deployable Cover
+    /// adds: a lone piece defines the line **perpendicular to the direction you are
+    /// covering from**, so it conceals across a half-plane exactly as a bench arm does
+    /// — the whole point of pushing one ahead of you across a room.
+    #[test]
+    fn a_lone_piece_conceals_across_its_perpendicular() {
+        let run = vec![Cell::new(5, 4)];
+        let player = Cell::new(4, 4); // flush behind it, covering eastward
+                                      // Everything east of the line x = 5, however far off the table's own row —
+                                      // which is the half-plane the pre-#377 wedge could not reach.
+        for viewer in [
+            Cell::new(6, 4),
+            Cell::new(9, 0),
+            Cell::new(6, 11),
+            Cell::new(11, 11),
+        ] {
+            assert!(
+                run_conceals(&run, player, viewer),
+                "{viewer:?} is across the piece",
+            );
+            assert!(
+                !arm_separates(&run, player, viewer),
+                "{viewer:?} is not covered by an *arm* — a lone piece has none",
+            );
+        }
+        // …and nothing on the player's own side of it, however far off.
+        for viewer in [Cell::new(2, 4), Cell::new(5, 0), Cell::new(4, 11)] {
+            assert!(
+                !run_conceals(&run, player, viewer),
+                "{viewer:?} is on my side of the piece",
+            );
+        }
+        // The other axis, to prove the line follows the *player*, not the grid: the
+        // same piece covered from the north hides what is south of it and nothing east.
+        let above = Cell::new(5, 3);
+        assert!(run_conceals(&run, above, Cell::new(9, 7)));
+        assert!(!run_conceals(&run, above, Cell::new(9, 3)));
+    }
+
+    /// The corner hug is the one stance a lone piece has no honest line for
+    /// (§10.3/#562): on the **exact diagonal** neither axis dominates, so the
+    /// half-plane says nothing and the ray test grants the quarter-plane it always
+    /// did. Pinned because the silence is a decision, not a gap.
+    #[test]
+    fn a_lone_piece_hugged_on_the_diagonal_falls_back_to_the_ray() {
+        let run = vec![Cell::new(5, 4)];
+        let corner = Cell::new(4, 3); // diagonally off it: dx == dy
+        assert!(run_hugs(&run, corner), "the pose is held here");
+        // No half-plane at all, either way round the diagonal.
+        let across = Cell::new(6, 5);
+        assert!(!lone_separates(&run, corner, across));
+        // What is left is the ray: straight across the piece is covered…
+        assert!(run_conceals(&run, corner, across), "the line crosses it");
+        // …and a viewer the quarter-plane never reached is still seen.
+        assert!(!run_conceals(&run, corner, Cell::new(9, 0)));
+    }
+
+    /// A lone piece **joined to a bench is not a lone piece** (§10.3/#562): the flood
+    /// gathers one run, the arm rule owns it, and the degenerate line switches itself
+    /// off. This is what "cover placed touching furniture extends that run" means in
+    /// the geometry rather than only in the terrain.
+    #[test]
+    fn a_piece_touching_a_bench_conceals_as_the_bench_does() {
+        let joined = vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)];
+        let player = Cell::new(4, 4);
+        let along = Cell::new(4, 0); // up the player's own column, past the run's end
+        assert!(
+            !lone_separates(&joined, player, along),
+            "a three-cell run has arms, so the degenerate rule is silent",
+        );
+        // And the arm's own half-plane is what answers, exactly as it did before.
+        assert!(run_conceals(&joined, player, Cell::new(8, 9)));
+        assert!(!run_conceals(&joined, player, along));
     }
 
     /// The ticket's regression: a viewer the anchored table alone would not

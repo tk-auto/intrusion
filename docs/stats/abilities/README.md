@@ -6,8 +6,11 @@ when the bot was actually given it. The set is exhaustive over `AbilityId` on
 purpose — the same move the cue seam makes in code (#366), so a missing file means
 "not an ability", never "nobody got round to it". A verb with no cue still gets a
 file; it says so, and says why — today that is the three passives (Vision, the Saver and
-the Guide) and the Drone, whose press exists but whose *control mode* the bot does not
-have (#273).
+the Guide), the Drone, whose press exists but whose *control mode* the bot does not have
+(#273), and Cover, whose press the bot cannot **aim**: it is aimed by facing (§8.4) and the
+bot faces the way it last stepped, so a cue written to the §8.3 row fired zero times over
+120 seeds on every temperament (#562, appendix 63). That page is the first to record the
+cue that was built and dropped rather than only the absence.
 
 There is a fourth kind of gap, and the Dart is the first page to carry it: a verb the bot
 *does* fire, but only ever in the half of its behaviour that succeeds. Its cue will not take
@@ -121,3 +124,4 @@ to make.
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
 | Saver | **none** — passive, and deliberately uncued | [`saver.md`](saver.md) |
 | Drone | **none** — a control mode the bot does not have | [`drone.md`](drone.md) |
+| Cover | **none** — a facing-aimed deployable the bot cannot aim | [`cover.md`](cover.md) |

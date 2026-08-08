@@ -170,7 +170,11 @@ pub const fn remote_kind(id: AbilityId) -> Option<RemoteKind> {
         // The field is ground, not a machine (§8.3/#554): it is laid on the floor and left
         // there, and there is nothing to drive — the player's keys stay their own for its
         // whole window.
-        | AbilityId::Repel => None,
+        | AbilityId::Repel
+        // A table is furniture, not a machine (§8.3/§10.3/#562): it is put on the floor
+        // and shoved along by hand, so there is nothing to drive and the player's keys
+        // stay their own for its whole window.
+        | AbilityId::Cover => None,
     }
 }
 

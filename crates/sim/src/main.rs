@@ -296,7 +296,7 @@ fn parse_args(argv: &[String]) -> Result<Command, String> {
         }
         (false, script) => Policy::Scripted(script.unwrap_or_default()),
     };
-    Ok(Command::Batch(Args {
+    Ok(Command::Batch(Box::new(Args {
         runs,
         // A token names a *run*, seed included, so it stands in as the first seed —
         // which is what makes `--config <token> --runs 1` replay the run it names.
@@ -306,14 +306,19 @@ fn parse_args(argv: &[String]) -> Result<Command, String> {
         config: flags.resolve()?,
         policy,
         emit_replay,
-    }))
+    })))
 }
 
 /// What the command line asked for: the metrics batch (`--emit-replay` included, a
 /// variation on the same run), or the standalone link inspector.
 #[derive(Debug)]
 enum Command {
-    Batch(Args),
+    /// **Boxed**, because [`Args`] carries a whole [`Profile`] and a profile carries a
+    /// per-ability cue floor (§13.2/#346) — so the batch arm grows by a byte with every
+    /// row added to the §8.3 catalogue, while the inspector's arm stays a `String`. The
+    /// indirection keeps the enum the size of the smaller arm rather than of the larger
+    /// one, and stops a new ability being the thing that trips `large_enum_variant`.
+    Batch(Box<Args>),
     /// `--inspect LINK` (#411) — narrate a pasted replay. It carries the raw link
     /// rather than the parsed pair so the parse error reaches the user through the
     /// one reporting path in [`inspect_link`].
@@ -424,7 +429,7 @@ fn emit_replay(args: &Args) -> ExitCode {
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
-        Ok(Command::Batch(args)) => args,
+        Ok(Command::Batch(args)) => *args,
         Ok(Command::Inspect(link)) => return inspect_link(&link),
         Err(message) => {
             eprintln!("{message}");
@@ -475,7 +480,7 @@ mod tests {
     /// batch, so the mode is unwrapped here rather than in each.
     fn args(argv: &[&str]) -> Result<Args, String> {
         match command(argv) {
-            Ok(Command::Batch(args)) => Ok(args),
+            Ok(Command::Batch(args)) => Ok(*args),
             Ok(Command::Inspect(link)) => panic!("expected a batch, got --inspect {link}"),
             Err(error) => Err(error),
         }

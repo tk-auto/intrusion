@@ -383,6 +383,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#554): a disc stamped on the cell you fired from that no
     /// guard may walk into for the window — a wall you can put down in the open.
     Repel,
+    /// Salvaged tech (§8.3/#562): a §10.3 partial-cover table put down in the cell you
+    /// face, which a bump **pushes** — cover you can walk across an open room.
+    Cover,
 }
 
 impl AbilityId {
@@ -391,7 +394,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 15] = [
+    pub const ALL: [AbilityId; 16] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -407,6 +410,7 @@ impl AbilityId {
         AbilityId::Guide,
         AbilityId::Dart,
         AbilityId::Repel,
+        AbilityId::Cover,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -425,7 +429,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 14] = [
+    pub const TECH: [AbilityId; 15] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -440,6 +444,7 @@ impl AbilityId {
         AbilityId::Guide,
         AbilityId::Dart,
         AbilityId::Repel,
+        AbilityId::Cover,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -521,6 +526,12 @@ impl AbilityId {
             // *screen*, a *field*, a *barrier* — because every one of those is a word for
             // something you stand behind, and this one hides nothing (§8.3).
             AbilityId::Repel => "Repel",
+            // One word, the world's own (§11.8): §10.3 already calls a table *partial
+            // cover*, so the thing this puts down is named after what it **is** rather
+            // than after the verb that deploys it. That is the §11.8 good case — a name
+            // the player has already met on the board — and it is also why the ability
+            // needs no vocabulary row of its own.
+            AbilityId::Cover => "Cover",
         }
     }
 
@@ -552,6 +563,7 @@ impl AbilityId {
             AbilityId::Guide => "Guide",
             AbilityId::Dart => "Dart",
             AbilityId::Repel => "Repel",
+            AbilityId::Cover => "Cover",
         }
     }
 
@@ -641,6 +653,14 @@ impl AbilityId {
                 "Stamps a disc where you fire it that no guard will walk into. It \
                  stays put while you do not. Hides nothing."
             }
+            // It states the **object and the verb that is new**, in that order. What it
+            // puts down is a table, which the player already knows how to read (§10.3);
+            // the one thing they cannot know is that this one *moves* when bumped, so
+            // that is the second sentence. The third is the cost the window carries.
+            AbilityId::Cover => {
+                "Puts a table in the cell you face. Bump it to shove it a cell and \
+                 step in behind, crouched. It vanishes when the window ends."
+            }
         }
     }
 
@@ -679,6 +699,7 @@ impl AbilityId {
             AbilityId::Guide => &GUIDE,
             AbilityId::Dart => &DART,
             AbilityId::Repel => &REPEL,
+            AbilityId::Cover => &COVER,
         }
     }
 
@@ -700,6 +721,7 @@ impl AbilityId {
             AbilityId::Guide => 12,
             AbilityId::Dart => 13,
             AbilityId::Repel => 14,
+            AbilityId::Cover => 15,
         }
     }
 }
@@ -1481,6 +1503,52 @@ const REPEL: Ability = Ability {
     mode: activated(1, 8, 40),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::Repel]),
+};
+
+// Cover [START] (§8.3/§10.3/#562): put a §10.3 partial-cover table down in the cell you
+// face, and push it ahead of you one cell a turn. The §10.1a bench is cover the building
+// gave you, fixed where the generator put it; this is cover you *carry* to the crossing
+// that has none — which is the whole reason it exists beside a mechanic already stamped
+// into every over-long straight (§2.3: two tools that buy the same thing on the same
+// ground are one tool and a dead slot).
+//
+// **12 against 35, and the pair is one number.** The window is measured against the
+// *room*, not the corridor: what it has to buy is a crossing of the open ground a §10.1/
+// §10.2 facility actually has, at the one cell a turn a push moves you. Too short and it
+// is a crouch with an activation bolted on; too long and it is a portable bench with a
+// cooldown, which is the §2.2/§7.2 permanence the window exists to forbid. The lockout is
+// shorter than Lockdown's 40 because what this buys is smaller and more local — one
+// crossing, at walking pace, concealed only from the far side — and because a tool for
+// getting across rooms is one a run needs more than once.
+//
+// **It is [`Behaviour::Coded`]**, the fourth, on Pierce Wall's own grounds rather than as
+// a shortcut: writing terrain is not a primitive the effect vocabulary has (§8.1), and
+// this one also *moves* the cell it wrote and takes it back at the end of the window.
+// Bending the data model around a one-off is exactly the DSL-rot §8.1 warns against.
+//
+// **What it costs, and when a good player declines it** (§2.3). Three things:
+//
+// - **A turn spent standing in the open**, which is the entry price and cannot be
+//   avoided: the deploy puts the table down in front of you and does *not* duck you
+//   behind it. You are behind it on the turn after, having bumped it — so the ability
+//   asks you to be exposed for one turn in order to be concealed for the next eleven.
+// - **A cell a turn, and only forwards.** A push moves the cover directly away from you,
+//   so the crossing you get is the straight line you started on. Cover that has to turn a
+//   corner is cover you stand up from.
+// - **The window ending where it leaves you.** Expiry hands back plain floor and takes the
+//   pose with it (§8.2), so a run that spends the last of its twelve turns halfway across
+//   a room is a standing figure in the open at the exact moment its concealment
+//   evaporates. There is no grace turn, deliberately: that moment *is* the ability.
+//
+// So a good player declines it whenever the crossing is short enough to walk, whenever
+// the ground already has a bench (§10.1a stamps one into every over-long straight), and
+// whenever twelve turns is not enough to reach the far side — the last being the mistake
+// it invites.
+const COVER: Ability = Ability {
+    id: AbilityId::Cover,
+    mode: activated(1, 12, 35),
+    uses: None,
+    behaviour: Behaviour::Coded,
 };
 
 /// How many darts one facility gives you — **[START]** (§7.2/§8.2/§8.3/#239).

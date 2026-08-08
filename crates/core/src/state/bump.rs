@@ -132,6 +132,17 @@ pub(super) enum BumpKind {
     /// that moves them to the adjacent path cell. Not an interaction offered on the
     /// usable line — it is movement, like [`BumpKind::Move`].
     DuctCrawl,
+    /// **The run's own deployed Cover** (§8.3/§10.3/#562), with somewhere to shove it:
+    /// the bump pushes the table one cell directly away, steps the player into the cell
+    /// it vacated, and leaves them crouched behind it — one turn, one verb.
+    ///
+    /// It outranks both crouch arms deliberately, held pose included: pushing the piece
+    /// you are *already* behind is the ability's whole play (that is how cover walks
+    /// across a room), so a re-bump on it must never fall through to the free no-op a
+    /// held bench's does. With nowhere to shove it the classification is the plain
+    /// [`Crouch`](BumpKind::Crouch) — *crouch always, push when it can* — so the bump
+    /// keeps one meaning and only the extra cell is conditional.
+    PushCover(CoverPush),
     /// A partial-cover table not already crouched behind (§10.3).
     Crouch,
     /// The table already crouched behind — a free bump.
@@ -174,6 +185,11 @@ impl BumpKind {
             BumpKind::EnterDuct => Some(Affordance::EnterDuct),
             BumpKind::EnterExitDuct => Some(Affordance::EnterExit),
             BumpKind::Crouch => Some(Affordance::Crouch),
+            // The one row that tells cover and a table apart on approach (§11.7/#562).
+            // They draw the same glyph — this *is* a table — so the usable line is the
+            // channel that carries the difference, and it carries it by naming what the
+            // bump will actually do.
+            BumpKind::PushCover(_) => Some(Affordance::PushCover),
             // A crawl is movement, not an offered interaction (§10.7) — like a plain
             // Move it shows nothing on the usable line.
             BumpKind::Guard { aware: true }
@@ -221,7 +237,10 @@ impl State {
         // not movement and stay full price; free bumps stay free.
         if self.dragging.is_some()
             && self.drag_debt
-            && matches!(kind, BumpKind::Move | BumpKind::Hide | BumpKind::AutoDoor)
+            && matches!(
+                kind,
+                BumpKind::Move | BumpKind::Hide | BumpKind::AutoDoor | BumpKind::PushCover(_)
+            )
         {
             self.drag_debt = false;
             return true;
@@ -527,6 +546,14 @@ impl State {
                 self.player = target;
                 self.facing = self.duct_entry_facing(target).unwrap_or(dir);
                 events.push(Event::DuctCrawled { to: target });
+                true
+            }
+            // **The run's own cover** (§8.3/§10.3/#562): the shove, the step in behind,
+            // and the crouch, in one turn. The half-speed drag above catches it with the
+            // plain moves, because it *is* a move — a push that hauls a body along pays
+            // the same debt a step does (§8.3).
+            BumpKind::PushCover(push) => {
+                self.push_cover(push, dir, events);
                 true
             }
             // A table: bump it to crouch behind it (§4.3, §10.3). Ducking is a
@@ -856,6 +883,17 @@ impl State {
                 return BumpKind::AutoDoor;
             }
             return BumpKind::Door { action };
+        }
+        // **The run's own cover, before the terrain match** (§8.3/§10.3/#562), so a shove
+        // outranks both crouch arms — including the held pose, which is the one that
+        // matters: walking the piece across a room is a bump on the very table you are
+        // already behind, and that must not fall through to a held bench's free no-op.
+        // A shove with nowhere to go answers `None` and drops into the plain §10.3 arms
+        // below, which is *crouch always, push when it can*.
+        if let Some(dir) = Direction::between(self.player, target) {
+            if let Some(push) = self.cover_push(dir) {
+                return BumpKind::PushCover(push);
+            }
         }
         match self.layout.facility().terrain(target) {
             Some(Terrain::Hideout) => {

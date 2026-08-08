@@ -5140,3 +5140,120 @@ where there is no door and is the tool for a built-up wing; Repel works precisel
 Lockdown is inert. §2.3's warning is that if one of them is always the better press, one of
 them is dead weight — and the answer then is `REPEL_RADIUS`, not the clocks, because the
 radius is the only knob that changes *which rooms* each is for.
+
+## Appendix 63 — Cover: the one-cell run, the severance check that is not there, and a cue the bot cannot aim
+
+**Ticket:** #562. **Sections:** §8.3, §10.3, §10.6, §13.2/§13.3.
+
+Cover is a §10.3 partial-cover table you put down in the cell you face and then shove
+ahead of you, one cell a turn, crouched behind it. Most of it is a small ability: a
+terrain write, a bump arm, and a teardown. Three decisions cost more than that, and this
+is where they are recorded.
+
+### 1. What a one-cell run conceals
+
+§10.3's concealment is built on **arms**: each straight arm of a run defines a line, and a
+viewer across that line cannot see you (appendix 14 has the two narrowings and the
+widening that got it there). §10.1a guarantees a bench is never a lone cell, so until this
+ability a single covering cell could not exist — and `arm_separates` needs two adjacent
+tables to draw a line through, so a lone piece fell through to the **ray test** alone: the
+quarter-plane straight across the cell.
+
+That would have been the worst possible answer here. #377's whole finding was that the
+per-ray wedge is *unreadable* — "a turn spent on protection you cannot predict is a turn
+not spent" — and leaving a lone piece on it makes the one piece of cover a player places
+themselves the one piece they cannot read at a glance, which is precisely backwards.
+
+So the lone piece takes the **degenerate arm**: the line **perpendicular to the direction
+the player is covering from**, through the piece's own cell. Push it east, stand behind
+it, and you are hidden from everything east of it — the same half-plane, read the same
+way, as the bench beside it.
+
+Which perpendicular is settled by the **dominant axis** of the offset from player to
+table, rather than by remembering the direction of the bump. That matters because the
+crouch-walk moves the player along the furniture (§10.3) and the anchor stays put: a rule
+that stored the bump direction would keep claiming a line the player had walked off. On
+the **exact diagonal** — the corner hug, where neither axis dominates — there is no honest
+answer, so the half-plane says nothing and the ray test grants the quarter-plane it always
+did. Integer arithmetic throughout, so a replay reads the same on every machine (§12.4).
+
+### 2. Why there is no §10.6 severance check
+
+An earlier draft of the ticket applied §10.6's severance check to the deploy: refuse a
+placement that would cut the facility in two. It is deliberately absent, and the absence
+is what lets the ability's second use — plugging a corridor so a patrol takes the long way
+round — exist at all.
+
+**§10.6 is a guarantee about *generation*.** It exists so a facility is never *born*
+unsolvable. Nothing about a player-placed solid is generation, and three properties make
+it structurally incapable of producing an unsolvable facility:
+
+- it expires on its own clock, and the window is the ability's own duration — there is no
+  second timer to outlive the first;
+- it can be **pushed**, so the owner is never refused by it;
+- it can be **dismissed for free** at any time (§4.4).
+
+That third one is how Cover answers the question Lockdown answers with *"you are never
+refused — a sealed door bumps open for you exactly as any closed door does"*. Different
+mechanism, same end: an ability that could box its own owner in is one that ends runs by
+geometry rather than by decision (§2.2).
+
+And the tactic it enables is one the design has already accepted: a Lockdown seals a
+doorway and a pursuit routes the long way round for eight turns. This is that, over open
+floor, for twelve. Restoring the check would delete the tactic and leave the ability a
+crouch with an activation bolted onto it.
+
+The corollary, stated here so it is not "fixed" later: **the region graph is not told
+either.** Generation drops a stamped table out of its §10.5 region because the building
+changed shape; a table somebody puts down for twelve turns has not changed the building.
+The machinery that copes with a solid the region graph does not know about already exists
+and predates the ability — a guard's patrol sweep filters its candidates through
+`walkable_ground`, added in #477 for exactly the solid usables stamped in after the
+partition. Leaving the graph alone is also what makes *"the §7.5 partition is not recut"*
+true by construction rather than by care: beats are cut when the guard set changes
+(§7.3/#374) and at no other time.
+
+### 3. The sim bot has no cue, and the reason is aim rather than value
+
+The ticket asks for a `crates/sim` cue. One was written, to the §8.3 row, and it does not
+ship. What it measured is worth keeping, because the next person to reach for it will hit
+the same wall.
+
+**The bot cannot aim a facing-aimed deployable.** §8.4 aims this ability at the cell you
+face, and the bot faces the way it last stepped — there is no turn-in-place (§5). Its
+router prices watched cells out and holds rather than stepping into a cone, so by the time
+a patrol is close enough that taking cover is the plan, every recent step has been *away*
+from that cone and the faced cell is on the wrong side of the bot.
+
+Two shapes were built and measured:
+
+- **Gated on core's own geometry** — *would ducking behind the piece this press puts down
+  hide me from every guard I perceive?* (`State::crouch_would_conceal`, the same function
+  the crouch ladder and the rule itself read). **Zero presses over 120 seeds on each of
+  `balanced`, `cautious` and `aggressive`.** Relaxing the gate from the push's line to the
+  plain crouch's — one cell more generous — changed nothing.
+- **Ungated**, keeping only *TakeCover, no cupboard, no bench at the elbow, a patrol
+  closing*: **twelve presses in forty seeds and not one duck behind what it built.** The
+  crouch row did not move off its bare-bot value. That is a turn and a 35-turn lockout
+  spent on furniture the bot then walked away from — a histogram reading *used* while
+  measuring nothing, which is #347's failure mode and the exact tell `Verb::Cover`'s own
+  doc names.
+
+The other half of the ability is served worse still. What it *sells* is a crossing walked
+behind the piece, one push a turn — and the bot's route is a Dijkstra over cells the
+player can walk **through**, which a table is not, so the router plans around the bot's own
+cover rather than through it. Teaching it otherwise means teaching the field that a
+pushable solid is passable when and only when the cell beyond is free, and then following
+that route as a mode. That is a second policy, exactly as the Drone's flight plan is
+(#273), and it is its own ticket for the same reason.
+
+So the shipped answer is the Drone's: **no cue, and a zero in the histogram that says
+which kind of zero it is** — in `Moment::bid`'s exhaustive arm and on
+`docs/stats/abilities/cover.md`. A cue that provably never fires is worse than none,
+because it claims a behaviour the bot does not have.
+
+What the bot *did* gain is smaller and worth having anyway: its crouch ladder now asks
+`State::cover_push` instead of assuming the furniture stays put. On the run's own cover a
+bump moves both the player and the table, so a bot predicting a stationary duck would have
+been planning against geometry the press does not produce — and a scripted run, or the
+policy that grows the mode later, meets a bot that is not blind to the mechanic.

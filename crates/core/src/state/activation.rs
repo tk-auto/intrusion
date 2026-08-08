@@ -94,6 +94,16 @@ pub(super) enum Aimed {
     /// and costs its turn and its lockout either way (§8.3's False Call reasoning, and
     /// #554 asks for it by name).
     Repel(EffectArea),
+    /// The cell a **Cover** would put its table in (§8.3/§10.3/#562) — the faced cell,
+    /// already known to be plain, empty floor.
+    ///
+    /// Aimed by facing, which is the Decoy's way (§8.4) and the same one for the same
+    /// reason: what you place goes where you are looking, and there is no candidate list
+    /// anywhere to snap to (appendix 1). Unlike the Decoy's, the cell it names is
+    /// [`cover_ground`](State::cover_ground)'s answer rather than merely a walkable one —
+    /// a table may only be written over plain floor, so the precondition is narrower than
+    /// "somewhere an intruder could stand".
+    Cover(Cell),
     /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
     /// the player's own, because you let it go from your hands.
     ///
@@ -114,6 +124,9 @@ pub(super) enum Refused {
     /// The faced cell could not hold an intruder (§8.3) — a wall, or somebody
     /// already standing there.
     NoDecoyCell,
+    /// The faced cell could not take a table (§8.3/§10.3/#562) — anything that is not
+    /// plain, empty floor.
+    NoCoverCell,
     /// Pierce Wall's geometry or supply says no (§8.3/#303), in its own words.
     Bore(BoreRefusal),
     /// No door within the lockdown box (§8.3/#242) — a window bought to seal
@@ -144,6 +157,10 @@ impl Refused {
     pub(super) fn event(self) -> Option<Event> {
         match self {
             Refused::NoDecoyCell => None,
+            // Silent on the decoy's grounds exactly, and the two refusals are the same
+            // shape: both aim at the faced cell, and the faced cell is drawn on the
+            // board. A player who presses at a wall has been shown the wall.
+            Refused::NoCoverCell => None,
             // Silent for the decoy's reason exactly: the rule is already on the board.
             // The remote is drawn under its own mark and every other bar entry is
             // greyed (§11.4), so a player who presses one has been shown why — and a
@@ -192,6 +209,15 @@ impl State {
             } else {
                 Err(Refused::NoRoomToPilot)
             };
+        }
+        // **Cover** is aimed like the decoy and refused like it (§8.3/§10.3/#562): the
+        // faced cell either takes a table or it does not, and the ladder is where that is
+        // answered once — for the press, and for the bar entry it greys (§11.4).
+        if id == AbilityId::Cover {
+            return self
+                .cover_deploy_cell()
+                .map(Aimed::Cover)
+                .ok_or(Refused::NoCoverCell);
         }
         if declares(id, Effect::SpawnDecoy) {
             return self

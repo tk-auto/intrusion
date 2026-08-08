@@ -87,6 +87,7 @@ mod activation;
 mod bore;
 mod bump;
 mod control;
+mod cover;
 mod dart;
 mod doors;
 mod effects;
@@ -101,6 +102,7 @@ mod tuning;
 mod view;
 
 pub use bore::BoreRefusal;
+pub use cover::CoverPush;
 pub use dart::DartShot;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
@@ -429,6 +431,20 @@ pub struct State {
     /// — so *"every cell is released"* is a property of the shape rather than of a sweep
     /// that could miss one.
     repel: Option<EffectArea>,
+    /// The cell the run's deployed **Cover** is standing in (§8.3/§10.3/#562), or `None`
+    /// — the one table this ability owns.
+    ///
+    /// A **bookmark, not a model**: the cover itself is ordinary
+    /// [`Terrain::PartialCover`] in the one spatial model (§10.5), read from the grid by
+    /// every §10.3 consumer like any other table, and what this remembers is only *which*
+    /// table a bump may shove and the window must hand back. One at a time — the ability
+    /// is activated (§8.2) and its duration sits well inside its lockout, so a second
+    /// deploy cannot overlap the first.
+    ///
+    /// Dropped whole when the window ends either way (§8.2 expiry, §4.4 toggle-off) from
+    /// the one teardown list ([`unwind_effect`](Self::unwind_effect)), so *"nothing is
+    /// left behind"* is a property of the shape rather than of a sweep that could miss it.
+    cover: Option<Cell>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -639,6 +655,7 @@ impl State {
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
             repel: None,
+            cover: None,
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -1257,6 +1274,7 @@ impl State {
                         Aimed::Call(reach) => self.fire_false_call(reach, events),
                         Aimed::Dart(shot) => self.fire_dart(&shot, events),
                         Aimed::Repel(field) => self.fire_repel(field, events),
+                        Aimed::Cover(cell) => self.deploy_cover(cell),
                         Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }
@@ -1392,6 +1410,12 @@ impl State {
         // (§8.2).
         if declares(id, Effect::Repel) {
             self.release_repel();
+        }
+        // The table is the window (§8.3/§10.3/#562), the seals' rule read over terrain:
+        // ending it early takes the cover away at once — and the pose with it — and
+        // refunds nothing, the full lockout still runs (§8.2).
+        if id == AbilityId::Cover {
+            self.release_cover();
         }
         // The effect is gone, so its marks go with it (#308/#338) — an early end
         // leaves no residue to fade over nothing.

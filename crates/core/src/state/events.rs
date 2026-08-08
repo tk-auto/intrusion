@@ -797,6 +797,17 @@ pub enum Affordance {
     EnterExit,
     /// A table: bump to crouch behind it (§10.3).
     Crouch,
+    /// **The run's own deployed Cover** (§8.3/§10.3/#562): bump to shove it a cell and
+    /// step in behind it, crouched.
+    ///
+    /// Its own row rather than [`Crouch`](Affordance::Crouch)'s, and it is the whole of
+    /// how the two are told apart. Deployed cover *is* a §10.3 table — same terrain, same
+    /// `π`, same blocking — so nothing on the board distinguishes it, and the one row
+    /// whose job is to say what a bump does would otherwise read identically for a bump
+    /// that moves you and one that does not (§2.3: the line may never promise the wrong
+    /// thing). Shown only while the shove has somewhere to go; blocked, the same cell
+    /// truthfully reads `table: crouch`, because that is what the bump then does.
+    PushCover,
     /// The exit, with the intel gate met (§10.2): bump to win (§4.5).
     Leave,
     /// The exit while no intel is yet in hand: bumping it will refuse (§4.5).
@@ -810,7 +821,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 19] = [
+    pub(crate) const ALL: [Affordance; 20] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -828,6 +839,7 @@ impl Affordance {
         Affordance::EnterDuct,
         Affordance::EnterExit,
         Affordance::Crouch,
+        Affordance::PushCover,
         Affordance::Leave,
         Affordance::ExitRefused,
     ];
@@ -856,6 +868,11 @@ impl Affordance {
             Affordance::EnterDuct => "duct: enter",
             Affordance::EnterExit => "exit: enter",
             Affordance::Crouch => "table: crouch",
+            // **`cover`, not `table`**, and the noun is doing the work: the row's two
+            // halves are what the thing is and what the bump does, so a player who reads
+            // `cover: push` on one `π` and `table: crouch` on the next has been told both
+            // that this piece is theirs and that bumping it moves it (§11.7/§11.8).
+            Affordance::PushCover => "cover: push",
             Affordance::Leave => "exit: leave",
             Affordance::ExitRefused => "exit: needs the intel",
         }
@@ -886,7 +903,12 @@ impl Affordance {
             | Affordance::Hide
             | Affordance::StoreBody
             | Affordance::EnterDuct
-            | Affordance::Crouch => Category::System,
+            | Affordance::Crouch
+            // Furniture on the System row like every other table (§11.2) — the fact that
+            // this one is yours is said by the words, not by a colour: `Owned` on the
+            // board already means *this run of furniture is concealing you right now*
+            // (§11.3), and one channel cannot also mean *you put this here*.
+            | Affordance::PushCover => Category::System,
             // The exit is the goal at both ends of the run — climbing into your own
             // tunnel is Interest, not the System colour a found duct's mouth wears
             // (§4.5/#466): what it is *for* is leaving.
@@ -935,6 +957,7 @@ mod affordance_tests {
                 | Affordance::EnterDuct
                 | Affordance::EnterExit
                 | Affordance::Crouch
+                | Affordance::PushCover
                 | Affordance::Leave
                 | Affordance::ExitRefused => true,
             };
