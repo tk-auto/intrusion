@@ -4,7 +4,7 @@
 //! spent (§4.4/§12.1).
 
 use super::*;
-use crate::campaign::{CampaignStage, ALERTS_ALL, ALERTS_ONE};
+use crate::campaign::{CampaignStage, ALERTS_ALL, ALERTS_ONE, GATE_RULES_MAX};
 use crate::render::GlyphCell;
 use crate::verdict::{Ending, RunStats, Verdict};
 
@@ -67,8 +67,8 @@ fn the_map_draws_the_country_the_run_is_in() {
         vec![
             "            THE FACILITY MAP            ",
             "    Left unnoticed — Depot off guard    ",
-            "      speed ★ · stealth ★ · haul ★      ",
-            "         Intel — nothing banked         ",
+            "         ★★★☆☆☆|☆☆☆☆|☆☆☆☆|☆☆☆☆          ",
+            "     3 stars => difficulty level 3      ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
@@ -248,60 +248,6 @@ fn alert_row(run: &Campaign) -> String {
         .to_string()
 }
 
-/// The wallet line as the player reads it.
-fn wallet_row(run: &Campaign) -> String {
-    text(run, MapUi::default())[WALLET_ROW as usize]
-        .trim()
-        .to_string()
-}
-
-/// **The map is the hub, so it says what there is to spend** (§2.2/§14 v3/#211).
-///
-/// Unconditional, both wordings, in the currency's own word (§11.8) — a run that has
-/// banked nothing says so rather than showing no line, because a missing readout reads as
-/// a broken one.
-#[test]
-fn the_map_says_what_the_run_has_to_spend() {
-    let mut run = Campaign::new(8371);
-    assert_eq!(wallet_row(&run), "Intel — nothing banked");
-
-    run.enter();
-    run.complete(&Verdict {
-        ending: Ending::Escaped,
-        stats: RunStats {
-            intel: 7,
-            ..RunStats::default()
-        },
-    });
-    assert_eq!(run.intel(), 7);
-    assert_eq!(wallet_row(&run), "Intel 7");
-
-    // And it moves when the hub takes some — the balance on screen is the balance the
-    // next price is read against, never a stale copy.
-    assert!(run.spend(4).paid());
-    assert_eq!(wallet_row(&run), "Intel 3");
-}
-
-/// **The wallet line does not move the picture** (§11.4). It is drawn on every frame, so
-/// the map band beneath it is the same height at a choice point, on the approach, and
-/// with the balance at zero — a readout that appeared with the first haul would make the
-/// map jump exactly once, while the player was reading it.
-#[test]
-fn the_wallet_line_never_moves_the_map_band() {
-    let fresh = text(&Campaign::new(8371), MapUi::default());
-    let mut rich = at_a_choice_point(8371);
-    assert!(rich.spend(0).paid());
-
-    for rows in [&fresh, &text(&rich, MapUi::default())] {
-        assert_eq!(rows.len(), H as usize);
-        assert!(rows[WALLET_ROW as usize].contains("Intel"));
-        assert!(
-            rows[MAP_TOP as usize - 1].trim().starts_with("Intel"),
-            "the band starts directly under the wallet line",
-        );
-    }
-}
-
 /// A run at a choice point with `intel` banked — what the hub's rows are read against.
 fn at_a_choice_point_holding(seed: u64, intel: usize) -> Campaign {
     let mut run = Campaign::new(seed);
@@ -406,11 +352,15 @@ fn buying_the_route_turns_the_price_into_a_facility() {
         .any(|c| c.fg != Category::Ground));
 }
 
-/// **The hub answers on the wallet line** (#211's `Outlay`, #212's press) — paid in Owned,
-/// refused in Warning, and every message names the balance, so the readout it replaces is
-/// not a fact the player loses.
+/// **The hub answers on the gauge's summary row** (#211's `Outlay`, #212's press) — paid
+/// in Owned, refused in Warning.
+///
+/// The row it borrows is the archive gauge's second line (#573), and every `Outlay`
+/// message names the balance — which is what makes the standing intel readout the header
+/// used to carry a thing the screen can do without: the number is still on screen at the
+/// moment a purchase moves it, and every price is on the brief's own row.
 #[test]
-fn the_wallet_line_carries_what_the_hub_just_said() {
+fn the_summary_row_carries_what_the_hub_just_said() {
     let mut broke = at_a_choice_point_holding(8371, (ROUTE_UNLOCK_COST - 1) as usize);
     let locked = broke.ahead().into_iter().find(|o| o.locked).expect("a row");
 
@@ -418,14 +368,14 @@ fn the_wallet_line_carries_what_the_hub_just_said() {
     assert!(!refused.paid());
     let ui = MapUi::default().saying(refused);
     assert_eq!(
-        text(&broke, ui)[WALLET_ROW as usize].trim(),
+        text(&broke, ui)[SUMMARY_ROW as usize].trim(),
         refused.message(),
     );
     assert_eq!(
         render_map(W, H, &broke, ui)
             .get(
                 centre(W, refused.message().chars().count() as u32),
-                WALLET_ROW
+                SUMMARY_ROW
             )
             .fg,
         Category::Warning,
@@ -436,7 +386,10 @@ fn the_wallet_line_carries_what_the_hub_just_said() {
     let paid = flush.unlock(locked.node);
     assert!(paid.paid());
     let ui = MapUi::default().saying(paid);
-    assert_eq!(text(&flush, ui)[WALLET_ROW as usize].trim(), paid.message());
+    assert_eq!(
+        text(&flush, ui)[SUMMARY_ROW as usize].trim(),
+        paid.message()
+    );
 
     // Both wordings fit the board (§10.2/§11.4) — they are formatted rather than const,
     // so the bound is asserted here instead of at compile time.
@@ -754,25 +707,16 @@ fn drawing_the_map_changes_nothing() {
     assert_eq!(run, before, "looking at a map is not playing one");
 }
 
-/// **The map is where a campaign's stars land** (§14 v3/#563): a completed facility does
-/// not raise the end screen, so if the score is not on this screen it is nowhere.
+/// **The archive is still the only Interest star on the screen** (§11.2/#573).
 ///
-/// Each axis is **named** beside its mark — the row says which star was missed, which is
-/// the whole reason the score is three marks and not a tier.
+/// The map used to draw `★` in two meanings — the terminus in the picture, and an earned
+/// axis on the score row. The score row is gone with the header rework, and the gauge took
+/// its marks over, so the split this asserts is now *node* against *gauge cell*: told apart
+/// by place, and by colour, exactly as before.
 #[test]
-fn the_map_reports_what_the_last_raid_was_worth() {
+fn the_terminus_star_and_the_gauge_stars_stay_apart() {
     let mut run = Campaign::new(8371);
-    // Narrowed to the score row on purpose: `★` is also the archive's node glyph, and
-    // the picture draws that from the first frame. The two readings are told apart by
-    // *where* they are, which is exactly what this asserts.
-    let blank = text(&run, MapUi::default())[SCORE_ROW as usize].clone();
-    assert!(
-        !blank.contains(STAR_EARNED) && !blank.contains(STAR_MISSED),
-        "a run with no raid behind it has nothing to score: {blank:?}",
-    );
-
     run.enter();
-    // Seen, and one console short: speed alone.
     run.complete(&Verdict {
         ending: Ending::Escaped,
         stats: RunStats {
@@ -784,25 +728,15 @@ fn the_map_reports_what_the_last_raid_was_worth() {
             ..RunStats::default()
         },
     });
-    let rows = text(&run, MapUi::default());
-    let score = run.last_score().expect("the raid is scored");
-    let row = &rows[SCORE_ROW as usize];
-    for axis in Axis::ALL {
-        assert!(row.contains(axis.label()), "{axis:?} is named: {row:?}");
-    }
-    assert!(row.contains(&format!("speed {STAR_EARNED}")), "{row:?}");
-    assert!(row.contains(&format!("stealth {STAR_MISSED}")), "{row:?}");
-    assert!(row.contains(&format!("haul {STAR_MISSED}")), "{row:?}");
-    assert_eq!(score.stars(), 1);
+    assert_eq!(run.stars(), 1, "speed alone: seen, and a console short");
 
-    // …and it is coloured as it is marked (§11.2): a star earned in the **player's** own
-    // colour, the two missed in the dim one.
-    //
-    // **This is also what keeps `★`'s two readings apart on this one screen.** The glyph
-    // is the archive node as well as an earned star, and here the two differ in colour as
-    // well as in place: the terminus is Interest — the thing worth reaching for — and the
-    // score is Owned, because it is already yours.
     let grid = render_map(W, H, &run, MapUi::default());
+    let on_row = |y: u32, glyph: char, category| {
+        (0..W)
+            .map(|x| grid.get(x, y))
+            .filter(|c: &GlyphCell| c.glyph == glyph && c.fg == category)
+            .count()
+    };
     let by_colour = |category| {
         cells_of(&grid, STAR_EARNED)
             .into_iter()
@@ -810,24 +744,164 @@ fn the_map_reports_what_the_last_raid_was_worth() {
             .count()
     };
     assert_eq!(
-        by_colour(Category::Owned),
-        1,
-        "the one star this raid earned"
-    );
-    assert_eq!(
         by_colour(Category::Interest),
         1,
-        "and the archive, still the only Interest star on the picture",
+        "the terminus, and nothing else on the picture, is Interest",
     );
+    // Every other earned star is the gauge's, on the gauge's row, in Owned.
+    assert_eq!(
+        on_row(GAUGE_ROW, STAR_EARNED, Category::Owned),
+        run.stars() as usize,
+    );
+    assert_eq!(by_colour(Category::Owned), run.stars() as usize);
     for cell in cells_of(&grid, STAR_MISSED) {
-        assert_eq!(cell.fg, Category::Ground, "a star not earned is drawn dim",);
+        assert_eq!(cell.fg, Category::Ground, "a star not earned is drawn dim");
     }
 }
 
-/// **The score row is reserved on every frame**, so the picture below it never jumps when
-/// the first raid's stars arrive — the rule the wallet line already follows one row down.
+/// **A threshold mark goes blue the moment the run reaches it** (§11.2/#573) — so the bar
+/// says how many thresholds are banked without the eye counting stars against a number it
+/// has to remember.
 #[test]
-fn the_score_row_costs_the_picture_the_same_band_either_way() {
+fn a_reached_threshold_mark_is_drawn_owned() {
+    let span = STARS_PER_FACILITY * DEPTH_TO_ARCHIVE;
+    let owned = |stars: u32| {
+        gauge_bar(ArchiveGate::new(stars, span))
+            .into_iter()
+            .filter(|&(glyph, category)| glyph == GAUGE_MARK && category == Category::Owned)
+            .count()
+    };
+    assert_eq!(owned(0), 0, "nothing banked, nothing marked");
+    // One short of each threshold and exactly on it — the boundary the gate's own
+    // arithmetic turns on, asserted on the drawing so the bar and the rules cannot
+    // come to disagree about what has been cleared.
+    for (i, &threshold) in THRESHOLDS.iter().enumerate() {
+        assert_eq!(owned(threshold - 1), i, "one short of {threshold}");
+        assert_eq!(owned(threshold), i + 1, "exactly {threshold}");
+    }
+    assert_eq!(
+        owned(span),
+        THRESHOLDS.len(),
+        "a perfect run banks them all"
+    );
+
+    // And the blue marks are exactly the levels the summary says have come off.
+    for stars in 0..=span {
+        let gate = ArchiveGate::new(stars, span);
+        assert_eq!(
+            owned(stars),
+            THRESHOLDS.len() - gate.rules(),
+            "{stars} stars"
+        );
+    }
+}
+
+/// **The summary says the total and the level it bought** (#573) — the one line on this
+/// screen the player is meant to act on, in the §11.2 colour of what it reports.
+#[test]
+fn the_summary_names_the_stars_and_the_difficulty_level() {
+    let span = STARS_PER_FACILITY * DEPTH_TO_ARCHIVE;
+    let (line, category) = gauge_summary(ArchiveGate::new(0, span));
+    assert_eq!(line, "0 stars => difficulty level 3");
+    assert_eq!(category, Category::Warning, "an ending set above zero");
+
+    // The singular is its own word — *1 stars* is what a formatted count says.
+    assert_eq!(
+        gauge_summary(ArchiveGate::new(1, span)).0,
+        "1 star => difficulty level 3",
+    );
+    assert_eq!(
+        gauge_summary(ArchiveGate::new(THRESHOLDS[0], span)).0,
+        format!("{} stars => difficulty level 2", THRESHOLDS[0]),
+    );
+    let (cleared, category) = gauge_summary(ArchiveGate::new(THRESHOLDS[2], span));
+    assert_eq!(
+        cleared,
+        format!("{} stars => difficulty level 0", THRESHOLDS[2]),
+    );
+    assert_eq!(category, Category::Owned, "a gate the run's stars emptied");
+
+    // And it never names the rules themselves: those are the brief's before the press and
+    // the Level info tab's once inside (§12.6). The map says how hard, not what.
+    for stars in 0..=span {
+        let (line, _) = gauge_summary(ArchiveGate::new(stars, span));
+        assert!(!line.contains("rule"), "{line:?}");
+    }
+}
+
+/// **The archive gauge is on the map before the run has raided anything** (§14 v3/#573) —
+/// *legible before the choice, not after*, which for this readout means before the
+/// **first** choice rather than at the terminus's door.
+#[test]
+fn the_gauge_is_drawn_before_the_run_has_raided_anything() {
+    let fresh = Campaign::new(8371);
+    let rows = text(&fresh, MapUi::default());
+    let bar = &rows[GAUGE_ROW as usize];
+    let summary = &rows[SUMMARY_ROW as usize];
+
+    // One cell per star the country is worth, a mark at each threshold, nothing banked.
+    let span = (STARS_PER_FACILITY * DEPTH_TO_ARCHIVE) as usize;
+    assert_eq!(bar.matches(STAR_MISSED).count(), span);
+    assert_eq!(bar.matches(GAUGE_MARK).count(), THRESHOLDS.len());
+    assert!(!bar.contains(STAR_EARNED), "nothing raided, nothing banked");
+    assert_eq!(
+        summary.trim(),
+        format!("0 stars => difficulty level {GATE_RULES_MAX}")
+    );
+}
+
+/// **The gauge fills as the run earns, and the level falls as it crosses** (#573) — the
+/// readout that turns *raid one more facility* into a decision.
+#[test]
+fn the_gauge_fills_with_the_run_and_the_level_only_falls() {
+    let mut run = Campaign::new(8371);
+    let mut last = GATE_RULES_MAX;
+    for raid in 0..DEPTH_TO_ARCHIVE {
+        run.enter();
+        // Three stars a raid: inside par, never seen, everything taken.
+        run.complete(&Verdict {
+            ending: Ending::Escaped,
+            stats: RunStats {
+                turns: 40,
+                par: 200,
+                ..RunStats::default()
+            },
+        });
+        let stars = run.stars();
+        assert_eq!(stars, (raid + 1) * STARS_PER_FACILITY);
+
+        let rows = text(&run, MapUi::default());
+        assert_eq!(
+            rows[GAUGE_ROW as usize].matches(STAR_EARNED).count(),
+            stars as usize,
+            "the bar fills one cell per star",
+        );
+        let level = run.archive_gate().rules();
+        assert!(level <= last, "the ending got harder as the run scored");
+        last = level;
+        assert_eq!(
+            rows[SUMMARY_ROW as usize].trim(),
+            format!("{stars} stars => difficulty level {level}"),
+        );
+
+        if run.stage() == CampaignStage::Won {
+            break;
+        }
+        let next = run.offers()[0].node;
+        assert!(run.choose(next));
+    }
+    // Six perfect raids is the ceiling, and the ceiling buys the ending down to nothing.
+    assert_eq!(run.archive_gate().rules(), 0);
+}
+
+/// **The header is a fixed height**, so the picture below it never jumps as the run banks
+/// its first stars (§11.4).
+///
+/// The gauge is drawn on every frame, empty bar included, for the reason the wallet line
+/// it replaced was: a readout that arrived with the first haul would move the map exactly
+/// once, at the moment the player was reading it.
+#[test]
+fn the_gauge_costs_the_picture_the_same_band_either_way() {
     let fresh = render_map(W, H, &Campaign::new(8371), MapUi::default());
     let scored = render_map(W, H, &at_a_choice_point(8371), MapUi::default());
     assert_eq!(fresh.height(), scored.height());

@@ -340,6 +340,9 @@ fn the_facility_is_the_flavour_the_map_offered() {
         let mut run = Campaign::new(seed);
         while run.stage() != CampaignStage::Won {
             let flavour = run.flavour();
+            // What the brief promised the terminus would carry, read before the press that
+            // enters it (#573) — asserted below against what it actually plays.
+            let named = run.archive_rules();
             let level = run.enter().expect("a facility to raid");
             let expected = ModifierSources {
                 chosen: LevelModifiers {
@@ -354,9 +357,30 @@ fn the_facility_is_the_flavour_the_map_offered() {
                 },
                 alert: None,
                 flavour: Some(flavour.modifiers()),
+                score: None,
             }
             .resolve();
-            assert_eq!(level.modifiers, expected, "{flavour:?} was not honoured");
+            if flavour == Flavour::Archive {
+                // **The terminus is its flavour plus its gate, and nothing else** (#573).
+                // The run above scores nothing — one console of three, seen once, well past
+                // a zero par — so it arrives at the archive on no stars at all, which is the
+                // worst case the gate can produce and the one worth pinning here.
+                let already = expected.active();
+                let added: Vec<_> = level
+                    .modifiers
+                    .active()
+                    .into_iter()
+                    .filter(|rule| !already.contains(rule))
+                    .collect();
+                assert_eq!(run.stars(), 0, "the fixture scores nothing");
+                assert_eq!(
+                    added, named,
+                    "the archive played rules the brief had not named",
+                );
+                assert_eq!(added.len(), GATE_RULES_MAX, "no stars, every rule");
+            } else {
+                assert_eq!(level.modifiers, expected, "{flavour:?} was not honoured");
+            }
             assert_eq!(
                 LevelSeed::decode(&level.encode().expect("a campaign facility is sayable")),
                 Some(level),
@@ -427,6 +451,7 @@ fn every_flavour_carves_the_facility_it_promises() {
             },
             alert: None,
             flavour: Some(flavour.modifiers()),
+            score: None,
         }
         .resolve();
         let expected = LevelConfig::V1
@@ -476,6 +501,7 @@ fn every_campaign_facility_can_satisfy_the_minimum_haul() {
             },
             alert: None,
             flavour: Some(flavour.modifiers()),
+            score: None,
         }
         .resolve();
         for seed in 0..12 {
@@ -2078,18 +2104,21 @@ fn a_capture_adds_no_score() {
     assert_eq!(run.stars(), 3, "and the total did not move");
 }
 
-/// **Nothing but the archive gate may read the score** (§2.2/#563/#573) — and until #573
-/// lands, that set is empty.
+/// **Nothing but the archive gate reads the score** (§2.2/#563/#573) — the set of readers
+/// is exactly one, and this is what keeps it there.
 ///
 /// Asserted the only way that means anything: two runs given raids that differ *only* in
 /// what they score are stepped side by side, and every other thing the campaign hands out
 /// — the next facility's whole config, the loadout, the wallet, the alert, the offers — is
 /// asserted identical. A system that started spending stars would move one of them.
 ///
-/// This is the criterion that stops the score drifting into meta-progression. #573 will
-/// **narrow** it to exactly one reader; it must never be deleted.
+/// **#573 narrowed this criterion rather than deleting it**, and the narrowing is the
+/// second half below: the terminus's config *must* differ between the two runs, because a
+/// gate that read the score and changed nothing would be the facade the other direction.
+/// One reader, and it really reads. It must never be widened again: a score a system can
+/// spend is a currency the player plays toward instead of playing well.
 #[test]
-fn nothing_reads_the_score() {
+fn nothing_but_the_archive_gate_reads_the_score() {
     // Same haul, same noise, same held set — so `bank` sees identical inputs — and a
     // different score: one raid was inside par with every crate opened, the other was
     // slow and left them.
@@ -2116,11 +2145,16 @@ fn nothing_reads_the_score() {
 
     let mut good = Campaign::to_depth(5, 4);
     let mut bad = Campaign::to_depth(5, 4);
+    // **Two raids each**, so the well-played run actually crosses the gate's first
+    // threshold (#573): a difference in stars that changed no threshold would leave the
+    // narrowing half of this test asserting nothing.
     for (run, verdict) in [(&mut good, brilliant), (&mut bad, plodding)] {
-        run.enter();
-        run.complete(&verdict);
-        let next = run.offers()[0].node;
-        assert!(run.choose(next));
+        for _ in 0..2 {
+            run.enter();
+            run.complete(&verdict);
+            let next = run.offers()[0].node;
+            assert!(run.choose(next));
+        }
     }
 
     assert_ne!(
@@ -2137,4 +2171,104 @@ fn nothing_reads_the_score() {
     assert_eq!(good.run_options(), bad.run_options());
     // And the two runs differ in exactly one thing — the record itself.
     assert_ne!(good.scores(), bad.scores());
+
+    // **The one reader, and it really reads** (#573). The terminus is the single node the
+    // score reaches, and the well-scored run walks into a measurably easier one: fewer
+    // rules drawn, and a level config that is genuinely a different level config.
+    let archive = good.map().archive();
+    assert!(good.archive_gate().rules() < bad.archive_gate().rules());
+    assert_eq!(good.archive_rules().len(), good.archive_gate().rules());
+    assert_ne!(
+        good.level_at(archive, false),
+        bad.level_at(archive, false),
+        "the archive gate reads the score, or the gauge is a facade",
+    );
+    // …and it reaches **only** the terminus: every other facility of the country is the
+    // same building under the same rules for both runs, however they scored.
+    for depth in 0..good.map().depth() {
+        for lane in 0..LANES {
+            let node = NodeId::at(depth, lane);
+            assert_eq!(
+                good.level_at(node, false),
+                bad.level_at(node, false),
+                "the score reached {node:?}, which is not the archive",
+            );
+        }
+    }
+}
+
+/// **The ending is never unreachable and never unwinnable** (§4.5/#573) — at nought stars
+/// the archive is a hard raid and nothing more.
+///
+/// The gate deals *rules*, and there is no rule in the §12.6 pool that can shut an exit:
+/// the terminus keeps its `IntelGate::All` and nothing else, the facility still generates,
+/// and the config still fits its level-seed token — even with the campaign at the top of
+/// the §7.3 ladder, which is the hardest thing the game can produce.
+#[test]
+fn the_archive_is_a_hard_raid_at_no_stars_and_never_a_locked_door() {
+    for seed in [1_u64, 42, 8371, 123_456, 7_777_777] {
+        let mut run = Campaign::new(seed);
+        // Walk the whole country loud and empty-handed: every raid seen, one console
+        // taken, nothing scored — the run that arrives at the terminus with nothing.
+        while !run.map().is_archive(run.node()) {
+            run.enter();
+            run.complete(&extracted(1, TOP_RUNG));
+            let next = run.offers()[0].node;
+            assert!(run.choose(next));
+        }
+        assert_eq!(run.stars(), 0, "seed {seed}: the fixture scores nothing");
+        assert_eq!(run.archive_gate().rules(), GATE_RULES_MAX);
+        assert_eq!(run.alert(), TOP_RUNG, "seed {seed}: and it arrives hunted");
+
+        let level = run.next_level();
+        assert_eq!(
+            level.modifiers.intel_to_exit,
+            IntelGate::All,
+            "seed {seed}: the terminus asks for its consoles and nothing further",
+        );
+        assert!(
+            level.is_sayable(),
+            "seed {seed}: the worst facility the game can produce fell off the wire",
+        );
+        assert!(
+            start_level(&level).is_ok(),
+            "seed {seed}: the archive would not generate",
+        );
+        // The gate is on top of an alerted terminus, and the two together are still inside
+        // the format's five active rules — the budget #573 was worried about (#565).
+        let rules = run.archive_rules();
+        assert_eq!(rules.len(), GATE_RULES_MAX);
+        assert!(
+            rules
+                .iter()
+                .all(|rule| rule.direction == ModifierDirection::Harder),
+            "seed {seed}",
+        );
+    }
+}
+
+/// **Same seed, same play, same ending** (§12.4/#573): two runs stepped identically arrive
+/// at the same stars, the same threshold and the same three rules.
+#[test]
+fn the_gate_is_the_same_for_two_runs_that_played_the_same() {
+    let play = |seed: u64| {
+        let mut run = Campaign::new(seed);
+        for turn in 0..DEPTH_TO_ARCHIVE {
+            run.enter();
+            // Alternating raids, so the run banks a mixed score rather than a flat one.
+            run.complete(&scored(turn % 2, 3, 3));
+            let next = run.offers()[0].node;
+            assert!(run.choose(next));
+        }
+        run
+    };
+    for seed in [3_u64, 99, 12_345] {
+        let (a, b) = (play(seed), play(seed));
+        assert_eq!(a.stars(), b.stars());
+        assert_eq!(a.archive_gate(), b.archive_gate());
+        assert_eq!(a.archive_rules(), b.archive_rules());
+        assert_eq!(a.next_level(), b.next_level());
+        // And the run really did earn its way down the table, or this proves nothing.
+        assert!(a.stars() > 0 && a.archive_gate().rules() < GATE_RULES_MAX);
+    }
 }

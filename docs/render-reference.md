@@ -348,25 +348,53 @@ what it is, colour is what it means to you now.
 
 `★` has **two readings on this screen**, and they are told apart by kind, by place and by
 colour. As a **node in the picture** it is the archive — the one place a run is trying to
-reach. As a **mark in the score row**, beside a named axis, it is a star the last raid
-earned, with `☆` for one it missed (§4.6/#563):
+reach. As a **cell of the archive gauge** in the header it is a star the run has banked,
+against the thresholds that decide how hard the terminus is (§14 v3/#573):
 
 | Glyph | Means | Category |
 |---|---|---|
 | `★` | *(a node in the picture)* the **archive** | Interest |
-| `★` | *(in the score row)* an axis **earned** | **Owned** |
-| `☆` | *(in the score row)* an axis **missed** | Ground |
+| `★` | *(in the gauge)* a star the **run has banked** | **Owned** |
+| `☆` | *(in the gauge)* a star still out there in the country | Ground |
+| <code>&#124;</code> | *(in the gauge)* a **threshold** — Owned once reached, Ground while not | Owned / Ground |
+
+The map used to carry a third reading, the last raid's three named axes (§4.6/#563). That
+row is gone with the header rework: the campaign's map shows the run's **total** and not
+its per-raid axes, and §4.6 records what that costs.
 
 **The colour is what completes the split.** The archive is Interest — the thing worth
-reaching for — and an earned star is Owned, the player's own channel, because it is a
+reaching for — and a banked star is Owned, the player's own channel, because it is a
 verdict on you and already yours. The picture still holds exactly **one** Interest star:
 the terminus.
 
-The pair was kept rather than swapped for a private mark, because `★` is the one glyph
-every player already reads as *this is the good one* and a rating is exactly what that is
-for — and because the score row never draws a bare `★★☆`: each mark stands beside the axis
-it belongs to (`speed ★ · stealth ☆ · haul ☆`), which is both the ticket's own requirement
-and what keeps the two readings apart at a glance. Appendix 61 records the call.
+`★` was kept rather than swapped for a private mark, because it is the one glyph every
+player already reads as *this is the good one* and a score is exactly what that is for.
+Appendix 61 records the call for the score; the gauge inherits it.
+
+**The gauge is two lines**, and it uses no glyph the game did not already have:
+
+```
+      ★★★★★★|★★★★|☆☆☆☆|☆☆☆☆
+      10 stars => difficulty level 1
+```
+
+One cell per star the country can be worth (three per facility before the terminus,
+eighteen on the standard six-deep map), and a `|` before each threshold. **A mark goes
+Owned as the run reaches it**, so the number of blue marks is the number of thresholds
+banked and the eye never has to count filled stars against a number it is holding in its
+head.
+
+The second line is the same fact in words, in the §11.2 colour of what it reports:
+**Warning** while the ending is set above zero, **Owned** at `difficulty level 0`, which
+is the same cue the alert line two rows up gives a facility bent your way. It says *how
+hard*, never *what* — the rules themselves are named on the facility brief before the
+press and on the Level info tab once inside. *Difficulty level* is **new vocabulary**:
+§11.8 has no row for it, and this screen is the only place in the game that uses it.
+
+A block-drawing fill (`█`/`░`) was the obvious alternative for the bar and was not taken —
+the map screen already argues (§2.4, and the Depot's `▪`) that the heaviest ink on the grid
+wins an argument it should not be in, and a bar of full blocks would out-shout the marked
+row.
 
 The end screen draws the same pair in the same Owned (§14 v2) and has no archive on it, so
 there is nothing to tell apart there.
