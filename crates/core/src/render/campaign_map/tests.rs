@@ -68,21 +68,21 @@ fn the_map_draws_the_country_the_run_is_in() {
             "            THE FACILITY MAP            ",
             "    Left unnoticed — Depot off guard    ",
             "      speed ★ · stealth ★ · haul ★      ",
+            " Archive ★★★☆☆☆|☆☆☆☆|☆☆☆☆|☆☆☆☆ 3 rules  ",
             "         Intel — nothing banked         ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
             "                                        ",
+            " ▫           ▫      ▫             ▫     ",
+            "                           ▫            ",
             "                                        ",
-            " ▫           ▫      ▫      ▫      ▫     ",
             "                                        ",
-            "                                        ",
-            "    ▫                                   ",
-            "            ▫                           ",
+            "    ▫       ▫                           ",
             "                   ▫      ▫         ▫   ",
             "                                        ",
-            "           ▫                            ",
-            "                                    ▫   ",
+            "                                        ",
+            "           ▫                        ▫   ",
             "   ▫                ▫        ▫          ",
             "                                        ",
             "                                        ",
@@ -803,6 +803,16 @@ fn the_map_reports_what_the_last_raid_was_worth() {
     // well as in place: the terminus is Interest — the thing worth reaching for — and the
     // score is Owned, because it is already yours.
     let grid = render_map(W, H, &run, MapUi::default());
+    // Narrowed to the score row, because `★` now has a **third** reading on this screen:
+    // the archive gauge one row down is drawn in the same two marks (#573), and its
+    // earned stars are Owned for the same reason this one's are. Told apart by where they
+    // are, exactly as the node glyph already is.
+    let on_row = |y: u32, glyph: char, category| {
+        (0..W)
+            .map(|x| grid.get(x, y))
+            .filter(|c: &GlyphCell| c.glyph == glyph && c.fg == category)
+            .count()
+    };
     let by_colour = |category| {
         cells_of(&grid, STAR_EARNED)
             .into_iter()
@@ -810,7 +820,7 @@ fn the_map_reports_what_the_last_raid_was_worth() {
             .count()
     };
     assert_eq!(
-        by_colour(Category::Owned),
+        on_row(SCORE_ROW, STAR_EARNED, Category::Owned),
         1,
         "the one star this raid earned"
     );
@@ -821,6 +831,105 @@ fn the_map_reports_what_the_last_raid_was_worth() {
     );
     for cell in cells_of(&grid, STAR_MISSED) {
         assert_eq!(cell.fg, Category::Ground, "a star not earned is drawn dim",);
+    }
+    // And the gauge one row down carries the **run's** total in the same two marks: one
+    // banked, the rest of the country still out there (#573).
+    assert_eq!(
+        on_row(GAUGE_ROW, STAR_EARNED, Category::Owned),
+        run.stars() as usize,
+    );
+}
+
+/// **The archive gauge is on the map from the first frame** (§14 v3/#573) — *legible
+/// before the choice, not after*, which for this readout means before the **first** choice
+/// rather than at the terminus's door.
+///
+/// A fresh run has raided nothing, and the gauge still has the most actionable thing on
+/// the screen to say: the ending is currently drawn three harder rules, and here is how
+/// far off the first threshold you are.
+#[test]
+fn the_gauge_is_drawn_before_the_run_has_raided_anything() {
+    let fresh = Campaign::new(8371);
+    let row = &text(&fresh, MapUi::default())[GAUGE_ROW as usize];
+    assert!(row.contains(GAUGE_LABEL), "{row:?}");
+    assert!(
+        row.contains(&format!("{GATE_RULES_MAX} {GAUGE_RULES}")),
+        "{row:?}"
+    );
+    assert!(
+        !row.contains(STAR_EARNED),
+        "a run that has raided nothing has banked nothing: {row:?}",
+    );
+    // One cell per star the country is worth, and a mark at each threshold.
+    let span = (STARS_PER_FACILITY * DEPTH_TO_ARCHIVE) as usize;
+    assert_eq!(row.matches(STAR_MISSED).count(), span);
+    assert_eq!(row.matches(GAUGE_MARK).count(), THRESHOLDS.len());
+}
+
+/// **The gauge fills as the run earns, and the marks stand where the thresholds do**
+/// (#573) — the readout that turns *raid one more facility* into a decision.
+#[test]
+fn the_gauge_fills_with_the_run_and_names_what_the_archive_carries() {
+    let mut run = Campaign::new(8371);
+    let mut last_rules = GATE_RULES_MAX;
+    for raid in 0..DEPTH_TO_ARCHIVE {
+        run.enter();
+        // Three stars a raid: inside par, never seen, everything taken.
+        run.complete(&Verdict {
+            ending: Ending::Escaped,
+            stats: RunStats {
+                turns: 40,
+                par: 200,
+                ..RunStats::default()
+            },
+        });
+        let stars = run.stars();
+        assert_eq!(stars, (raid + 1) * STARS_PER_FACILITY);
+
+        let row = &text(&run, MapUi::default())[GAUGE_ROW as usize];
+        assert_eq!(
+            row.matches(STAR_EARNED).count(),
+            stars as usize,
+            "the bar fills one cell per star: {row:?}",
+        );
+        // The tail names what the archive is currently drawn, and it only ever falls.
+        let rules = run.archive_gate().rules();
+        assert!(rules <= last_rules, "the gate got harder as the run scored");
+        last_rules = rules;
+        let tail = match rules {
+            0 => GAUGE_CLEARED.to_string(),
+            1 => format!("1 {GAUGE_RULE}"),
+            n => format!("{n} {GAUGE_RULES}"),
+        };
+        assert!(row.contains(&tail), "{row:?} should end {tail:?}");
+
+        if run.stage() == CampaignStage::Won {
+            break;
+        }
+        let next = run.offers()[0].node;
+        assert!(run.choose(next));
+    }
+    // Six perfect raids is the ceiling, and the ceiling buys the whole gate off.
+    assert_eq!(run.archive_gate().rules(), 0);
+}
+
+/// **The gauge is drawn in the two marks the score row already taught** (§11.2/§11.3) —
+/// Owned for a star banked, Ground for one still out there, and the mark between segments
+/// quiet enough not to compete with either.
+#[test]
+fn the_gauge_wears_the_scores_own_colours() {
+    let run = at_a_choice_point(8371);
+    let grid = render_map(W, H, &run, MapUi::default());
+    for x in 0..W {
+        let cell = grid.get(x, GAUGE_ROW);
+        let expected = match cell.glyph {
+            STAR_EARNED => Some(Category::Owned),
+            STAR_MISSED | GAUGE_MARK => Some(Category::Ground),
+            _ => None,
+        };
+        if let Some(category) = expected {
+            assert_eq!(cell.fg, category, "the gauge cell at {x} wears its meaning");
+        }
     }
 }
 

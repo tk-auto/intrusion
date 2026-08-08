@@ -2241,6 +2241,7 @@ mod tests {
                     },
                     alert: Some(extra),
                     flavour: Some(composite.contribution()),
+                    score: None,
                 }
                 .resolve();
                 let level = LevelSeed {

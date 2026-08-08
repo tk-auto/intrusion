@@ -404,14 +404,20 @@ level like every active modifier (§12.6), so it is available on demand and neve
 A par counting down in the corner would turn a stealth game into a speedrun and push
 against exactly the patience §1 and §7.6 are built to reward.
 
-#### It grants nothing — with exactly one planned exception
+#### It grants nothing — with exactly one exception
 
-**Nothing reads the score.** Not an ability, not a modifier, not the wallet (#211), and
-nothing at all across runs — §2.2's no-meta-progression rule is not negotiable, and a
-score a system can *spend* is a currency the player plays toward instead of playing well.
-The one exception the design has chosen is the campaign's **archive gate** (#573, v3): the
-run's accumulated stars set how hard the terminus is, earned and spent inside one run
-exactly as intel is. Until that ships the set of readers is empty, and a test asserts it.
+**Nothing reads the score but the archive gate.** Not an ability, not another modifier, not
+the wallet (#211), and nothing at all across runs — §2.2's no-meta-progression rule is not
+negotiable, and a score a system can *spend* is a currency the player plays toward instead
+of playing well. The one exception the design has chosen is the campaign's **archive gate**
+(#573, §14 v3): the run's accumulated stars set how hard the terminus is, earned and spent
+inside one run exactly as intel is.
+
+The set of readers is **one**, and a test holds it there from both sides (#573 narrowed
+#563's criterion rather than deleting it): two runs given raids that differ only in what
+they score are stepped side by side, every facility of the country but the last must be
+byte-identical between them, and the **archive** must not be — a gate that read the score
+and changed nothing would be the facade the other way round.
 
 #### Where the stars are shown
 
@@ -4356,6 +4362,73 @@ bullet below fills one of its seams.
     price is a body to hide and a §7.3 radio clock to outrun). Leaving with the data is
     the **run won** (§2.2); capture there is terminal like capture anywhere, with no
     special case.
+  - **How hard the archive is, is what the run scored** (#573/#563/§4.6). The stars a
+    campaign has banked decide how many rules the terminus is drawn from the **harder**
+    side of the §12.6 directed pool — the same machinery the alert uses, never a private
+    list. This is the one system in the game that reads a score (§4.6), and it is what
+    makes per-facility scoring matter to the *run* rather than being a report card handed
+    out between raids.
+
+    | Stars | Harder rules on the archive |
+    |---|---|
+    | 0 – 5 | **3** |
+    | 6 – 9 | **2** |
+    | 10 – 13 | **1** |
+    | 14+ | **0** |
+
+    All **[START]**, and these are the numbers the mechanism is least sure of. Six
+    facilities at three stars apiece is a ceiling of **18**, and a realistic good run lands
+    well short of it — but how far short is a thing no one knows until played runs and a
+    campaign-scale sim batch say so. **Placeholders, ship the mechanism, tune from the
+    arriving-total distribution.**
+    - **It accumulates, and the alert deliberately does not** [SETTLED]. #210's rule below
+      is that the alert *"reaches one hop and does not accumulate… a level that cannot add
+      to itself cannot spiral"*. This breaks that rule on purpose, and what makes it safe
+      is which direction the loop runs in. The alert is a **feedback** loop: loud makes the
+      next facility harder, which makes loud more likely, which compounds. The gate is not
+      a loop at all — it is a **tally with one reader, read once, at the end**. A bad score
+      never makes the next facility harder, so it cannot make the next score worse; what
+      accumulates is the *statement*, not the pressure. That is also why it gets no decay
+      rate: a run-length accumulation with a decay on it would be unreadable, and the
+      levers if play says it bites too hard are the thresholds first and a two-rule cap
+      second.
+    - **It is never a lock** [SETTLED]. The gate deals rules and cannot touch the exit —
+      no §12.6 pool entry moves the intel gate — so the terminus keeps its `IntelGate::All`
+      and nothing more. At nought stars it is a hard raid, asserted: the facility still
+      generates, and its config still fits a level-seed token even with the campaign at the
+      top of the §7.3 ladder, which is the hardest facility the game can produce.
+    - **It is legible before the choice, not after** [SETTLED] — the alert's rule below,
+      borrowed wholesale and earned harder. A **gauge** on the map screen (#208) shows the
+      run's stars against the thresholds **from the first frame**, because seeing that you
+      are one threshold short is what turns *raid one more facility* into a decision paid
+      for in time and in the alert an extra raid may raise. And the rules the archive is
+      carrying are **named on its brief**, over the press that walks in: the player chooses
+      *when* to enter the terminus, and choosing blind is a coin flip they paid six raids
+      for. A gauge at the archive door is a verdict; a gauge on the map the whole time is
+      the campaign's spine.
+    - **A star takes a rule off; it does not deal a new hand** [SETTLED]. The draw is the
+      shared partial shuffle, whose first *n* picks do not depend on *n*, so crossing a
+      threshold removes one of the rules already named rather than rerolling the set. That
+      is what lets the brief name them honestly while the run is still earning.
+    - **The gate never spends a pick on a rule the archive already plays.** The terminus
+      locks its prize room and stands at the guard knob's full reach on its own account,
+      and *both* are entries of the harder pool — so a blind three-of-nine draw lands on
+      one of them 58% of the time and applies as nothing. The draw is told what the
+      facility already plays (its composite's expansion **and** whatever the alert drew
+      onto it) and skips those entries, so the count the gauge names is the count the
+      building has. A caption with nothing behind it is the §2.3 facade. Appendix 63.
+    - **The budget is exactly spent, and this is what #565 was for.** The worst archive
+      carries its own composite (1 slot), three gate rules and one more from the alert —
+      five, which is `MODIFIER_CAP` to the slot. As a raw combination the flavour alone
+      cost two, and the terminus would have fallen off the wire.
+    - **Do not let the gauge become a second score screen.** It shows one number against a
+      few marks. The per-facility stars are §4.6's surfaces; this is a fill bar with
+      thresholds and nothing else.
+    - **The pair to watch in play** is the *one more raid* incentive. The gauge is meant to
+      make an extra facility tempting; if it makes one **mandatory**, the campaign stops
+      being a route you choose and becomes a checklist you grind. The counterweight is
+      already here — an extra raid is an extra chance to be seen, and #210 carries the
+      condition forward.
   - **The map screen is the campaign's surface** (#208) — the title screen's *Story
     mode* opens it, and it is where every raid is chosen and started. It draws in the
     same character grid as everything else (§11.1), as **a picture and a list**: the

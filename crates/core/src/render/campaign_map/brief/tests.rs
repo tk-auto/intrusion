@@ -5,6 +5,7 @@
 use super::*;
 use crate::ability::Loadout;
 use crate::campaign::{Campaign, CampaignStage, Offer, Outlay, MANIFEST_COST, SCOUT_COST};
+use crate::modifiers::{Composite, IntelGate, LevelModifiers, ModifierSources};
 use crate::render::campaign_map::{map_activation, map_hit, MapScreen};
 use crate::verdict::{Ending, RunStats, Verdict};
 
@@ -356,10 +357,10 @@ fn the_marker_and_the_finger_both_step_over_the_crates() {
 
     for (y, line) in lines {
         match line {
-            Line::Crate(_) => assert_eq!(
+            Line::Crate(_) | Line::Note(_) | Line::Rule(_) => assert_eq!(
                 map_hit(W, H, &run, ui, W / 2, y),
                 None,
-                "a crate line answered a press at row {y}",
+                "a caption line answered a press at row {y}",
             ),
             Line::Row(row) => assert_eq!(map_hit(W, H, &run, ui, W / 2, y), Some(row.hit(node))),
         }
@@ -398,5 +399,140 @@ fn a_facility_with_no_crates_shows_no_manifest_row() {
             "{:?} ({:?}) offers a manifest iff it hides crates",
             offer.node, offer.flavour,
         );
+    }
+}
+
+/// A run standing on the **archive**, having walked the whole country and scored `stars`
+/// on the way — the brief every assertion below is opened on.
+fn at_the_archive(seed: u64, per_raid: u32) -> Campaign {
+    let mut run = Campaign::new(seed);
+    while !run.map().is_archive(run.node()) {
+        run.enter();
+        run.complete(&Verdict {
+            ending: Ending::Escaped,
+            stats: RunStats {
+                // The three axes, switched on one at a time by `per_raid`: inside par,
+                // never noticed, everything taken.
+                turns: if per_raid >= 1 { 40 } else { 400 },
+                par: 200,
+                alert_peak: if per_raid >= 2 { 0 } else { 1 },
+                intel: if per_raid >= 3 { 1 } else { 0 },
+                intel_total: 1,
+                held: Loadout::innate(),
+                ..RunStats::default()
+            },
+        });
+        let next = run.offers()[0].node;
+        assert!(run.choose(next));
+    }
+    run
+}
+
+/// **The archive names the rules it is drawn, before the press that walks into it**
+/// (§14 v3/#573) — *legible before the choice, not after*, at the one choice a run has
+/// spent six facilities preparing for.
+///
+/// The rules are named in the **same captions the Level info tab will print** once the
+/// player is inside, so the brief cannot come to describe the raid differently from the
+/// panel that reports it.
+#[test]
+fn the_archive_brief_names_the_rules_the_gate_drew() {
+    let run = at_the_archive(8371, 0);
+    assert_eq!(run.stars(), 0, "a run that scored nothing");
+    let node = run.node();
+    let named = run.archive_rules();
+    assert_eq!(named.len(), GATE_RULES_MAX);
+
+    let ui = MapUi::default().opening(node);
+    let rows = render_brief(W, H, &run, ui, node).to_text();
+    assert!(
+        rows.iter().any(|row| row.contains(GATE_HEADING)),
+        "the gate has no heading: {rows:?}",
+    );
+    for rule in &named {
+        assert!(
+            rows.iter().any(|row| row.contains(&caption(rule))),
+            "{:?} was drawn but never named: {rows:?}",
+            rule.name,
+        );
+    }
+    // And the level the press actually boots plays exactly those rules — the brief is a
+    // receipt, not a claim (§2.3).
+    let mut booting = run.clone();
+    let level = booting.enter().expect("the archive is enterable");
+    // The terminus as it would be with no gate on it — its own composite and the run's
+    // §4.5 gate, and nothing else. What the booted level has beyond this is the gate's.
+    let ungated = ModifierSources {
+        chosen: LevelModifiers {
+            intel_to_exit: IntelGate::All,
+            ..LevelModifiers::default()
+        },
+        alert: None,
+        flavour: Some(Composite::Archive.contribution()),
+        score: None,
+    }
+    .resolve()
+    .active();
+    let played: Vec<_> = level
+        .modifiers
+        .active()
+        .into_iter()
+        .filter(|rule| !ungated.contains(rule))
+        .collect();
+    assert_eq!(played, named);
+}
+
+/// **A run that cleared every threshold is told so** (#573) — the gauge's one payout, and
+/// it says the *reason* rather than showing an empty list the player has to interpret.
+#[test]
+fn a_cleared_gate_says_the_stars_paid_for_it() {
+    let run = at_the_archive(8371, 3);
+    assert!(
+        run.archive_gate().rules() == 0,
+        "the fixture has to clear the table: {} stars",
+        run.stars(),
+    );
+    let node = run.node();
+    assert!(run.archive_rules().is_empty());
+
+    let ui = MapUi::default().opening(node);
+    let rows = render_brief(W, H, &run, ui, node).to_text();
+    assert!(
+        rows.iter().any(|row| row.contains(GATE_CLEARED)),
+        "a cleared gate said nothing at all: {rows:?}",
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains(GATE_HEADING)),
+        "a heading with nothing under it: {rows:?}",
+    );
+}
+
+/// **The two expansions can never share a screen** (#550/#573) — which is what makes the
+/// brief's fixed block tall enough for both.
+///
+/// The archive hides no equipment caches (§14 v3), so its manifest is never on sale, so the
+/// four-row shape and the four-caption shape are different briefs. If a future flavour
+/// change gave the terminus a crate, this fails and `LIST_ROWS` is what has to grow.
+#[test]
+fn the_archive_never_offers_a_manifest_beside_its_gate() {
+    for seed in [1_u64, 8371, 42] {
+        let run = at_the_archive(seed, 0);
+        let node = run.node();
+        let rows = brief_rows(&run, node);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, BriefRow::Manifest { .. })),
+            "the archive offered a manifest",
+        );
+        assert!(rows.len() as u32 <= MAX_GATE_ROWS, "{rows:?}");
+        // The block still fits the band the picture reserves for it, gate and all.
+        let lines = laid_out(&run, node, H);
+        let lowest = lines
+            .iter()
+            .map(|&(y, _)| y)
+            .max()
+            .expect("a brief has rows");
+        assert!(lowest < H - 1, "the brief ran into the footer");
     }
 }

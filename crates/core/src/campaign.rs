@@ -74,19 +74,23 @@ use serde::{Deserialize, Serialize};
 use crate::ability::{AbilityId, Loadout};
 use crate::difficulty::Difficulty;
 use crate::level_seed::LevelSeed;
-use crate::modifiers::{IntelGate, LevelModifiers, ModifierDirection, ModifierSources};
+use crate::modifiers::{
+    ActiveModifier, IntelGate, LevelModifiers, ModifierDirection, ModifierSources,
+};
 use crate::rng::Rng;
 use crate::salvage::cache_contents;
 use crate::score::Score;
 use crate::state::Outcome;
 use crate::verdict::{Ending, RunMode, RunOptions, RunStats, Verdict};
 
+pub mod archive;
 pub mod loudness;
 pub mod map;
 #[cfg(test)]
 mod tests;
 pub mod wallet;
 
+pub use archive::{ArchiveGate, GATE_RULES_MAX, STARS_PER_FACILITY, THRESHOLDS};
 pub use loudness::{Loudness, ALERTS_ALL, ALERTS_ONE};
 pub use map::{FacilityMap, Flavour, MapPos, Offer, DEPTH_TO_ARCHIVE};
 pub use wallet::{Outlay, Wallet};
@@ -345,10 +349,11 @@ pub struct Campaign {
     /// ([`stars`](Self::stars)) rather than being stored beside them, so the two can
     /// never disagree.
     ///
-    /// It is written by [`complete`](Self::complete) and read by **nothing** — not an
-    /// ability, not a modifier, not the wallet (§2.2). The archive gate (#573) will be the
-    /// one reader, and the tests keep the set at zero until it lands: a score a system can
-    /// spend is a currency the player plays toward instead of playing well.
+    /// It is written by [`complete`](Self::complete) and read by exactly **one** thing:
+    /// the archive gate ([`archive`], #573), which spends the total on how hard the
+    /// terminus is. Not an ability, not another modifier, not the wallet (§2.2) — and a
+    /// test keeps that set at one rather than at "one so far", because a score a system
+    /// can spend is a currency the player plays toward instead of playing well.
     scores: Vec<(NodeId, Score)>,
 }
 
@@ -901,6 +906,10 @@ impl Campaign {
                 // source.
                 alert: self.alert_contribution(node),
                 flavour: Some(self.map.flavour(node).modifiers()),
+                // **The archive gate** (§4.6/#573), and nowhere else: what the run's
+                // stars make of the terminus, through the same seam every other source
+                // reaches the facility by.
+                score: self.gate_contribution(node),
             }
             .resolve(),
             abilities: self.loadout,
@@ -923,6 +932,68 @@ impl Campaign {
     fn alert_contribution(&self, node: NodeId) -> Option<LevelModifiers> {
         let loudness = self.loudness()?;
         loudness.contribution(self.map, self.noise_made_at()?, node)
+    }
+
+    /// The modifier contribution the **archive gate** makes to `node` (§4.6/§12.6/#573) —
+    /// `None` for every facility but the terminus, and for a run that has cleared every
+    /// threshold.
+    ///
+    /// This is the one place in the game a [`Score`] is read, and the narrowness is the
+    /// whole guarantee: the node is checked first, so no facility of the campaign but the
+    /// last can be bent by how the run has been scored, and every other thing the campaign
+    /// hands out is a function of a run that has never been told its stars.
+    fn gate_contribution(&self, node: NodeId) -> Option<LevelModifiers> {
+        if !self.map.is_archive(node) {
+            return None;
+        }
+        self.archive_gate()
+            .contribution(self.seed(), self.archive_plays(node))
+    }
+
+    /// **What the archive is playing before its gate says anything** — the terminus's own
+    /// composite expanded, plus whatever rule the campaign alert (#210) has drawn onto it.
+    ///
+    /// Handed to the draw so a pick is never spent on a rule the building already has
+    /// ([`draw_from_pool_beyond`](crate::modifiers::draw_from_pool_beyond)): the archive
+    /// locks its prize room and stands at the guard knob's reach on its own account, and
+    /// both of those are entries of the same harder pool the gate draws from. The alert is
+    /// in it for the same reason and it is the sharper case — the two sources draw from
+    /// one pool on separate streams, so without this they could deal the *same* rule and
+    /// the archive would carry one fewer than the two of them announced.
+    fn archive_plays(&self, node: NodeId) -> LevelModifiers {
+        let flavour = self.map.flavour(node).composite().expansion();
+        match self.alert_contribution(node) {
+            Some(alert) => flavour.union(alert),
+            None => flavour,
+        }
+    }
+
+    /// **The archive gate this run currently faces** (§4.6/#573) — its banked stars
+    /// against the thresholds that will decide how hard its ending is.
+    ///
+    /// Read by the map's gauge and the facility brief, and it is *"legible before the
+    /// choice, not after"* (§14 v3) taken at its word: it answers from the first frame of
+    /// the run, long before the archive is anywhere near, because seeing that you are one
+    /// threshold short is what turns *raid one more facility* into a decision rather than
+    /// a thing you find out at the door.
+    ///
+    /// The **ceiling** is the country's, not a constant: the facilities before the
+    /// terminus are worth [`STARS_PER_FACILITY`] apiece, and how many of them there are is
+    /// the map's depth.
+    pub fn archive_gate(&self) -> ArchiveGate {
+        ArchiveGate::new(self.stars(), STARS_PER_FACILITY * self.map.depth())
+    }
+
+    /// **The rules the archive is carrying**, named — what the facility brief lists over
+    /// the press that commits to entering it (§14 v3/#573).
+    ///
+    /// Empty when the run has cleared every threshold, and empty is a real answer the
+    /// brief says in words: *the stars paid for it* is the only feedback the gauge's whole
+    /// mechanism has at the moment it pays out.
+    pub fn archive_rules(&self) -> Vec<ActiveModifier> {
+        let node = self.map.archive();
+        self.archive_gate()
+            .rules_drawn(self.seed(), self.archive_plays(node))
     }
 
     /// **Enter the current facility**: the raid begins, and the caller boots
@@ -1063,10 +1134,10 @@ impl Campaign {
     /// completed, 0–3 apiece.
     ///
     /// Derived from [`scores`](Self::scores) rather than stored, so the total and the
-    /// per-facility record cannot drift. It is the number the archive gate (#573) will
-    /// read, and — until that ships — the number **nothing** reads: it is offered here so
-    /// the sim can report it (§13.2) and the map can draw it, neither of which changes how
-    /// a facility plays. It dies with the run, exactly as intel does.
+    /// per-facility record cannot drift. It is the number the **archive gate**
+    /// ([`archive_gate`](Self::archive_gate), #573) reads to decide how hard the terminus
+    /// is, and the only number any system reads off a [`Score`] at all. It dies with the
+    /// run, exactly as intel does.
     pub fn stars(&self) -> u32 {
         self.scores.iter().map(|&(_, score)| score.stars()).sum()
     }

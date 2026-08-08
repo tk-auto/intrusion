@@ -100,9 +100,9 @@ pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
 pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 pub use campaign::{
-    facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos, NodeId, Offer,
-    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, MANIFEST_COST, ROUTE_UNLOCK_COST,
-    SCOUT_COST,
+    facility_seed, ArchiveGate, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos,
+    NodeId, Offer, Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, GATE_RULES_MAX,
+    MANIFEST_COST, ROUTE_UNLOCK_COST, SCOUT_COST, STARS_PER_FACILITY, THRESHOLDS,
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};

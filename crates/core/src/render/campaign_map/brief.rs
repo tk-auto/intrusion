@@ -30,12 +30,14 @@
 //! drawn, tappable row rather than an `Escape` a phone does not have (§11.6's no-trap
 //! rule), and `Escape` works too for the hand that reaches for it.
 
+use super::super::modifier_rows::{caption, direction_category};
 use super::{
     centre, draw, footer, picture, Category, Grid, MapHit, MapUi, ENTRY_SPACING, MARKER, NO_MARKER,
     PRICE_DIGITS, SEPARATOR,
 };
 use crate::ability::AbilityId;
-use crate::campaign::{Campaign, Flavour, NodeId, MANIFEST_COST, SCOUT_COST};
+use crate::campaign::{Campaign, Flavour, NodeId, GATE_RULES_MAX, MANIFEST_COST, SCOUT_COST};
+use crate::modifiers::{ActiveModifier, CAPTIONS};
 use crate::place::LevelConfig;
 
 #[cfg(test)]
@@ -81,6 +83,21 @@ const CRATE_BULLET: char = '¤';
 /// The way out, as a row (§11.6). "the map" and not "back": the screen it returns to is one
 /// the player has a name for.
 const BACK_LABEL: &str = "Back to the map";
+
+/// The heading the **archive's** drawn rules stand under (§4.6/§14 v3/#573), and the line
+/// that stands there when the run's stars have taken every one of them off.
+///
+/// This is *"legible before the choice, not after"* (§14 v3 **[SETTLED]**) at the one
+/// press it matters most for. The player decides **when** to walk into the terminus — a
+/// facility they may have raided six others to prepare for — and choosing without knowing
+/// what is inside it is a coin flip they paid the whole run for. The alert line earns that
+/// rule at one hop; the ending earns it at the length of a campaign.
+///
+/// The cleared line names the **reason** rather than the absence: the gauge's entire payout
+/// is this moment, and *nothing drawn* on its own would read as the screen having nothing
+/// to say.
+const GATE_HEADING: &str = "The rules it is drawn";
+const GATE_CLEARED: &str = "Nothing drawn — your stars paid";
 
 /// A **row of the brief** — everything that may be done about one facility.
 ///
@@ -160,6 +177,12 @@ enum Line {
     Row(BriefRow),
     /// One crate of a bought manifest — drawn under the row that revealed it.
     Crate(AbilityId),
+    /// A caption belonging to the row above it, in fixed words — the archive gate's
+    /// heading, or the line that says it drew nothing (#573).
+    Note(&'static str),
+    /// One rule the **archive** is drawn (#573), named under the row that would enter it,
+    /// in the same caption the Level info tab will print once the player is inside.
+    Rule(ActiveModifier),
 }
 
 /// **Every line the brief draws**, in order, with the crates of a bought manifest expanded
@@ -181,6 +204,18 @@ fn brief_lines(run: &Campaign, node: NodeId) -> Vec<Line> {
                     .into_iter()
                     .map(Line::Crate),
             );
+        }
+        // **The archive's gate, under the row that would walk into it** (#573). Under
+        // *Enter* and not somewhere lower down, because it is a fact about that press and
+        // about no other row on the screen.
+        if matches!(row, BriefRow::Enter) && run.map().is_archive(node) {
+            let rules = run.archive_rules();
+            if rules.is_empty() {
+                lines.push(Line::Note(GATE_CLEARED));
+            } else {
+                lines.push(Line::Note(GATE_HEADING));
+                lines.extend(rules.into_iter().map(Line::Rule));
+            }
         }
     }
     lines
@@ -240,6 +275,19 @@ fn crate_text(tech: AbilityId) -> String {
     format!("{CAPTION_INDENT}{CRATE_BULLET} {}", tech.name())
 }
 
+/// One drawn rule's line — **the caption the Level info tab will print**, indented under
+/// the heading, so what the brief promises and what the panel reports once the player is
+/// inside are the same string from the same derivation (§11.3/#248). A brief with its own
+/// wording for a rule would be the second copy that comes to disagree.
+fn rule_text(rule: &ActiveModifier) -> String {
+    format!("{CAPTION_INDENT}{}", caption(rule))
+}
+
+/// A fixed caption's line — the gate's heading, or the line that says it drew nothing.
+fn note_text(note: &str) -> String {
+    format!("{CAPTION_INDENT}{note}")
+}
+
 /// How far a crate line is indented past its heading. Two cells: enough that the list is
 /// plainly subordinate, and not so much that a long ability name has nowhere to go.
 const CAPTION_INDENT: &str = "  ";
@@ -252,6 +300,17 @@ const CAPTION_INDENT: &str = "  ";
 /// on.
 const MAX_ROWS: u32 = 4;
 const MAX_CRATES: u32 = crate::modifiers::CacheCount::MAX as u32;
+
+/// The **archive's** shape, which is the other candidate for the tallest block (#573):
+/// three rows — enter, scout, back — under a heading and the [`GATE_RULES_MAX`] rules the
+/// star gate can deal.
+///
+/// **Three rows and not four**, and it is a fact rather than an omission: the terminus
+/// hides no equipment caches (`Composite::Archive` sets them to none, §14 v3), so the
+/// manifest is never on sale there and the two expansions can never appear on one screen.
+/// `the_archive_never_offers_a_manifest_beside_its_gate` is what keeps that true.
+const MAX_GATE_ROWS: u32 = 3;
+const MAX_GATE_LINES: u32 = 1 + GATE_RULES_MAX as u32;
 
 /// How tall the brief's block is, given how many lines of each kind it is drawing.
 ///
@@ -275,7 +334,18 @@ const fn block_rows(rows: u32, crates: u32) -> u32 {
 /// bought would move the map under the player at the exact moment they were reading it —
 /// the same objection the wallet line answers on the map screen by being drawn even when
 /// the wallet is empty (#211).
-pub(super) const LIST_ROWS: u32 = block_rows(MAX_ROWS, MAX_CRATES);
+///
+/// It is the **taller of the two expansions** a brief can carry — a bought manifest's
+/// crates, and the archive's drawn rules — for the same reason it is fixed at all.
+pub(super) const LIST_ROWS: u32 = {
+    let crates = block_rows(MAX_ROWS, MAX_CRATES);
+    let gate = block_rows(MAX_GATE_ROWS, MAX_GATE_LINES);
+    if gate > crates {
+        gate
+    } else {
+        crates
+    }
+};
 
 /// The screen row each drawn line sits on, paired with the line — the one walk the drawing
 /// and the hit-test share, so a tap lands on exactly the row that was drawn.
@@ -310,7 +380,7 @@ fn row_of_brief(run: &Campaign, node: NodeId, height: u32, index: usize) -> Opti
         .into_iter()
         .filter_map(|(y, line)| match line {
             Line::Row(row) => Some((y, row)),
-            Line::Crate(_) => None,
+            Line::Crate(_) | Line::Note(_) | Line::Rule(_) => None,
         })
         .nth(index)
         .map(|(y, _)| y)
@@ -357,6 +427,26 @@ const MAX_ROW_WIDTH: usize = {
         }
         i += 1;
     }
+    // The archive gate's lines (#573): its two fixed captions, and **every** caption a
+    // drawn rule can print — the whole set, so a re-worded modifier fails the build here
+    // rather than clipping on the one screen where the player is deciding whether to walk
+    // into it.
+    let heading = CAPTION_INDENT.len() + GATE_HEADING.len();
+    if heading > widest {
+        widest = heading;
+    }
+    let cleared = CAPTION_INDENT.len() + GATE_CLEARED.len();
+    if cleared > widest {
+        widest = cleared;
+    }
+    let mut c = 0;
+    while c < CAPTIONS.len() {
+        let rule = CAPTION_INDENT.len() + CAPTIONS[c].caption_len();
+        if rule > widest {
+            widest = rule;
+        }
+        c += 1;
+    }
     widest
 };
 
@@ -376,10 +466,10 @@ pub(super) fn brief_hit(height: u32, run: &Campaign, node: NodeId, y: u32) -> Op
     laid_out(run, node, height)
         .into_iter()
         .find_map(|(row_y, line)| match line {
-            // A **crate line is not a target** (#550): nothing happens when it is pressed,
-            // so a press that lands on one is swallowed exactly as a press on the blank
-            // between rows is. A list that answered taps would be three buttons that do
-            // nothing.
+            // A **caption is not a target** (#550/#573): nothing happens when a crate line
+            // or a drawn rule is pressed, so a press that lands on one is swallowed exactly
+            // as a press on the blank between rows is. A list that answered taps would be
+            // three buttons that do nothing.
             Line::Row(row) if row_y == y => Some(row.hit(node)),
             _ => None,
         })
@@ -405,6 +495,8 @@ pub fn render_brief(width: u32, height: u32, run: &Campaign, ui: MapUi, node: No
         .map(|&(_, line)| match line {
             Line::Row(row) => row_text(row, flavour, true).chars().count() as u32,
             Line::Crate(tech) => crate_text(tech).chars().count() as u32,
+            Line::Note(note) => note_text(note).chars().count() as u32,
+            Line::Rule(rule) => rule_text(&rule).chars().count() as u32,
         })
         .max()
         .unwrap_or(0);
@@ -426,6 +518,28 @@ pub fn render_brief(width: u32, height: u32, run: &Campaign, ui: MapUi, node: No
             // has, on the same footing as the intel in its wallet — and a colour the
             // heading above it deliberately does not share, so the list lifts off it.
             Line::Crate(tech) => draw(&mut grid, column, y, &crate_text(tech), Category::Owned),
+            // **Ground** for the heading, the same quiet the manifest's heading takes, so
+            // the rules under it lift off; **Owned** for the cleared line, because a gate
+            // the run's stars have emptied is a thing the player earned, in the colour this
+            // screen already gives one.
+            Line::Note(note) => {
+                let category = if note == GATE_CLEARED {
+                    Category::Owned
+                } else {
+                    Category::Ground
+                };
+                draw(&mut grid, column, y, &note_text(note), category);
+            }
+            // The rule's own §11.2 direction cue — Warning, since the gate only ever deals
+            // harder rules — read from the same derivation the Level info tab reads it
+            // from, so the colour the player learns here is the colour they meet inside.
+            Line::Rule(rule) => draw(
+                &mut grid,
+                column,
+                y,
+                &rule_text(&rule),
+                direction_category(rule.direction),
+            ),
         }
     }
     footer(&mut grid, FOOTER);

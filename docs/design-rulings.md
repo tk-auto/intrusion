@@ -5140,3 +5140,134 @@ where there is no door and is the tool for a built-up wing; Repel works precisel
 Lockdown is inert. §2.3's warning is that if one of them is always the better press, one of
 them is dead weight — and the answer then is `REPEL_RADIUS`, not the clocks, because the
 radius is the only knob that changes *which rooms* each is for.
+
+---
+
+## Appendix 63 — The archive gate: why a run-length accumulation is allowed here, and the filter the gauge needed
+
+**Ticket #573.** The design lives in §14 v3 (*"how hard the archive is, is what the run
+scored"*) and the criterion it narrows is §4.6's. This is the argument that cost the
+work: why the one rule #210 was built to forbid is broken here on purpose, and the
+mechanical problem the ticket had not seen.
+
+### 1. The rule this breaks, and why breaking it is safe
+
+#210 is unusually firm about accumulation. §14 v3 **[SETTLED]**: the campaign alert
+*"reaches one hop and does not accumulate… a level that cannot add to itself cannot
+spiral, which is why there is no decay rate and no floor to tune."* Appendix 41 argues it
+at length. The archive gate accumulates over an entire run and reads the total, which is
+precisely the shape that sentence was written against — and the ticket says so itself,
+naming it *"a feedback loop in the punishing direction"*.
+
+It is not one, and the distinction is worth stating exactly because the surface reading is
+so plausible.
+
+**A feedback loop needs the output wired back to the input.** The alert has that: being
+loud makes the next facility harder, a harder facility makes being loud more likely, and
+each turn of the crank raises the floor for the next. Left to accumulate it compounds, and
+a run that had one bad raid at facility two is paying for it at facility six with no way
+to tell what it is paying for. That is the death spiral §2.2 warns about, and one hop is
+the answer.
+
+**The gate has no such wire.** A run that scores badly at facility two arrives at facility
+three exactly as it would have with three stars: same building, same guards, same rules.
+Nothing about the tally changes what is *generating* the next number, so the tally cannot
+drive itself. It is read **once**, by **one** node, at the **end** — a statement about the
+whole run, delivered at the only point where there is nothing left for it to affect. What
+accumulates is the statement, not the pressure.
+
+That is also the answer to *"why no decay, when #210's argument was that decay is
+untunable?"* Different reason, same conclusion. #210 has no decay because a one-hop rule
+needs none. This has no decay because it is a **score**, and a score that quietly forgot
+what you did four facilities ago would be unreadable — the player could no longer predict
+the gauge from their own play, which is the whole thing the gauge is for. The levers if
+play says it bites too hard are the thresholds first and a two-rule cap second; a decay
+rate is not on the list.
+
+The three properties that have to hold for any of this to be true are asserted rather than
+asserted-in-prose: it is never a lock (the §12.6 pool holds no entry that can move an intel
+gate, so the terminus keeps `IntelGate::All` and generates and fits its token even at
+nought stars under a condition-3 campaign), the player can always earn more (stars come
+from facilities and the map keeps offering them), and the gauge is on the map **from the
+first frame** so falling short is a decision rather than a discovery.
+
+### 2. The filter, which is the part the ticket did not see
+
+The ticket asks for the rules to be *"drawn from the harder side of the directed pool
+(§12.6) off the run's seed — the same machinery #210 uses"*. Done naively, that is wrong,
+and wrong in the way §2.3 cares most about.
+
+`Composite::Archive` already sets **`prize_room_locked`**, and it already sets
+**`guard_count: TwoMore`** — the knob's full reach. Both `LOCKED_PRIZE_ROOM` and
+`GUARDS_MORE` are entries of the harder pool. So:
+
+- a pick of `LOCKED_PRIZE_ROOM` sets a flag that is already set, and applies as nothing;
+- a pick of `GUARDS_MORE` contributes `+1` to a knob that is already at `+2` and clamps
+  straight back to `TwoMore`, and applies as nothing.
+
+The harder pool holds nine entries. Drawing three of nine blind hits at least one of those
+two **58%** of the time. So on more than half of all runs a gauge reading *3 rules* would
+be standing over a building carrying two, and a brief naming three would be naming one the
+player never meets. That is a caption with nothing behind it — the §2.3 facade, produced
+not by carelessness but by composing two systems that were each individually correct.
+
+The fix is one parameter: the draw is told what the facility **already plays**, and skips
+entries that would compose into it without changing it (`draw_from_pool_beyond`). What it
+is told is the terminus's own composite expansion **and** whatever rule the campaign alert
+(#210) has drawn onto the same node — the second half being the sharper case, since the two
+sources draw from one pool on separate streams and could otherwise deal the *same* rule
+while announcing two.
+
+Two details of that are worth keeping:
+
+- **The probe composes; it does not assign.** The first version applied the entry directly
+  to the facility and compared, which reports `GUARDS_MORE` as a change (it *assigns*
+  `More` over `TwoMore`) when the union that actually happens adds the deltas and clamps.
+  The probe has to model the composition the resolver will really perform, or it passes
+  exactly the entry it was built to catch.
+- **It is a no-op for the two callers that predate it**, and that is a test rather than a
+  claim. Quick play draws over `LevelModifiers::default` and the alert over `neutral`;
+  those differ only in the intel gate, which no pool entry touches, so every entry lands on
+  both and the filtered pool is the whole pool. If a future entry ever *is* a no-op over
+  the baseline, a difficulty draw silently starts dealing one fewer rule than it says — and
+  that test is what fails first.
+
+### 3. A star removes a rule; it does not deal a new hand
+
+The draw is `Rng::choose_n`, a partial Fisher–Yates whose first *n* picks do not depend on
+*n*. That was not chosen for this, but it is what makes the brief honest: the two rules a
+six-star run faces are two of the three a five-star run would have faced, so crossing a
+threshold takes a rule **off the pile** rather than reshuffling. A player working toward a
+threshold is working to remove a rule they have already been shown, which is the difference
+between a gauge you can plan against and a slot machine.
+
+The property is asserted as a **subset** rather than as a prefix, deliberately: the display
+order is the field order, not the draw order, so *which* rule came off is a fact about the
+draw and not about the list. What the player is owed is that earning a star never adds a
+rule they had not been named.
+
+### 4. The numbers are placeholders and are meant to be
+
+The thresholds — 6 / 10 / 14 against a ceiling of 18 — cannot be derived from anything that
+exists. They depend on how often a real run earns each star across a whole campaign, and
+nothing has measured that: `crates/sim` plays **one facility** and has no campaign policy
+at all, so the arriving-total distribution the ticket asks for is a ticket of its own.
+
+What can be said is the shape. The first threshold sits at a third of the ceiling so that a
+run which took two facilities seriously has already bought something, and the ticket's own
+test is the right one: *if the modal run arrives at three rules, the gate is not a
+difficulty curve, it is a tax, and the numbers are wrong.*
+
+### 5. Where the "resolved gauge" beat went
+
+The ticket asks that entering the archive *"shows the gauge resolved… the dramatic beat,
+not the information"*. It is on the **facility brief** — the screen the entering press is
+made on, which draws the map's own picture and so carries the gauge — with the drawn rules
+listed under the Enter row.
+
+It is deliberately **not** on the level-start splash. That renderer is a pure function of
+the level (§12.1), and the campaign is a layer above it; threading a run's stars into a
+level's own card for a decorative beat would put campaign state somewhere every quick-play
+render has to step around. The splash already lists the gate's rules as modifiers, which is
+the informative half, and the Level info tab lists them again with every other active rule
+— so nothing about what the archive is carrying is only ever said once.

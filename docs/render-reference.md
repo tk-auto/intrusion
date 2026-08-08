@@ -346,16 +346,21 @@ meaning, across both screens. And a facility that has been raided
 recolours to Ground exactly as a spent console does (§2.2's recolour rule): shape is
 what it is, colour is what it means to you now.
 
-`★` has **two readings on this screen**, and they are told apart by kind, by place and by
-colour. As a **node in the picture** it is the archive — the one place a run is trying to
-reach. As a **mark in the score row**, beside a named axis, it is a star the last raid
-earned, with `☆` for one it missed (§4.6/#563):
+`★` has **three readings on this screen**, and they are told apart by kind, by place and
+by colour. As a **node in the picture** it is the archive — the one place a run is trying
+to reach. As a **mark in the score row**, beside a named axis, it is a star the last raid
+earned, with `☆` for one it missed (§4.6/#563). And as a **cell of the archive gauge** one
+row down it is a star the *run* has banked, against the thresholds that decide how hard
+the terminus is (§14 v3/#573):
 
 | Glyph | Means | Category |
 |---|---|---|
 | `★` | *(a node in the picture)* the **archive** | Interest |
 | `★` | *(in the score row)* an axis **earned** | **Owned** |
 | `☆` | *(in the score row)* an axis **missed** | Ground |
+| `★` | *(in the gauge)* a star the **run has banked** | **Owned** |
+| `☆` | *(in the gauge)* a star still out there in the country | Ground |
+| <code>&#124;</code> | *(in the gauge)* a **threshold**, standing before the star that clears it | Ground |
 
 **The colour is what completes the split.** The archive is Interest — the thing worth
 reaching for — and an earned star is Owned, the player's own channel, because it is a
@@ -367,6 +372,23 @@ every player already reads as *this is the good one* and a rating is exactly wha
 for — and because the score row never draws a bare `★★☆`: each mark stands beside the axis
 it belongs to (`speed ★ · stealth ☆ · haul ☆`), which is both the ticket's own requirement
 and what keeps the two readings apart at a glance. Appendix 61 records the call.
+
+**The gauge reuses the pair rather than inventing a bar glyph**, and it costs nothing to
+learn because the row directly above it has just taught both marks for the same thing:
+
+```
+Archive ★★★☆☆☆|☆☆☆☆|☆☆☆☆|☆☆☆☆ 3 rules
+```
+
+One cell per star the country can be worth (three per facility before the terminus,
+eighteen on the standard six-deep map), the mark before each threshold, and a tail naming
+what the archive is currently drawn — **Warning** while it carries anything, **Owned** at
+`no rules`, which is the same §11.2 cue the alert line one row up gives a facility bent
+your way. The word *harder* is not in the tail: it will not fit beside an eighteen-cell
+bar, and the colour is already the game's word for it. A block-drawing fill (`█`/`░`) was
+the obvious alternative and was not taken — the map screen already argues (§2.4, and the
+Depot's `▪`) that the heaviest ink on the grid wins an argument it should not be in, and a
+bar of full blocks would out-shout the marked row.
 
 The end screen draws the same pair in the same Owned (§14 v2) and has no archive on it, so
 there is nothing to tell apart there.

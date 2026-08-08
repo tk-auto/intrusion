@@ -1774,6 +1774,28 @@ pub(crate) struct PoolEntry {
     pub(crate) set: fn(&mut LevelModifiers),
 }
 
+impl PoolEntry {
+    /// Whether this entry would **change** a facility already playing `given` — the
+    /// filter [`draw_from_pool_beyond`] applies before it picks (#573).
+    ///
+    /// Asked by building the contribution the entry would make and **composing** it, not
+    /// by a table of what overlaps what: the entry's own `set` and [`LevelModifiers::union`]
+    /// are the only honest account of what a pick does, and a hand-kept overlap list would
+    /// be one more thing to drift.
+    ///
+    /// **Composing rather than assigning is the whole of it**, and the count knobs are
+    /// why. [`GUARDS_MORE`] *assigns* [`GuardCount::More`], so applying it directly to a
+    /// facility already at [`TwoMore`](GuardCount::TwoMore) looks like a change — while
+    /// the union that actually happens adds the deltas and clamps, landing back on
+    /// `TwoMore` with nothing gained. A probe that tested the assignment would pass an
+    /// entry the archive absorbs, which is the exact case this filter exists for.
+    fn lands_on(&self, given: LevelModifiers) -> bool {
+        let mut probe = LevelModifiers::neutral();
+        (self.set)(&mut probe);
+        given.union(probe) != given
+    }
+}
+
 /// **The directed pool** (§12.6/#297): every modifier the difficulty draw may pick,
 /// listed in the permanent slot order [`modifier_slots`](crate::level_seed) encodes.
 /// A new modifier joins the pool by taking a row here beside the caption that
@@ -2005,10 +2027,41 @@ pub(crate) fn draw_from_pool(
     picks: usize,
     seed: u64,
 ) -> LevelModifiers {
+    draw_from_pool_beyond(base, base, direction, picks, seed)
+}
+
+/// [`draw_from_pool`], told what the facility **already plays** — so a pick is never
+/// spent on a rule the building has anyway (§2.3/#573).
+///
+/// The two arguments are different questions and the archive is where they come apart.
+/// `base` is what the contribution is built *over* — [`LevelModifiers::neutral`] for a
+/// contributing source. `given` is what the facility will be playing once every other
+/// source has had its say: for the archive's star gate, [`Composite::Archive`]'s own
+/// expansion plus whatever rule the campaign alert (#210) drew onto it.
+///
+/// **Without the filter the gate would promise rules the building does not have.** The
+/// archive already locks its prize room and already stands at the guard knob's full
+/// reach, and *both* of those are entries of the harder pool — so a blind three-of-nine
+/// draw lands on one of them 58% of the time and applies as nothing at all. The gauge
+/// (#573) names a number of rules, so that number has to be the number the player walks
+/// into; a caption with nothing behind it is exactly the §2.3 facade the design refuses.
+///
+/// **It changes nothing for the two callers that came before it**, and that is asserted
+/// rather than assumed (`the_landing_filter_is_a_no_op_over_the_bases_that_predate_it`):
+/// both draw over a base whose fields are all at their defaults but the intel gate, which
+/// no pool entry touches, so no entry is a no-op over it and the filtered pool is the
+/// whole pool.
+pub(crate) fn draw_from_pool_beyond(
+    base: LevelModifiers,
+    given: LevelModifiers,
+    direction: ModifierDirection,
+    picks: usize,
+    seed: u64,
+) -> LevelModifiers {
     let mut drawn = base;
     let mut pool: Vec<&PoolEntry> = POOL
         .iter()
-        .filter(|entry| entry.caption.direction == direction)
+        .filter(|entry| entry.caption.direction == direction && entry.lands_on(given))
         .collect();
     // The shared partial draw (`Rng::choose_n`) — one home for the idiom this and
     // the quick-play tech grant used to hand-roll as twins.
@@ -2435,6 +2488,20 @@ pub struct ModifierSources {
     /// existence is the set it puts here: the offer on the map screen and the facility
     /// you walk into are then the same statement, one drawn and one played.
     pub flavour: Option<LevelModifiers>,
+    /// **Score** — what the run's accumulated stars make of the **archive**
+    /// (§4.6/§14 v3/#573), and `None` on every other facility of every run.
+    ///
+    /// It is the one system in the game that reads a [`Score`](crate::Score), and it is a
+    /// source rather than a knob of the campaign's for the reason the alert is: what a
+    /// badly-scored run arrives at is *rules from the directed pool*, composed here like
+    /// anything else, so no system below resolution learns that stars exist.
+    ///
+    /// Its own field and not folded into [`alert`](Self::alert), because the two answer
+    /// different questions — the alert is *how loud was the last raid*, one hop deep and
+    /// replaced at every one; this is *how well has the whole run gone*, accumulated over
+    /// all of it and spent at one node. A single field would make the archive's rules
+    /// indistinguishable from the alert's at the seam that has to explain them.
+    pub score: Option<LevelModifiers>,
 }
 
 impl ModifierSources {
@@ -2447,6 +2514,7 @@ impl ModifierSources {
             chosen,
             alert: None,
             flavour: None,
+            score: None,
         }
     }
 
@@ -2467,6 +2535,9 @@ impl ModifierSources {
         }
         if let Some(flavour) = self.flavour {
             active = active.union(flavour);
+        }
+        if let Some(score) = self.score {
+            active = active.union(score);
         }
         active.expand_composite()
     }
@@ -2683,6 +2754,7 @@ mod tests {
             chosen,
             alert: Some(alert),
             flavour: Some(flavour),
+            score: None,
         }
         .resolve();
         assert!(resolved.always_show_vision_cones);
@@ -2995,6 +3067,7 @@ mod tests {
                 ..LevelModifiers::neutral()
             }),
             flavour: Some(Composite::Vault.contribution()),
+            score: None,
         }
         .resolve();
         assert_eq!(resolved.guard_count, TwoMore);
@@ -3044,6 +3117,7 @@ mod tests {
                 layout_knowledge: None,
                 ..LevelModifiers::neutral()
             }),
+            score: Option::None,
         }
         .resolve();
         assert_eq!(resolved.layout_knowledge, None);
@@ -3247,6 +3321,83 @@ mod tests {
         }
     }
 
+    /// **The landing filter changes nothing for the draws that predate it** (#573).
+    ///
+    /// [`draw_from_pool_beyond`] skips an entry that would compose into `given` without
+    /// changing it, and the quick-play axis and the campaign alert both draw with
+    /// `given == base`. Their bases — [`LevelModifiers::default`] and
+    /// [`LevelModifiers::neutral`] — differ only in the intel gate, which no pool entry
+    /// touches, so every entry lands on both and the filtered pool is the whole pool.
+    ///
+    /// Stated as a test rather than as a sentence in the doc comment, because it is the
+    /// promise that keeps #573 from silently retuning quick play: if a pool entry ever
+    /// lands on the baseline as a no-op, a difficulty draw quietly starts dealing one
+    /// fewer rule than it says it does, and this is what fails first.
+    #[test]
+    fn the_landing_filter_is_a_no_op_over_the_bases_that_predate_it() {
+        for base in [LevelModifiers::default(), LevelModifiers::neutral()] {
+            for entry in POOL.iter() {
+                assert!(
+                    entry.lands_on(base),
+                    "{} is a no-op over a base the pool has always drawn over",
+                    entry.caption.name,
+                );
+            }
+            for direction in [ModifierDirection::Harder, ModifierDirection::Easier] {
+                for seed in [0_u64, 7, 4242, u64::MAX] {
+                    for picks in 0..=pool_size(direction) {
+                        assert_eq!(
+                            draw_from_pool(base, direction, picks, seed),
+                            draw_from_pool_beyond(base, base, direction, picks, seed),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// **The filter bites where it was built to** (#573): the archive absorbs two entries
+    /// of the harder pool outright, and a draw told what the terminus already plays never
+    /// spends a pick on either.
+    ///
+    /// The two are the ones the gauge would otherwise lie about — the prize room is locked
+    /// by [`Composite::Archive`] itself, and its guard count is already at the knob's full
+    /// reach, so `GUARDS_MORE` composes back onto the value it started from.
+    #[test]
+    fn the_archive_absorbs_two_harder_rules_and_the_draw_knows_it() {
+        let archive = Composite::Archive.expansion();
+        let absorbed: Vec<&str> = POOL
+            .iter()
+            .filter(|entry| {
+                entry.caption.direction == ModifierDirection::Harder && !entry.lands_on(archive)
+            })
+            .map(|entry| entry.caption.name)
+            .collect();
+        assert_eq!(
+            absorbed,
+            vec![GUARDS_MORE.name, LOCKED_PRIZE_ROOM.name],
+            "the set the archive absorbs has moved — the gate's count may now be wrong",
+        );
+        // And a draw over it never deals one: whatever it picks changes the building.
+        for seed in [0_u64, 7, 42, 4242, u64::MAX] {
+            let drawn = draw_from_pool_beyond(
+                LevelModifiers::neutral(),
+                archive,
+                ModifierDirection::Harder,
+                3,
+                seed,
+            );
+            assert_ne!(archive.union(drawn), archive, "seed {seed}");
+            let quiet = LevelModifiers::neutral().active();
+            let added = drawn
+                .active()
+                .into_iter()
+                .filter(|rule| !quiet.contains(rule))
+                .count();
+            assert_eq!(added, 3, "seed {seed}: the draw came up short");
+        }
+    }
+
     /// **Every field a composite expands to gets its own row, under the composite's name**
     /// (§12.6/#565) — the acceptance the display half of this mechanism is written to:
     /// *nothing is hidden behind a label*.
@@ -3261,6 +3412,7 @@ mod tests {
             chosen: LevelModifiers::default(),
             alert: None,
             flavour: Some(composite.contribution()),
+            score: None,
         }
         .resolve()
     }
@@ -3362,6 +3514,7 @@ mod tests {
                 ..LevelModifiers::neutral()
             }),
             flavour: Some(Composite::Vault.contribution()),
+            score: None,
         }
         .resolve();
         let rows = resolved.active();
@@ -3402,6 +3555,7 @@ mod tests {
             },
             alert: Some(drawn),
             flavour: Some(Composite::Vault.contribution()),
+            score: None,
         }
         .resolve();
         // Two guards, and the recipe seats both — the envelope was widened to make room
@@ -3456,6 +3610,7 @@ mod tests {
                 ..LevelModifiers::neutral()
             }),
             flavour: Some(Composite::Outpost.contribution()),
+            score: None,
         }
         .resolve();
         assert_eq!(resolved.guard_count, GuardCount::Baseline);
@@ -3516,6 +3671,7 @@ mod tests {
                     },
                     alert: Some(extra),
                     flavour: Some(composite.contribution()),
+                    score: None,
                 }
                 .resolve();
                 // Stripping drops the word as well as the fields, so putting the word back
@@ -3551,6 +3707,7 @@ mod tests {
                 composite: Composite::Vault,
                 ..LevelModifiers::neutral()
             }),
+            score: None,
         }
         .resolve();
         let by_hand = ModifierSources {
@@ -3562,6 +3719,7 @@ mod tests {
                 caches: CacheCount::Three,
                 ..LevelModifiers::neutral()
             }),
+            score: None,
         }
         .resolve();
         assert_eq!(

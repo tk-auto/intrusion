@@ -57,7 +57,8 @@ use super::{blank_grid, draw, Grid};
 use crate::alert::TOP_RUNG;
 use crate::campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 use crate::campaign::{
-    Campaign, Flavour, Loudness, MapPos, NodeId, Offer, Outlay, ROUTE_UNLOCK_COST,
+    ArchiveGate, Campaign, Flavour, Loudness, MapPos, NodeId, Offer, Outlay, DEPTH_TO_ARCHIVE,
+    GATE_RULES_MAX, ROUTE_UNLOCK_COST, STARS_PER_FACILITY, THRESHOLDS,
 };
 use crate::category::Category;
 use crate::modifiers::ModifierDirection;
@@ -158,8 +159,19 @@ const ALERT_ROW: u32 = 1;
 /// facility does not raise the end screen: the map comes up instead, so if the stars are
 /// not here they are nowhere.
 const SCORE_ROW: u32 = 2;
-const WALLET_ROW: u32 = 3;
-const MAP_TOP: u32 = 4;
+/// **The archive gauge** (#573): the run's banked stars against the thresholds that
+/// decide how hard its ending is.
+///
+/// Directly under the score row, because it is that row's *consequence* — the stars you
+/// just earned, and what they have bought. And drawn on **every** frame, balance-zero
+/// style like the wallet line beneath it: a run at nought stars is already facing three
+/// harder rules at the archive, which is the most actionable thing the screen can say at
+/// the moment the first road is chosen. A gauge that appeared once the first raid was
+/// banked would arrive after the first decision it exists to inform, and would move the
+/// picture while the player was reading it.
+const GAUGE_ROW: u32 = 3;
+const WALLET_ROW: u32 = 4;
+const MAP_TOP: u32 = 5;
 
 /// Rows the list of rows-you-may-take needs beneath the map: one per offer at
 /// [`ENTRY_SPACING`], for the widest offer a choice point can make — three open edges
@@ -839,6 +851,134 @@ const _: () = assert!(
     "the score row overruns the v1 board — shorten an axis label",
 );
 
+/// What the gauge row leads with (#573) — the facility it is about, in the word the map
+/// already teaches for it. Not *stars*: the row is drawn in stars, and a label naming them
+/// would be captioning the picture. What the player needs told is **which building this
+/// number decides**.
+const GAUGE_LABEL: &str = "Archive";
+
+/// The mark standing at each of [`THRESHOLDS`] — a plain rule between two runs of stars,
+/// so the bar reads as *segments you cross* rather than as one long count.
+///
+/// It sits **before** the star that clears the threshold, which is the only place it can
+/// be honest: six stars takes the first rule off, so the mark belongs between the fifth
+/// star and the sixth. A player counting to the next mark is counting exactly what they
+/// have to earn.
+const GAUGE_MARK: char = '|';
+
+/// What the tail says the archive is carrying — the number of rules, in the design's own
+/// word for one (§12.6). The singular is its own constant because *1 rules* is the kind of
+/// thing a formatted count says and nothing else here would catch it.
+const GAUGE_RULE: &str = "rule";
+const GAUGE_RULES: &str = "rules";
+/// What it says once every threshold is cleared. It names the **reason**, not just the
+/// absence: this row is the one payout the whole mechanism has, and *none* on its own
+/// would read as the readout having nothing to report.
+const GAUGE_CLEARED: &str = "no rules";
+
+// A two-digit count would widen the tail past what the bound below measures — and the gate
+// deals three rules, so this is a guard on a future edit rather than on today's number.
+const _: () = assert!(
+    GATE_RULES_MAX < 10,
+    "a two-digit gate would widen the gauge"
+);
+
+/// The widest the gauge can be, in cells: the label, the standard country's whole bar —
+/// one cell per star it can earn, plus a mark at each threshold — and the widest tail.
+///
+/// Measured against the **standard** country ([`DEPTH_TO_ARCHIVE`]) because that is the
+/// one the game ships; a shorter country drawn by `Campaign::to_depth` draws a shorter
+/// bar, and a longer one is clamped by [`draw`] like every other row here.
+const GAUGE_LINE_MAX: usize = {
+    let bar = (STARS_PER_FACILITY * DEPTH_TO_ARCHIVE) as usize + THRESHOLDS.len();
+    let counted = 1 + 1 + GAUGE_RULES.len();
+    let tail = if GAUGE_CLEARED.len() > counted {
+        GAUGE_CLEARED.len()
+    } else {
+        counted
+    };
+    GAUGE_LABEL.len() + 1 + bar + 1 + tail
+};
+
+const _: () = assert!(
+    GAUGE_LINE_MAX <= LevelConfig::V1.width as usize,
+    "the archive gauge overruns the v1 board (§10.2): shorten its label or its tail",
+);
+
+/// **The archive gauge** (§14 v3/#573): the run's banked stars against the thresholds
+/// that take a rule off its ending, and what it is currently facing.
+///
+/// One cell per star the country can be worth, filled with the score's own marks
+/// (§4.6/§11.3) — `★` **Owned** for one earned, `☆` **Ground** for one still out there —
+/// so the bar needs no legend and no new glyph: the row directly above it has just taught
+/// both marks, on the same screen, for the same thing. The tail is the fact the player
+/// acts on, in the §11.2 colour they already read as *bent against you*: **Warning** while
+/// the archive carries anything, **Owned** once it carries nothing, which is the same cue
+/// the alert line one row up gives a facility off guard.
+///
+/// **It is a fill bar with thresholds and nothing else** (#573). The per-facility stars
+/// are the score row's and the end screen's; this row shows one number against a few
+/// marks, and if it ever grows a second fact it has become a score screen the campaign
+/// does not want.
+///
+/// Nothing is drawn on a country with no facilities before its terminus — the degenerate
+/// zero-depth campaign, where the start node *is* the archive. There is no ground on which
+/// to earn a star, so a bar with no cells would be a readout of a question that was never
+/// asked.
+fn draw_gauge(grid: &mut Grid, y: u32, gate: ArchiveGate) {
+    if gate.ceiling() == 0 {
+        return;
+    }
+    let bar = gauge_bar(gate);
+    let (tail, tail_category) = gauge_tail(gate);
+    let len = GAUGE_LABEL.chars().count() + 1 + bar.len() + 1 + tail.chars().count();
+    let mut x = centre(grid.width, len as u32);
+    draw(grid, x, y, GAUGE_LABEL, Category::Ground);
+    x += GAUGE_LABEL.chars().count() as u32 + 1;
+    for (glyph, category) in bar {
+        draw(grid, x, y, &glyph.to_string(), category);
+        x += 1;
+    }
+    draw(grid, x + 1, y, &tail, tail_category);
+}
+
+/// The bar itself, cell by cell with its §11.2 meaning — the one walk the drawing and the
+/// width it is centred by share.
+fn gauge_bar(gate: ArchiveGate) -> Vec<(char, Category)> {
+    let mut cells = Vec::new();
+    for star in 0..gate.ceiling() {
+        if THRESHOLDS.contains(&star) {
+            cells.push((GAUGE_MARK, Category::Ground));
+        }
+        let earned = star < gate.stars();
+        let glyph = if earned { STAR_EARNED } else { STAR_MISSED };
+        let category = if earned {
+            Category::Owned
+        } else {
+            Category::Ground
+        };
+        cells.push((glyph, category));
+    }
+    cells
+}
+
+/// What the archive is currently carrying, as the tail says it — and never *harder*: the
+/// word would not fit beside an eighteen-cell bar, and the Warning colour is already the
+/// game's word for it (§11.2).
+fn gauge_tail(gate: ArchiveGate) -> (String, Category) {
+    match gate.rules() {
+        0 => (GAUGE_CLEARED.to_string(), Category::Owned),
+        1 => (
+            format!("1 {GAUGE_RULE}"),
+            direction_category(ModifierDirection::Harder),
+        ),
+        rules => (
+            format!("{rules} {GAUGE_RULES}"),
+            direction_category(ModifierDirection::Harder),
+        ),
+    }
+}
+
 /// What the line says the noise did to the facility it names.
 fn suffix(direction: ModifierDirection) -> &'static str {
     match direction {
@@ -1046,6 +1186,11 @@ pub(super) fn picture(
     if let Some(score) = run.last_score() {
         draw_score(&mut grid, SCORE_ROW, score);
     }
+
+    // What those stars have bought at the **archive** (§4.6/#573) — the run's total against
+    // the thresholds that take a rule off its ending, from the first frame onward, because
+    // the decision it informs (*raid one more, or go in*) is made long before the door.
+    draw_gauge(&mut grid, GAUGE_ROW, run.archive_gate());
 
     // What the run has to spend (§2.2/#211) — always, so the hub's balance is never a
     // thing the player has to remember.
