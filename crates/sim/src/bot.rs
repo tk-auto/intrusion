@@ -591,8 +591,21 @@ impl StealthBot {
             .into_iter()
             .find(|&dir| {
                 player.step(dir).is_some_and(|table| {
-                    facility.terrain(table) == Some(Terrain::PartialCover)
-                        && conceals_from_all(state, table, player, &threats)
+                    facility.terrain(table) == Some(Terrain::PartialCover) && {
+                        // **A bump on the run's own Cover is a shove, not a duck**
+                        // (§8.3/§10.3/#562): the table ends a cell further on and the bot
+                        // ends where the table was. Both are asked of core
+                        // ([`State::cover_push`]) rather than worked out here, so the
+                        // geometry the bot plans against is the geometry the press
+                        // produces — predicting a stationary crouch on a piece that moves
+                        // would have the bot walking into cover it had already pushed out
+                        // of the way.
+                        let (table, from) = match state.cover_push(dir) {
+                            Some(push) => (push.cover, push.player),
+                            None => (table, player),
+                        };
+                        conceals_from_all(state, table, from, &threats)
+                    }
                 })
             })
             .map(Input::Step)

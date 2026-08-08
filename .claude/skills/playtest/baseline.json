@@ -1,6 +1,6 @@
 {
-  "_note": "Baseline metrics snapshot the playtest skill diffs against (\u00a713.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` \u2014 never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
-  "captured_at_commit": "5e3f2d3",
+  "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` — never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
+  "captured_at_commit": "9efdb5f",
   "command": "for p in balanced cautious aggressive careless; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -42,7 +42,8 @@
           "drone": 0,
           "false_call": 0,
           "dart": 0,
-          "repel": 0
+          "repel": 0,
+          "cover": 0
         },
         "usage_share": {
           "wait": 0.2693,
@@ -62,7 +63,8 @@
           "drone": 0.0,
           "false_call": 0.0,
           "dart": 0.0,
-          "repel": 0.0
+          "repel": 0.0,
+          "cover": 0.0
         },
         "diversity": 0.601,
         "alert_peak_mean": 0.76,
@@ -127,7 +129,8 @@
           "drone": 0,
           "false_call": 0,
           "dart": 0,
-          "repel": 0
+          "repel": 0,
+          "cover": 0
         },
         "usage_share": {
           "wait": 0.3094,
@@ -147,7 +150,8 @@
           "drone": 0.0,
           "false_call": 0.0,
           "dart": 0.0,
-          "repel": 0.0
+          "repel": 0.0,
+          "cover": 0.0
         },
         "diversity": 0.3411,
         "alert_peak_mean": 0.65,
@@ -212,7 +216,8 @@
           "drone": 0,
           "false_call": 0,
           "dart": 0,
-          "repel": 0
+          "repel": 0,
+          "cover": 0
         },
         "usage_share": {
           "wait": 0.0166,
@@ -232,7 +237,8 @@
           "drone": 0.0,
           "false_call": 0.0,
           "dart": 0.0,
-          "repel": 0.0
+          "repel": 0.0,
+          "cover": 0.0
         },
         "diversity": 0.5796,
         "alert_peak_mean": 1.05,
@@ -297,7 +303,8 @@
           "drone": 0,
           "false_call": 0,
           "dart": 0,
-          "repel": 0
+          "repel": 0,
+          "cover": 0
         },
         "usage_share": {
           "wait": 0.0116,
@@ -317,7 +324,8 @@
           "drone": 0.0,
           "false_call": 0.0,
           "dart": 0.0,
-          "repel": 0.0
+          "repel": 0.0,
+          "cover": 0.0
         },
         "diversity": 0.5035,
         "alert_peak_mean": 1.19,

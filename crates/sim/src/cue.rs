@@ -274,6 +274,39 @@ impl Moment<'_> {
             AbilityId::FalseCall => self.false_call(status),
             AbilityId::Dart => self.dart(status),
             AbilityId::Repel => self.repel(status),
+            // **Cover** (§8.3/§10.3/#562) is a fourth kind of "no cue", and it is not that
+            // the ability is weak: **this policy cannot aim it.**
+            //
+            // The ability is aimed by facing (§8.4) and the bot faces the way it last
+            // stepped — there is no turn-in-place (§5). Its router prices watched cells out
+            // and holds rather than stepping into a cone, so by the time a patrol is close
+            // enough to take cover from, every recent step has been *away* from that cone
+            // and the faced cell is on the wrong side of the bot. A cue was written to the
+            // §8.3 row and gated on core's own geometry — *would ducking behind the piece
+            // this press puts down hide me from every guard I perceive?*
+            // ([`State::crouch_would_conceal`]) — and it fired **zero** times over 120 seeds
+            // on each of the three temperaments. Ungated it fired a dozen times in forty and
+            // never once ducked behind what it had built, which is a press bought with a
+            // turn and a 35-turn lockout for nothing (§13.3, and `Verb::Cover`'s own doc
+            // names that exact tell).
+            //
+            // The other half of the ability is worse served still. What it *sells* is a
+            // crossing walked behind the piece, one push a turn — and the bot's route is a
+            // Dijkstra over cells the player can walk **through**, which a table is not, so
+            // the router plans around the bot's own cover rather than through it. Making it
+            // plan through would mean teaching the field that a pushable solid is passable
+            // when and only when the cell beyond it is free, and then following that route
+            // as a mode: a second policy, exactly as the Drone's flight plan is, and its own
+            // ticket for the same reason.
+            //
+            // So the honest report is a zero in the histogram (`Verb::Cover`) with this
+            // comment and `docs/stats/abilities/cover.md` saying which kind of zero it is
+            // (§13.3). What the bot *does* still do is plan a duck against the right
+            // geometry: on the run's own cover a bump is a shove, and `Bot::crouch` asks
+            // [`State::cover_push`] rather than assuming the furniture stays put — so a
+            // scripted run, or a policy that grows the mode later, meets a bot that is not
+            // blind to the mechanic.
+            AbilityId::Cover => None,
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.

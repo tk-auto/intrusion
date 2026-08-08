@@ -145,7 +145,7 @@ impl State {
     ///   look down a bench and see the player through its other tables; a guard
     ///   that has come round to the player's *own* side does see them. Other runs
     ///   the player happens to stand beside cover nothing. Integer arithmetic
-    ///   throughout ([`cover::run_conceals`]), so it is exactly deterministic
+    ///   throughout ([`crouch::run_conceals`]), so it is exactly deterministic
     ///   (§12.4).
     ///
     /// …and a fourth that is not the facility's: the **ghost** debug switch
@@ -191,8 +191,8 @@ impl State {
         let Some(anchor) = self.crouched_behind else {
             return false;
         };
-        let run = cover::cover_run(self.layout.facility(), anchor);
-        cover::run_conceals(&run, self.player, viewer)
+        let run = crouch::cover_run(self.layout.facility(), anchor);
+        crouch::run_conceals(&run, self.player, viewer)
     }
 
     /// Whether `guard` would **detect** the player *right now* — the live §7.2
@@ -247,7 +247,7 @@ impl State {
     /// piece of furniture, so it hides as one.
     pub fn crouch_cover(&self) -> Vec<Cell> {
         self.crouched_behind
-            .map(|anchor| cover::cover_run(self.layout.facility(), anchor))
+            .map(|anchor| crouch::cover_run(self.layout.facility(), anchor))
             .unwrap_or_default()
     }
 
@@ -260,7 +260,7 @@ impl State {
     /// held; this answers *"if I ducked behind that bench from there, would he
     /// see me?"* — the question §10.3's half-plane rule was shaped to be readable
     /// at a glance (#377), and the one a player asks before spending the turn. It
-    /// is the same [`cover::run_conceals`] the held pose is judged by, on the same
+    /// is the same [`crouch::run_conceals`] the held pose is judged by, on the same
     /// whole §10.1a run, so a caller can never drift from the rule by planning
     /// against a private copy of it.
     ///
@@ -273,8 +273,8 @@ impl State {
     /// channels (§11.5a — geometry is always known, and a perceived guard's cell
     /// with it) and must ask core rather than re-derive the half-plane.
     pub fn crouch_would_conceal(&self, table: Cell, from: Cell, viewer: Cell) -> bool {
-        let run = cover::cover_run(self.layout.facility(), table);
-        cover::run_conceals(&run, from, viewer)
+        let run = crouch::cover_run(self.layout.facility(), table);
+        crouch::run_conceals(&run, from, viewer)
     }
 
     /// Whether a crouch anchored on `table` **survives** a plain step to `to`
@@ -289,7 +289,7 @@ impl State {
     /// other spent action, stands the player up whatever this says (see the turn
     /// loop's `crouch_walked`).
     pub fn crouch_holds(&self, table: Cell, to: Cell) -> bool {
-        cover::run_hugs(&cover::cover_run(self.layout.facility(), table), to)
+        crouch::run_hugs(&crouch::cover_run(self.layout.facility(), table), to)
     }
 
     /// The guards, for rendering and tests.

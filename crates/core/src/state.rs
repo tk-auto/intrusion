@@ -59,7 +59,7 @@ use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::control::{transfers_control, Remote};
-use crate::cover;
+use crate::crouch;
 use crate::duct::Duct;
 use crate::exchange::{Choice, Exchange};
 use crate::facility::{Facility, Terrain};
@@ -87,6 +87,7 @@ mod activation;
 mod bore;
 mod bump;
 mod control;
+mod cover;
 mod dart;
 mod doors;
 mod effects;
@@ -101,6 +102,7 @@ mod tuning;
 mod view;
 
 pub use bore::BoreRefusal;
+pub use cover::CoverPush;
 pub use dart::DartShot;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
@@ -429,6 +431,20 @@ pub struct State {
     /// — so *"every cell is released"* is a property of the shape rather than of a sweep
     /// that could miss one.
     repel: Option<EffectArea>,
+    /// The cell the run's deployed **Cover** is standing in (§8.3/§10.3/#562), or `None`
+    /// — the one table this ability owns.
+    ///
+    /// A **bookmark, not a model**: the cover itself is ordinary
+    /// [`Terrain::PartialCover`] in the one spatial model (§10.5), read from the grid by
+    /// every §10.3 consumer like any other table, and what this remembers is only *which*
+    /// table a bump may shove and the window must hand back. One at a time — the ability
+    /// is activated (§8.2) and its duration sits well inside its lockout, so a second
+    /// deploy cannot overlap the first.
+    ///
+    /// Dropped whole when the window ends either way (§8.2 expiry, §4.4 toggle-off) from
+    /// the one teardown list ([`unwind_effect`](Self::unwind_effect)), so *"nothing is
+    /// left behind"* is a property of the shape rather than of a sweep that could miss it.
+    cover: Option<Cell>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -639,6 +655,7 @@ impl State {
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
             repel: None,
+            cover: None,
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -1257,6 +1274,7 @@ impl State {
                         Aimed::Call(reach) => self.fire_false_call(reach, events),
                         Aimed::Dart(shot) => self.fire_dart(&shot, events),
                         Aimed::Repel(field) => self.fire_repel(field, events),
+                        Aimed::Cover(cell) => self.deploy_cover(cell),
                         Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }
@@ -1393,6 +1411,12 @@ impl State {
         if declares(id, Effect::Repel) {
             self.release_repel();
         }
+        // The table is the window (§8.3/§10.3/#562), the seals' rule read over terrain:
+        // ending it early takes the cover away at once — and the pose with it — and
+        // refunds nothing, the full lockout still runs (§8.2).
+        if id == AbilityId::Cover {
+            self.release_cover();
+        }
         // The effect is gone, so its marks go with it (#308/#338) — an early end
         // leaves no residue to fade over nothing.
         self.clear_effect_marks(id);
@@ -1402,7 +1426,7 @@ impl State {
     /// pose survives only plain movement — the turn's events carry a
     /// [`Event::Moved`], so an interaction that spends the turn in place (a
     /// door, a grab, a haul-debt payment) still stands the player up — that
-    /// lands still hugging the anchored run ([`cover::run_hugs`]: within one
+    /// lands still hugging the anchored run ([`crouch::run_hugs`]: within one
     /// cell of any of its tables, the diagonal past a bench's end included, so
     /// the walk can round the corner). A sprinting step (§8.3 Run) is judged
     /// where it *ends*, like every other consequence of the two-cell move.
@@ -1411,8 +1435,8 @@ impl State {
             return false;
         };
         events.iter().any(|e| matches!(e, Event::Moved { .. }))
-            && cover::run_hugs(
-                &cover::cover_run(self.layout.facility(), anchor),
+            && crouch::run_hugs(
+                &crouch::cover_run(self.layout.facility(), anchor),
                 self.player,
             )
     }
@@ -1421,8 +1445,9 @@ impl State {
     /// behind (§10.3) — the "is this bump the pose I already hold" question the
     /// interaction ladder asks to keep a held re-bump free (§4.4).
     fn crouch_covers(&self, table: Cell) -> bool {
-        self.crouched_behind
-            .is_some_and(|anchor| cover::cover_run(self.layout.facility(), anchor).contains(&table))
+        self.crouched_behind.is_some_and(|anchor| {
+            crouch::cover_run(self.layout.facility(), anchor).contains(&table)
+        })
     }
 
     /// Phases 2 and 3 (§4.2): recompute sight, run the radio net, then let the

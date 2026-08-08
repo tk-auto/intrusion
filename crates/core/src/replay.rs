@@ -79,6 +79,12 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // unique for [`parse_script`] to be unambiguous. (The bar's own mnemonic is a
         // different question with a different answer — it is derived per loadout, §11.6.)
         "Repel" => 'p',
+        // `h` for *hoarding* — the temporary screen you put up and take away again,
+        // which is what this ability is. Every letter of *Cover* is already spoken for
+        // (`c` Camouflage, `o` Drone, `v` Vision, `e` Saver, `r` Run) and the letters
+        // have to stay unique for [`parse_script`] to be unambiguous, so the pick is
+        // semantic on the "`s` for *seal*" precedent rather than an initial.
+        "Cover" => 'h',
         _ => return None,
     })
 }

@@ -725,7 +725,7 @@ mark) > investigation area > Effect wash.**
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** — or it lies on the **watcher line**, the sightline of a guard you cannot see that is watching you right now |
-| **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
+| **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `π` here is **a piece of Cover you deployed** rather than furniture the building came with (§8.3/#562), and it rides the piece as you push it; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
 | **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
 | **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
 

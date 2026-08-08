@@ -30,6 +30,7 @@ mod bore;
 mod cache;
 mod comms;
 mod control;
+mod cover;
 mod dart;
 mod doors;
 mod ducts;

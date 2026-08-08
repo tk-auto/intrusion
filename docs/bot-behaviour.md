@@ -238,6 +238,11 @@ Three rules govern the pose, and all three ask **core**, never a local copy of �
   A **sensed** guard counts here even though it does not for the rear strike, and the
   asymmetry is real: striking a back needs the guard's *facing*, which a sensed guard
   does not give up; hiding across a bench needs only where it stands, which it does.
+  On the run's **own deployed Cover** (§8.3/#562) the duck is a *shove*, so the geometry
+  it is judged against is the one the press produces — the bot a cell on, the table a cell
+  further — and that too is asked of core (`State::cover_push`) rather than assumed. The
+  bot never presses that ability today (§4.4a), but a stationary prediction for furniture
+  that moves would have been silently wrong the first time anything did.
 - **Hold** while that stays true — waiting is the one action other than the duck that
   keeps the pose.
 - **Crouch-walk** when it stops: a plain step landing still hugging the run keeps the
@@ -320,8 +325,9 @@ it is ruled out the same way.
 
 ### 4.4a The cues that exist, and the fact each one reads
 
-Every activated verb is cued (#347), with one recorded exception: the **Drone**
-(#273), whose press opens a piloting mode the policy does not drive — flying it well
+Every activated verb is cued (#347), with two recorded exceptions: the **Drone**
+(#273), whose press opens a piloting mode the policy does not drive, and **Cover**
+(#562), whose press the policy cannot **aim** — see below and appendix 63 — flying it well
 needs its own routing and a judgement about the parked body, so until that exists its
 zero in the histogram is deliberate (§13.3; `docs/stats/abilities/drone.md` says which
 kind of zero). What a cue is *allowed* to key off
@@ -343,6 +349,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Dart** | the watcher on your line you could not have walked up to | **the temperament's takedown appetite**, core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
 | **Repel** | a hunt closing across ground a Lockdown cannot touch | intent is `Flee`, somebody in reach, and a route to spend the turns it buys on |
 | **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
+| **Cover** | — **activated but uncued** (#562): aimed by facing, and the bot faces the way it last stepped | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
 | **Saver** | — **passive**, and deliberately uncued even though it has a budget (#243) | — |
@@ -445,6 +452,36 @@ Three of these are worth reading twice, because they are the seam's own rules bi
   step, the field holds the hunt off for eight turns and then hands the bot back the
   same cell with a ring of guards around it — which is the §8.3 row's own warning about
   what the ability costs, written as a predicate.
+
+- **Cover has no cue, and the reason is aim rather than value** (#562). It is the second
+  activated verb with no arm, and unlike the Drone's the absence was reached by
+  measurement: a cue *was* written to the §8.3 row and it does not ship.
+
+  The ability puts a §10.3 table in the cell you face (§8.4) and sells a crossing walked
+  behind it. The bot **faces the way it last stepped** — there is no turn-in-place (§5) —
+  and its router prices watched cells out and holds rather than stepping into a cone, so by
+  the time a patrol is close enough that taking cover is the plan, every recent step has
+  been *away* from that cone and the faced cell is on the wrong side of the bot. Gated on
+  core's own geometry (*would ducking behind the piece this press puts down hide me from
+  every guard I perceive?*, `State::crouch_would_conceal`) the cue fired **zero** times over
+  120 seeds on each of three temperaments. Ungated — `TakeCover`, no cupboard, no bench at
+  the elbow, a patrol closing — it fired twelve times in forty seeds and **never once ducked
+  behind what it had built**, which is a turn and a 35-turn lockout spent on furniture the
+  bot walked away from: the histogram reading *used* while measuring nothing (#347's failure
+  mode, and the tell `Verb::Cover`'s own doc names).
+
+  The crossing is served worse still. The route is a Dijkstra over cells the player can walk
+  **through**, and a table is not one — so the router plans **around** the bot's own cover.
+  A real cue needs the field to know that a pushable solid is passable when and only when
+  the cell beyond it is free, and then a mode that follows that route: a second policy,
+  exactly as the Drone's flight plan is, and its own ticket.
+
+  What the bot *did* gain is the seam: `Bot::crouch` asks `State::cover_push` rather than
+  assuming the furniture stays put, so on the run's own cover it predicts the shove — the
+  bot a cell on, the table a cell further — instead of a stationary duck the press does not
+  produce. Predicting one and pressing the other is the usable line's failure mode moved
+  into the geometry, and it would have been silently wrong the first time a policy pressed
+  the key.
 
 **The Guide's zero is a third kind, and it is the interesting one.** Vision and the
 Saver have no cue because there is no key; the Guide has no key *either*, but unlike
