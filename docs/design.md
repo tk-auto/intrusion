@@ -421,14 +421,18 @@ and changed nothing would be the facade the other way round.
 
 #### Where the stars are shown
 
-- **Quick play** — on the end screen, beside the run's ledger.
-- **The campaign** — on the **map**, per facility, because §14 v3 settles that a completed
-  facility does not raise the end screen; the map comes up instead, so if the stars are
-  not there they are nowhere. The run keeps the score of every facility it completed, in
-  raid order, and its total is the sum.
-
-Either way the axes are **named**, never a bare `★★☆`: knowing which one you missed is the
-entire point.
+- **Quick play** — on the end screen, beside the run's ledger. The axes are **named**,
+  never a bare `★★☆`: knowing which one you missed is the entire point.
+- **The campaign** — the run keeps the score of every facility it completed, in raid
+  order, and its total is the sum. What the **map** shows of it is the *total*, on the
+  archive gauge (§14 v3/#573), and not the per-raid axes: the map is where the next
+  decision is made, and four stacked readouts over a picture is a dashboard rather than a
+  map. **This is a known gap and it is recorded rather than hidden** — §14 v3 settles
+  that a completed facility does not raise the end screen, so a campaign player is
+  currently told *how many* stars they have and never *which axis they keep missing*,
+  which is the one thing §4.6 says a rating is good for. The candidates when it is
+  addressed are the run's own end screen and the facility brief; the map is not one of
+  them.
 
 #### Two known states, recorded rather than hidden
 
@@ -4401,7 +4405,12 @@ bullet below fills one of its seams.
       borrowed wholesale and earned harder. A **gauge** on the map screen (#208) shows the
       run's stars against the thresholds **from the first frame**, because seeing that you
       are one threshold short is what turns *raid one more facility* into a decision paid
-      for in time and in the alert an extra raid may raise. And the rules the archive is
+      for in time and in the alert an extra raid may raise. The gauge is **two lines and
+      no more**: a bar of one cell per star the country is worth, with a mark before each
+      threshold that goes the player's own colour as it is reached, and beneath it the
+      same fact in words — `6 stars => difficulty level 2`. It says **how hard**, never
+      *what*: naming the rules is the brief's job one press later, and a map that listed
+      them would be a Level info tab with a picture on it. And the rules the archive is
       carrying are **named on its brief**, over the press that walks in: the player chooses
       *when* to enter the terminus, and choosing blind is a coin flip they paid six raids
       for. A gauge at the archive door is a verdict; a gauge on the map the whole time is

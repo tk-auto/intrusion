@@ -34,17 +34,19 @@
 //! # Colour is named, never chosen (§11.2)
 //!
 //! Every glyph here carries a [`Category`] and the shell owns the table: **Owned** for
-//! where you stand (it is yours) and for the intel in the wallet (likewise), **Interest**
-//! for the archive and for the row the marker rests on (the thing worth reaching for),
-//! **Neutral** for a live option, **Ground** for the road behind you, the facilities you
-//! have spent, and the locked edge you cannot take yet.
+//! where you stand (it is yours) and for the stars the run has banked (likewise),
+//! **Interest** for the archive and for the row the marker rests on (the thing worth
+//! reaching for), **Neutral** for a live option, **Ground** for the road behind you, the
+//! facilities you have spent, and the locked edge you cannot take yet.
 //!
 //! # It is also the hub (§14 v3/#211)
 //!
-//! Intel is the run's currency and this is the one screen it is spent on, so the balance
-//! is a line of the picture rather than a panel somewhere else: the prices and the purse
-//! are read in one glance. There is no separate shop — a second modal screen carrying one
-//! list would be a screen to learn for no fact it could not have said here.
+//! Intel is the run's currency and this is the one screen it is spent on. There is no
+//! separate shop — a second modal screen carrying one list would be a screen to learn for
+//! no fact it could not have said here — and no standing balance either: the prices live
+//! on the facility brief's own rows, an unaffordable one is drawn Ground, and the hub's
+//! answer to a spend names the balance as it changes it. What the header carries instead
+//! is the one **forward**-looking readout the run has, the archive gauge (#573).
 
 use super::alert::condition_line;
 use super::help::{right_aligned_start, FOOTER_INDENT, THEME_KEY};
@@ -58,12 +60,12 @@ use crate::alert::TOP_RUNG;
 use crate::campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 use crate::campaign::{
     ArchiveGate, Campaign, Flavour, Loudness, MapPos, NodeId, Offer, Outlay, DEPTH_TO_ARCHIVE,
-    GATE_RULES_MAX, ROUTE_UNLOCK_COST, STARS_PER_FACILITY, THRESHOLDS,
+    ROUTE_UNLOCK_COST, STARS_PER_FACILITY, THRESHOLDS,
 };
 use crate::category::Category;
 use crate::modifiers::ModifierDirection;
 use crate::place::LevelConfig;
-use crate::score::{Axis, Score, STAR_EARNED, STAR_MISSED};
+use crate::score::{STAR_EARNED, STAR_MISSED};
 
 pub mod brief;
 #[cfg(test)]
@@ -131,8 +133,8 @@ const EDGE_GLYPH: char = '·';
 /// geometry always, contents once you are close enough to see.
 const UNKNOWN_GLYPH: char = '▫';
 
-/// The screen row the heading sits on, the row the campaign alert reports on, the row the
-/// **wallet** reports on, and the first row of the map band beneath them.
+/// The screen row the heading sits on, the row the campaign alert reports on, the two rows
+/// the **archive gauge** takes, and the first row of the map band beneath them.
 ///
 /// The alert takes the blank that used to separate the heading from the picture, so the
 /// band keeps every row it had: the line is a **subtitle** — what the country ahead
@@ -141,37 +143,31 @@ const UNKNOWN_GLYPH: char = '▫';
 /// not move when it is not: a map band that changed height between two looks at the same
 /// screen would be a picture that jumped.
 ///
-/// The wallet line (#211) costs the band a real row, and it is a **fixed** one for the
-/// same reason: it is drawn on every frame, balance zero included, so the picture below it
-/// never moves. A readout that appeared with the run's first haul would make the map jump
-/// exactly once, at the moment the player was reading it.
+/// # The header is two readouts, not four
+///
+/// It used to carry the last raid's three named stars (#563) and a standing intel balance
+/// (#211) as well. Both are gone, and what is left is the run's **one forward-looking
+/// question**: how hard is the ending going to be, and how far off the next threshold are
+/// you. The two lines it dropped were both *reports* — what the last raid was worth, what
+/// is in the purse — and four stacked readouts over a picture is a dashboard rather than a
+/// map. What that costs is written down where each of them was argued for (§4.6 and §14
+/// v3's hub); the affordances that actually gate a press are unaffected, because the brief
+/// prices every sink on its own row and draws an unaffordable one Ground.
 const HEADING_ROW: u32 = 0;
 const ALERT_ROW: u32 = 1;
-/// The **score row** (#563): what the raid the run just walked out of was worth, three
-/// stars, one per axis.
+/// **The archive gauge** (#573): the run's banked stars against the thresholds that decide
+/// how hard its ending is — the bar itself.
 ///
-/// It sits directly under the alert line because the two say the same kind of thing — *the
-/// raid behind you*, in the past tense — and a fixed row for the same reason the wallet's
-/// is fixed: it is reserved on every frame, drawn only once there is a raid to report, so
-/// the picture below never jumps when the first score arrives.
-///
-/// **This is the campaign's only score surface**, because §14 v3 settles that a completed
-/// facility does not raise the end screen: the map comes up instead, so if the stars are
-/// not here they are nowhere.
-const SCORE_ROW: u32 = 2;
-/// **The archive gauge** (#573): the run's banked stars against the thresholds that
-/// decide how hard its ending is.
-///
-/// Directly under the score row, because it is that row's *consequence* — the stars you
-/// just earned, and what they have bought. And drawn on **every** frame, balance-zero
-/// style like the wallet line beneath it: a run at nought stars is already facing three
-/// harder rules at the archive, which is the most actionable thing the screen can say at
+/// Drawn on **every** frame, from the first: a run at nought stars is already facing the
+/// hardest ending the game has, which is the most actionable thing this screen can say at
 /// the moment the first road is chosen. A gauge that appeared once the first raid was
 /// banked would arrive after the first decision it exists to inform, and would move the
 /// picture while the player was reading it.
-const GAUGE_ROW: u32 = 3;
-const WALLET_ROW: u32 = 4;
-const MAP_TOP: u32 = 5;
+const GAUGE_ROW: u32 = 2;
+/// The gauge's second line: the same fact in words ([`gauge_summary`]), and the row the
+/// hub's answer to a spend borrows while there is one to give ([`Outlay::message`]).
+const SUMMARY_ROW: u32 = 3;
+const MAP_TOP: u32 = 4;
 
 /// Rows the list of rows-you-may-take needs beneath the map: one per offer at
 /// [`ENTRY_SPACING`], for the widest offer a choice point can make — three open edges
@@ -217,13 +213,6 @@ const fn row_width(label: usize, blurb: usize) -> usize {
 /// [`row_width`] has to measure exactly what [`row_text`] prints.
 const SEPARATOR: &str = " — ";
 
-/// What stands between the score row's three axes (#563) — the **middot**, not the dash.
-///
-/// The dash above joins a thing to what it is worth (*Depot — an ordinary facility*), and
-/// the three axes are not that: they are peers, none of them a gloss on another, and the
-/// footers already teach this mark as *and another one of the same kind*.
-const SCORE_SEPARATOR: &str = " · ";
-
 /// How the alert line names a run that nobody ever noticed (§7.3 condition 0/#210).
 ///
 /// It does **not** reuse the Level info tab's rung-0 wording (`no alert — you are
@@ -263,46 +252,6 @@ const OFF_GUARD: &str = "off guard";
 /// here rather than clip a line on a player's screen.
 const CONDITION_LEN: usize = "Condition 0 of 0".len();
 const _: () = assert!(TOP_RUNG < 10, "a two-digit rung would widen the alert line");
-
-/// How the wallet line names the currency (§11.8: *intel* is already the world's word, so
-/// there is nothing to translate) — the readout that makes the map the run's **hub**
-/// (§14 v3/#211).
-///
-/// It is here and not in the level's HUD because a campaign's intel is not a thing you
-/// carry through a facility: inside one it is the raid's own count, and only a completed
-/// raid banks it. The balance is what the *next* decision is made against, so it belongs
-/// on the screen that decision is made on.
-const WALLET_LABEL: &str = "Intel";
-
-/// What the wallet line says when the run has nothing banked — the whole of the currency's
-/// starting state, said rather than left as a bare `Intel 0` the player has to interpret.
-///
-/// Its own wording because zero is the interesting case for a run that has just walked out
-/// of a facility empty-handed: nothing is taken away for that (appendix 47), and the line
-/// saying so plainly is the only feedback there is.
-const WALLET_EMPTY: &str = "nothing banked";
-
-/// The widest the wallet line can ever be, in cells. The balance is bounded in practice by
-/// the consoles a run can carry out, not by the type, so the bound reserves a sane number
-/// of digits and asserts the wording fits around them rather than pretending a `u32` could
-/// not be wider.
-const WALLET_DIGITS: usize = 4;
-const WALLET_LINE_MAX: usize = {
-    let counted = WALLET_LABEL.len() + 1 + WALLET_DIGITS;
-    let empty = WALLET_LABEL.len() + SEPARATOR.len() + WALLET_EMPTY.len();
-    if counted > empty {
-        counted
-    } else {
-        empty
-    }
-};
-
-/// The wallet line fits the board too (§10.2/§11.4), on the terms every other line here
-/// does.
-const _: () = assert!(
-    WALLET_LINE_MAX <= LevelConfig::V1.width as usize,
-    "the wallet line must fit the v1 board (§10.2): shorten its wording",
-);
 
 /// The widest the alert line can ever be, in cells — the widest lead against the widest
 /// tail, with the widest flavour label standing in the tail that names one.
@@ -741,122 +690,6 @@ fn alert_text(run: &Campaign, ahead: &[Offer]) -> Option<(String, Category)> {
     Some((format!("{lead}{SEPARATOR}{tail}"), category))
 }
 
-/// **What the run has to spend** (§2.2/§14 v3/#211), as the line under the alert says it.
-///
-/// The map is the campaign's **hub**: it is where intel is spent, and a currency whose
-/// balance is not on the screen the prices are on is a currency the player has to keep in
-/// their head. So the line is unconditional — a run that has banked nothing says so
-/// ([`WALLET_EMPTY`]) rather than showing no line at all, which would read as the readout
-/// being broken rather than as the wallet being empty.
-///
-/// **Owned**, not Interest (§11.2): the intel in the wallet is already yours, in the same
-/// sense the `@` on the picture is. Interest is what is worth reaching for, and it is
-/// spoken for on this screen by the archive and by the marked row — a third claim on it
-/// would blunt both.
-/// **The hub's last word replaces the balance**, and that is not a compromise for want of
-/// a row (#212). Every [`Outlay::message`] already names the balance — *spent 1 intel — 3
-/// left*, *needs 1 intel — you have 0* — so the line still answers the question the
-/// readout answers, and it answers the one the player just asked as well. Two lines saying
-/// the balance twice would be the screen repeating itself.
-///
-/// A refusal is **Warning** and a purchase **Owned**: the same two meanings the map already
-/// gives a rule bent against you and a thing that is yours (§11.2), so there is no third
-/// colour to learn.
-fn wallet_text(run: &Campaign, ui: MapUi) -> (String, Category) {
-    if let Some(outlay) = ui.outlay {
-        let category = if outlay.paid() {
-            Category::Owned
-        } else {
-            Category::Warning
-        };
-        return (outlay.message(), category);
-    }
-    let line = match run.intel() {
-        0 => format!("{WALLET_LABEL}{SEPARATOR}{WALLET_EMPTY}"),
-        banked => format!("{WALLET_LABEL} {banked}"),
-    };
-    (line, Category::Owned)
-}
-
-/// **The last raid's three stars**, drawn segment by segment so each axis wears its own
-/// §11.2 colour: **Owned** — the player's own channel, the blue the `@` on this very
-/// picture is drawn in — for a star earned, and **Ground** for one missed, with the
-/// separators in Ground so the row reads as three findings rather than one sentence.
-///
-/// **Owned, not Interest**, for the reason the wallet line one row down is Owned: the
-/// stars are a verdict on *you*, already earned, in the same sense the intel in the purse
-/// is already yours. Interest is what is worth reaching for and it is spoken for twice on
-/// this screen — the archive and the marked row — so a third claim would blunt both. It
-/// also gives the score one colour identity across every surface that draws it (the end
-/// screen's block is Owned for the same reason).
-///
-/// Each axis is **named** beside its mark. A bare `★★☆` on the map would tell the player
-/// how many they got and leave them to work out which — and knowing which one you missed
-/// is the whole reason the score is three marks instead of a tier (#563).
-///
-/// `★` is also this screen's archive glyph. The two do not read as one thing because they
-/// are different kinds of thing in different places — a node standing in the picture, and
-/// a mark on a named axis in a labelled row — and `docs/render-reference.md` records the
-/// second reading rather than leaving it to be discovered.
-fn draw_score(grid: &mut Grid, y: u32, score: Score) {
-    let cell = |axis: Axis| {
-        format!(
-            "{} {}",
-            axis.label(),
-            if score.earned(axis) {
-                STAR_EARNED
-            } else {
-                STAR_MISSED
-            },
-        )
-    };
-    let len: usize = Axis::ALL
-        .iter()
-        .map(|&a| cell(a).chars().count())
-        .sum::<usize>()
-        + SCORE_SEPARATOR.chars().count() * (Axis::ALL.len() - 1);
-    let mut x = centre(grid.width, len as u32);
-    for (i, &axis) in Axis::ALL.iter().enumerate() {
-        if i > 0 {
-            draw(grid, x, y, SCORE_SEPARATOR, Category::Ground);
-            x += SCORE_SEPARATOR.chars().count() as u32;
-        }
-        let text = cell(axis);
-        let category = if score.earned(axis) {
-            Category::Owned
-        } else {
-            Category::Ground
-        };
-        draw(grid, x, y, &text, category);
-        x += text.chars().count() as u32;
-    }
-}
-
-/// The widest the score row can be — every axis at its longest label, marked, with a
-/// separator between each. A compile-time bound like the list rows' own, so a re-worded
-/// axis fails the build here rather than clipping on a player's screen.
-const SCORE_LINE_MAX: usize = {
-    // One cell per mark: `★`/`☆` are one character each, and the row is measured in
-    // characters because that is what the grid is (§11.1).
-    let mut widest = 0;
-    let mut i = 0;
-    while i < Axis::ALL.len() {
-        widest += Axis::ALL[i].label().len() + " x".len();
-        i += 1;
-    }
-    widest + SCORE_SEPARATOR.len() * (Axis::ALL.len() - 1)
-};
-const _: () = assert!(
-    SCORE_LINE_MAX <= LevelConfig::V1.width as usize,
-    "the score row overruns the v1 board — shorten an axis label",
-);
-
-/// What the gauge row leads with (#573) — the facility it is about, in the word the map
-/// already teaches for it. Not *stars*: the row is drawn in stars, and a label naming them
-/// would be captioning the picture. What the player needs told is **which building this
-/// number decides**.
-const GAUGE_LABEL: &str = "Archive";
-
 /// The mark standing at each of [`THRESHOLDS`] — a plain rule between two runs of stars,
 /// so the bar reads as *segments you cross* rather than as one long count.
 ///
@@ -864,62 +697,67 @@ const GAUGE_LABEL: &str = "Archive";
 /// be honest: six stars takes the first rule off, so the mark belongs between the fifth
 /// star and the sixth. A player counting to the next mark is counting exactly what they
 /// have to earn.
+///
+/// **A mark the run has reached is drawn Owned**, like the stars behind it — so the bar
+/// says how many thresholds are banked at a glance, without the eye having to count filled
+/// cells against a number it has to remember.
 const GAUGE_MARK: char = '|';
 
-/// What the tail says the archive is carrying — the number of rules, in the design's own
-/// word for one (§12.6). The singular is its own constant because *1 rules* is the kind of
-/// thing a formatted count says and nothing else here would catch it.
-const GAUGE_RULE: &str = "rule";
-const GAUGE_RULES: &str = "rules";
-/// What it says once every threshold is cleared. It names the **reason**, not just the
-/// absence: this row is the one payout the whole mechanism has, and *none* on its own
-/// would read as the readout having nothing to report.
-const GAUGE_CLEARED: &str = "no rules";
-
-// A two-digit count would widen the tail past what the bound below measures — and the gate
-// deals three rules, so this is a guard on a future edit rather than on today's number.
-const _: () = assert!(
-    GATE_RULES_MAX < 10,
-    "a two-digit gate would widen the gauge"
-);
-
-/// The widest the gauge can be, in cells: the label, the standard country's whole bar —
-/// one cell per star it can earn, plus a mark at each threshold — and the widest tail.
+/// The gauge's second line, in words (#573): the run's total, and the **difficulty level**
+/// the archive is therefore set to.
 ///
-/// Measured against the **standard** country ([`DEPTH_TO_ARCHIVE`]) because that is the
-/// one the game ships; a shorter country drawn by `Campaign::to_depth` draws a shorter
-/// bar, and a longer one is clamped by [`draw`] like every other row here.
+/// It says the count as a *level* rather than as a number of rules, and the two words do
+/// different jobs. How many §12.6 rules the terminus is drawn is the mechanism; what the
+/// player is choosing between when they decide whether to raid one more facility is **how
+/// hard the ending is**. The rules themselves are named on the facility brief before the
+/// press, and listed on the Level info tab once the player is inside — so nothing about
+/// what the archive carries is hidden by saying it this way, and the map is left saying
+/// the thing a map should say.
+///
+/// **New vocabulary**: §11.8 has no row for *difficulty level*, and this screen is the
+/// only place in the game that uses the phrase.
+const GAUGE_STARS: &str = "stars";
+/// See [`GAUGE_STARS`] — one star is not *1 stars*, and nothing else here would catch it.
+const GAUGE_STAR: &str = "star";
+/// See [`GAUGE_STARS`].
+const GAUGE_LEVEL: &str = "=> difficulty level";
+
+/// The widest either gauge line can be, in cells.
+///
+/// The bar is the standard country's whole span — one cell per star it can earn, plus a
+/// mark at each threshold — measured against [`DEPTH_TO_ARCHIVE`] because that is the
+/// country the game ships; a shorter one drawn by `Campaign::to_depth` draws a shorter
+/// bar, and a longer one is clamped by [`draw`] like every other row here. The summary is
+/// measured at two digits either side of its wording, which is far past both a ceiling of
+/// eighteen and a gate of three.
 const GAUGE_LINE_MAX: usize = {
     let bar = (STARS_PER_FACILITY * DEPTH_TO_ARCHIVE) as usize + THRESHOLDS.len();
-    let counted = 1 + 1 + GAUGE_RULES.len();
-    let tail = if GAUGE_CLEARED.len() > counted {
-        GAUGE_CLEARED.len()
+    let summary = 2 + 1 + GAUGE_STARS.len() + 1 + GAUGE_LEVEL.len() + 1 + 2;
+    if bar > summary {
+        bar
     } else {
-        counted
-    };
-    GAUGE_LABEL.len() + 1 + bar + 1 + tail
+        summary
+    }
 };
 
 const _: () = assert!(
     GAUGE_LINE_MAX <= LevelConfig::V1.width as usize,
-    "the archive gauge overruns the v1 board (§10.2): shorten its label or its tail",
+    "the archive gauge overruns the v1 board (§10.2): shorten its summary wording",
 );
 
 /// **The archive gauge** (§14 v3/#573): the run's banked stars against the thresholds
-/// that take a rule off its ending, and what it is currently facing.
+/// that take a rule off its ending — the bar, on a line of its own.
 ///
-/// One cell per star the country can be worth, filled with the score's own marks
-/// (§4.6/§11.3) — `★` **Owned** for one earned, `☆` **Ground** for one still out there —
-/// so the bar needs no legend and no new glyph: the row directly above it has just taught
-/// both marks, on the same screen, for the same thing. The tail is the fact the player
-/// acts on, in the §11.2 colour they already read as *bent against you*: **Warning** while
-/// the archive carries anything, **Owned** once it carries nothing, which is the same cue
-/// the alert line one row up gives a facility off guard.
+/// One cell per star the country can be worth, in the score's own marks (§4.6/§11.3):
+/// `★` **Owned** for one earned, `☆` **Ground** for one still out there in the country,
+/// and a [`GAUGE_MARK`] before each threshold — **Owned** once the run has reached it,
+/// Ground while it has not. So the bar answers both of the player's questions in one
+/// glance: how much have I banked, and how many thresholds has that bought.
 ///
-/// **It is a fill bar with thresholds and nothing else** (#573). The per-facility stars
-/// are the score row's and the end screen's; this row shows one number against a few
-/// marks, and if it ever grows a second fact it has become a score screen the campaign
-/// does not want.
+/// **It is a fill bar with thresholds and nothing else** (#573). One number against a few
+/// marks; the words are the row beneath ([`gauge_summary`]) and the rules themselves are
+/// the facility brief's. If this row ever grows a second fact it has become the score
+/// screen the campaign does not want.
 ///
 /// Nothing is drawn on a country with no facilities before its terminus — the degenerate
 /// zero-depth campaign, where the start node *is* the archive. There is no ground on which
@@ -930,53 +768,62 @@ fn draw_gauge(grid: &mut Grid, y: u32, gate: ArchiveGate) {
         return;
     }
     let bar = gauge_bar(gate);
-    let (tail, tail_category) = gauge_tail(gate);
-    let len = GAUGE_LABEL.chars().count() + 1 + bar.len() + 1 + tail.chars().count();
-    let mut x = centre(grid.width, len as u32);
-    draw(grid, x, y, GAUGE_LABEL, Category::Ground);
-    x += GAUGE_LABEL.chars().count() as u32 + 1;
-    for (glyph, category) in bar {
-        draw(grid, x, y, &glyph.to_string(), category);
-        x += 1;
+    let left = centre(grid.width, bar.len() as u32);
+    for (i, (glyph, category)) in bar.into_iter().enumerate() {
+        draw(grid, left + i as u32, y, &glyph.to_string(), category);
     }
-    draw(grid, x + 1, y, &tail, tail_category);
 }
 
 /// The bar itself, cell by cell with its §11.2 meaning — the one walk the drawing and the
 /// width it is centred by share.
 fn gauge_bar(gate: ArchiveGate) -> Vec<(char, Category)> {
-    let mut cells = Vec::new();
-    for star in 0..gate.ceiling() {
-        if THRESHOLDS.contains(&star) {
-            cells.push((GAUGE_MARK, Category::Ground));
-        }
-        let earned = star < gate.stars();
-        let glyph = if earned { STAR_EARNED } else { STAR_MISSED };
-        let category = if earned {
+    // Owned for what the run has, Ground for what it has not — the one rule this bar has,
+    // applied to both kinds of cell it draws.
+    let banked = |yes: bool| {
+        if yes {
             Category::Owned
         } else {
             Category::Ground
-        };
-        cells.push((glyph, category));
+        }
+    };
+    let mut cells = Vec::new();
+    for star in 0..gate.ceiling() {
+        if THRESHOLDS.contains(&star) {
+            // A threshold is **cleared at** its own number, so the mark before the star
+            // that clears it is Owned from the moment that star lands — the same `>=` the
+            // gate's own arithmetic uses, rather than a second reading of the table.
+            cells.push((GAUGE_MARK, banked(gate.stars() >= star)));
+        }
+        cells.push((
+            if star < gate.stars() {
+                STAR_EARNED
+            } else {
+                STAR_MISSED
+            },
+            banked(star < gate.stars()),
+        ));
     }
     cells
 }
 
-/// What the archive is currently carrying, as the tail says it — and never *harder*: the
-/// word would not fit beside an eighteen-cell bar, and the Warning colour is already the
-/// game's word for it (§11.2).
-fn gauge_tail(gate: ArchiveGate) -> (String, Category) {
-    match gate.rules() {
-        0 => (GAUGE_CLEARED.to_string(), Category::Owned),
-        1 => (
-            format!("1 {GAUGE_RULE}"),
-            direction_category(ModifierDirection::Harder),
-        ),
-        rules => (
-            format!("{rules} {GAUGE_RULES}"),
-            direction_category(ModifierDirection::Harder),
-        ),
-    }
+/// **The gauge in words**: the run's total, and the difficulty level the archive is
+/// therefore set to — `6 stars => difficulty level 2`.
+///
+/// Drawn in the §11.2 colour of what it reports: **Warning** while the ending is set above
+/// zero, **Owned** at level zero, which is the same cue the alert line two rows up gives a
+/// facility bent the player's way. It is the one line on this screen the player is meant
+/// to act on, and the colour is what says which way it is pointing without spending the
+/// words to say *harder*.
+fn gauge_summary(gate: ArchiveGate) -> (String, Category) {
+    let stars = gate.stars();
+    let noun = if stars == 1 { GAUGE_STAR } else { GAUGE_STARS };
+    let level = gate.rules();
+    let category = if level == 0 {
+        Category::Owned
+    } else {
+        direction_category(ModifierDirection::Harder)
+    };
+    (format!("{stars} {noun} {GAUGE_LEVEL} {level}"), category)
 }
 
 /// What the line says the noise did to the facility it names.
@@ -1181,27 +1028,35 @@ pub(super) fn picture(
         draw(&mut grid, centre(width, len), ALERT_ROW, &line, category);
     }
 
-    // What the last raid was **worth** (#563) — the three stars, under the noise it made,
-    // and drawn only once there is a raid behind the run to score.
-    if let Some(score) = run.last_score() {
-        draw_score(&mut grid, SCORE_ROW, score);
-    }
+    // **The archive gauge** (§4.6/#573) — the run's banked stars against the thresholds
+    // that take a rule off its ending, from the first frame onward, because the decision
+    // it informs (*raid one more, or go in*) is made long before the door.
+    let gate = run.archive_gate();
+    draw_gauge(&mut grid, GAUGE_ROW, gate);
 
-    // What those stars have bought at the **archive** (§4.6/#573) — the run's total against
-    // the thresholds that take a rule off its ending, from the first frame onward, because
-    // the decision it informs (*raid one more, or go in*) is made long before the door.
-    draw_gauge(&mut grid, GAUGE_ROW, run.archive_gate());
-
-    // What the run has to spend (§2.2/#211) — always, so the hub's balance is never a
-    // thing the player has to remember.
-    let (wallet, wallet_category) = wallet_text(run, ui);
-    let len = wallet.chars().count() as u32;
+    // …and the same fact in words. **The hub's last word borrows this row** while there is
+    // one to give (#212/#215/#550): a purchase or a refusal is the answer to the press the
+    // player has just made, where the summary is a standing fact they can re-read a moment
+    // later, and every `Outlay::message` names the balance the wallet line used to carry.
+    // Cleared by any move of the marker, so it never answers a question nobody just asked.
+    let (summary, summary_category) = match ui.outlay {
+        Some(outlay) => (
+            outlay.message(),
+            if outlay.paid() {
+                Category::Owned
+            } else {
+                Category::Warning
+            },
+        ),
+        None => gauge_summary(gate),
+    };
+    let len = summary.chars().count() as u32;
     draw(
         &mut grid,
         centre(width, len),
-        WALLET_ROW,
-        &wallet,
-        wallet_category,
+        SUMMARY_ROW,
+        &summary,
+        summary_category,
     );
 
     let at = |node: NodeId| plot(map.position(node), map.depth(), width, map_h);
