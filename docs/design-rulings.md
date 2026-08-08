@@ -5177,6 +5177,34 @@ the **exact diagonal** — the corner hug, where neither axis dominates — ther
 answer, so the half-plane says nothing and the ray test grants the quarter-plane it always
 did. Integer arithmetic throughout, so a replay reads the same on every machine (§12.4).
 
+### 1b. Identical in every rule, told apart on the board
+
+The ticket's second question — *same glyph, different bump* — was first answered by
+leaving the difference entirely to the §11.7 usable line: a piece of Cover would draw
+exactly as furniture does, and the row would read `cover: push` where a table reads
+`table: crouch`.
+
+That is right about what the *rules* should not distinguish and wrong about what the
+*player* should. The usable line speaks only from the cell beside the thing, so a run
+holding this ability could not find its own piece across a room, and a `π` two cells away
+was a coin flip between something to duck behind and something to shove. Making the
+rules unable to tell them apart is the design; making the player unable to is just a
+missing cue.
+
+So the piece wears the §11.5 effect mark for its whole window, on the **thing** channel
+— the decoy's arm, almost word for word, and for its reason: *"that `@` is not a thing
+you left, it is the ability running"* reads here as *"that `π` is not a table the
+generator put there"*. Three properties make it cost nothing:
+
+- It is a **background**, and the glyph channel on this very cell is already spoken for:
+  §10.3 recolours a covering run to `Owned` while it conceals you. The two compose and
+  each keeps its own word — `Owned` ink for *this is hiding me*, cyan behind it for *and
+  I put it there*. A single colour asked to say both would have said neither.
+- It is read **live** off the deployed cell, so it rides a push with nothing to relight
+  it and stops on the frame the window ends. No second schedule to fall out of step with.
+- It changes no rule. Every §10.3 consumer still sees an ordinary table, which is what
+  `deployed_cover_is_a_table_in_every_model` pins.
+
 ### 2. Why there is no §10.6 severance check
 
 An earlier draft of the ticket applied §10.6's severance check to the deploy: refuse a

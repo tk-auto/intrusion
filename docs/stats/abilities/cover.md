@@ -10,6 +10,12 @@ pushes it a cell directly away and steps you into the cell it vacated, crouched.
 and the table walks across an open room ahead of you, a cell a turn, concealing you from
 its far side the whole way.
 
+**On the board** it is a `π` like any other — no new glyph — wearing the §11.5 **Effect**
+mark on the thing for its whole window, so you can pick your own piece out of a room of
+furniture from across the room. Identical in every rule, told apart by the picture: the
+mark is a *background*, so §10.3's `Owned` recolour of a covering run is untouched and the
+two compose.
+
 **Where it may go:** plain, empty floor and nothing else. A wall, a doorway, a hideout, a
 duct mouth, any solid usable, the exit, a guard or a body all refuse it **for free**
 (§4.4), and so does being inside a crawlspace (§10.7). That is also why removal needs no

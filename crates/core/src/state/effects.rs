@@ -207,6 +207,31 @@ pub(super) enum MarkPlace {
     /// The guards an effect currently **holds** — the mark rides each one wherever it
     /// walks, for as long as it is held, and is gated on perception (§11.5a).
     HeldGuards,
+    /// The **piece of Cover the run has deployed** (§8.3/§10.3/#562) — the mark sits on
+    /// the table for exactly as long as the window holds it, and follows it as it is
+    /// pushed.
+    ///
+    /// It joins on [`LiveDecoy`](Self::LiveDecoy)'s reasoning almost word for word, and
+    /// for the same reason: a piece of Cover is a §10.3 table in every *rule* model —
+    /// same terrain, same `π`, same blocking — so the board has nothing to tell it apart
+    /// from the furniture the building came with, and *"that `π` is not a table the
+    /// generator put there, it is the ability running"* is exactly the fact this channel
+    /// exists to add. Without it the only place the difference is stated is the §11.7
+    /// usable line, which speaks only when the player is already standing next to it.
+    ///
+    /// **Background, so it collides with nothing.** §11.5's standing rule is that an
+    /// effect colourises the background and the glyph keeps its own meaning — which
+    /// matters more here than anywhere, because the glyph channel on this very cell is
+    /// already spoken for: §10.3 recolours the whole covering run to `Owned` while it
+    /// conceals you (§11.3). So the two compose and each keeps its word: `Owned` ink
+    /// says *this furniture is hiding me right now*, the cyan behind it says *and I put
+    /// it there*. A colour that tried to say both would say neither.
+    ///
+    /// Read **live** from [`State::deployed_cover`] rather than latched as a cell, which
+    /// is what makes the mark follow a push with nothing to relight it and stop dead the
+    /// frame the window ends — the same shape, and the same guarantee,
+    /// [`LiveDecoy`](Self::LiveDecoy) gets.
+    DeployedCover,
     /// The **live decoy** an effect is running (§8.3/#340) — the mark sits on the fake
     /// for exactly as long as it exists, and on nothing at all once it does not.
     ///
@@ -574,6 +599,7 @@ impl State {
                 MarkPlace::Cells(cells) => cells.as_slice(),
                 MarkPlace::HeldGuards
                 | MarkPlace::LiveDecoy
+                | MarkPlace::DeployedCover
                 | MarkPlace::ConcealedPlayer
                 | MarkPlace::PhasedPlayer
                 | MarkPlace::PilotedRemote => NO_CELLS,
@@ -612,6 +638,9 @@ impl State {
         let riding = |place: MarkPlace| self.effect_marks.iter().any(|mark| mark.place == place);
         let held = riding(MarkPlace::HeldGuards);
         let decoyed = riding(MarkPlace::LiveDecoy);
+        // The deployed table is read live off the state, like the decoy: the mark rides
+        // the piece through every push and goes out on the frame the window ends.
+        let covered = riding(MarkPlace::DeployedCover);
         let concealed = riding(MarkPlace::ConcealedPlayer) && self.camouflage_holding();
         // Both player marks land on the one cell, so they are folded into a single
         // yield: the layer paints a background, and painting it twice would say
@@ -628,6 +657,7 @@ impl State {
             .filter(move |guard| held && self.guard_under_effect(guard))
             .map(|guard| guard.pos())
             .chain(self.decoy.filter(|_| decoyed))
+            .chain(self.cover.filter(|_| covered))
             .chain((concealed || phased).then_some(self.player))
             .chain(self.remote.filter(|_| piloted).map(|remote| remote.cell))
     }
@@ -953,6 +983,22 @@ impl State {
                 // activation — so the arm keys on the activation that placed it. Which
                 // ability that is comes off the event rather than being assumed, so a
                 // second decoy-spawning ability would join the layer for free.
+                // A piece of Cover is a §10.3 table in every rule model (§8.3/#562), which
+                // is the design — and it leaves the board with nothing to say *whose*
+                // table it is. This is that fact, in the one channel §11.5 has for it:
+                // a background under a glyph whose own colour is already §10.3's
+                // (`Owned` while the run conceals you), so the two compose rather than
+                // compete.
+                //
+                // Lit **once**, at the activation, and then left to ride: the placement
+                // is a live read of [`deployed_cover`](State::deployed_cover), so a push
+                // moves the mark with nothing to relight and the window ending takes it
+                // with the table. Keyed on the ability's identity rather than on an
+                // [`Effect`] because Cover is `Behaviour::Coded` (§8.1) and declares
+                // none — Pierce Wall's arm has the same shape for the same reason.
+                Event::AbilityActivated { ability, .. } if ability == AbilityId::Cover => {
+                    self.light_mark(ability, MarkPlace::DeployedCover, MarkLife::Standing)
+                }
                 Event::AbilityActivated { ability, .. }
                     if declares(ability, Effect::SpawnDecoy) =>
                 {
@@ -1083,6 +1129,7 @@ impl State {
     pub(super) fn decay_effect_marks(&mut self) {
         let any_held = self.guards.iter().any(|guard| guard.is_dazed());
         let decoy_alive = self.decoy.is_some();
+        let cover_out = self.cover.is_some();
         let camouflaged = self.abilities.effect_active(Effect::ConcealWhileStill);
         let phasing = self.abilities.effect_active(Effect::Phase);
         // Kept for the ability's whole **window**, not for the turns anybody is flying —
@@ -1098,6 +1145,7 @@ impl State {
             MarkLife::Standing => match mark.place {
                 MarkPlace::HeldGuards => any_held,
                 MarkPlace::LiveDecoy => decoy_alive,
+                MarkPlace::DeployedCover => cover_out,
                 MarkPlace::ConcealedPlayer => camouflaged,
                 MarkPlace::PhasedPlayer => phasing,
                 MarkPlace::PilotedRemote => remote_out,

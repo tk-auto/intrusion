@@ -12,6 +12,18 @@
 //! the flood fill has no way to tell the two apart — which is the point rather than a
 //! coincidence, and `deployed_cover_is_a_table_in_every_model` pins it.
 //!
+//! **Identical in every rule; told apart on the board.** That the *rules* cannot
+//! distinguish the two is the design; leaving the *player* unable to would not be. So the
+//! piece wears the §11.5 effect mark for its whole window
+//! ([`MarkPlace::DeployedCover`](super::effects::MarkPlace)) — cyan behind the `π`,
+//! riding it through every push and out the frame the window ends. It is a **background**,
+//! which is what lets it cost nothing: the glyph channel on this cell is already spoken
+//! for by §10.3, which recolours a covering run to `Owned` while it conceals you, so the
+//! two compose — `Owned` ink for *this is hiding me*, cyan behind it for *and I put it
+//! there*. The §11.7 usable line still names what the bump will do; what the mark adds is
+//! that you can pick your own piece out of a room full of furniture without walking up to
+//! it.
+//!
 //! What is stored on the state is one cell ([`State::deployed_cover`]) and nothing else.
 //! It is not a second model of the world; it is the *bookmark* that says which table is
 //! the one this ability owns — so the push knows what it may shove, and the release knows

@@ -800,13 +800,16 @@ pub enum Affordance {
     /// **The run's own deployed Cover** (§8.3/§10.3/#562): bump to shove it a cell and
     /// step in behind it, crouched.
     ///
-    /// Its own row rather than [`Crouch`](Affordance::Crouch)'s, and it is the whole of
-    /// how the two are told apart. Deployed cover *is* a §10.3 table — same terrain, same
-    /// `π`, same blocking — so nothing on the board distinguishes it, and the one row
-    /// whose job is to say what a bump does would otherwise read identically for a bump
-    /// that moves you and one that does not (§2.3: the line may never promise the wrong
-    /// thing). Shown only while the shove has somewhere to go; blocked, the same cell
-    /// truthfully reads `table: crouch`, because that is what the bump then does.
+    /// Its own row rather than [`Crouch`](Affordance::Crouch)'s, because the two bumps do
+    /// different things and this row's whole job is to say which (§2.3: the line may never
+    /// promise the wrong thing). Shown only while the shove has somewhere to go; blocked,
+    /// the same cell truthfully reads `table: crouch`, because that is what the bump then
+    /// does.
+    ///
+    /// The board says *which* `π` is yours — the piece wears the §11.5 effect mark for its
+    /// whole window (`MarkPlace::DeployedCover`) — and this row says what pressing at it
+    /// will do. Two channels, two different facts: the mark is visible across the room and
+    /// the row only from the cell beside it, so neither substitutes for the other.
     PushCover,
     /// The exit, with the intel gate met (§10.2): bump to win (§4.5).
     Leave,
@@ -904,10 +907,12 @@ impl Affordance {
             | Affordance::StoreBody
             | Affordance::EnterDuct
             | Affordance::Crouch
-            // Furniture on the System row like every other table (§11.2) — the fact that
-            // this one is yours is said by the words, not by a colour: `Owned` on the
-            // board already means *this run of furniture is concealing you right now*
-            // (§11.3), and one channel cannot also mean *you put this here*.
+            // Furniture on the System row like every other table (§11.2). That this one
+            // is *yours* is the board's to say, and it says it in the §11.5 effect
+            // channel — a background, because the foreground here is already §10.3's
+            // (`Owned` means *this run is concealing you right now*, §11.3). This row
+            // keeps the furniture colour its neighbours have, so a glance down the line
+            // still sorts the entries by what kind of thing they are.
             | Affordance::PushCover => Category::System,
             // The exit is the goal at both ends of the run — climbing into your own
             // tunnel is Interest, not the System colour a found duct's mouth wears

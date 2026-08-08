@@ -120,6 +120,50 @@ fn deployed_cover_is_a_table_in_every_model() {
     }
 }
 
+/// **The board says which `π` is yours** (§11.5/#562): the piece wears the effect mark
+/// for its whole window, riding it through every push and going out on the frame the
+/// window ends — while a generated table beside it never wears one.
+///
+/// It is the **thing** channel, not the wash, for the decoy's reason: it recolours a cue
+/// the board already draws rather than adding one. And it is a *background*, so §10.3's
+/// `Owned` recolour of a covering run is untouched — the two compose.
+#[test]
+fn the_deployed_piece_wears_the_effect_mark_and_a_generated_table_does_not() {
+    let mut state = coverer(Cell::new(10, 10), Vec::new());
+    let stamped = Cell::new(10, 12);
+    state.layout.place(stamped, Terrain::PartialCover);
+    state.layout.place(Cell::new(10, 13), Terrain::PartialCover);
+
+    let marks = |s: &State| s.effect_thing_marks().collect::<Vec<_>>();
+    assert!(marks(&state).is_empty(), "nothing deployed, nothing marked");
+
+    let at = deploy(&mut state);
+    assert_eq!(marks(&state), vec![at], "the piece, and only the piece");
+    assert!(
+        state.effect_cell_marks().next().is_none(),
+        "the thing channel, not the wash — it recolours a `π` already drawn",
+    );
+
+    // It rides the shove, with nothing relighting it.
+    state.step(Input::Step(Direction::East));
+    let shoved = state.deployed_cover().expect("out");
+    assert_eq!(marks(&state), vec![shoved]);
+    assert_eq!(
+        state.crouch_cover(),
+        vec![shoved],
+        "and §10.3's own Owned recolour still names the run — the two compose",
+    );
+
+    // And it goes out with the window, on the frame the table does.
+    state.step(Input::Deactivate(AbilityId::Cover));
+    assert!(marks(&state).is_empty(), "no mark outlives the piece");
+    assert_eq!(
+        state.layout().facility().terrain(stamped),
+        Some(Terrain::PartialCover),
+        "the bench is still there, and was never marked",
+    );
+}
+
 /// **Cover placed against a bench extends that run** (§10.3) — arms included, because
 /// the flood fill has no way to tell the two apart. The joined piece is concealed by the
 /// bench's own half-plane, which a lone piece could not have granted.
